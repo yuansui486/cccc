@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Messaging/inbox/ledger CLI command handlers."""
 
+import json
 import os
 
 from .common import *  # noqa: F401,F403
@@ -33,12 +34,18 @@ def _to_tokens_from_args(args: argparse.Namespace) -> list[str]:
 
 def _resolve_cli_message_sender(args: argparse.Namespace) -> str:
     explicit_by = str(getattr(args, "by", "") or "").strip()
-    if explicit_by:
-        return explicit_by
-    actor_id = str(os.environ.get("CCCC_ACTOR_ID") or "").strip()
-    if actor_id:
-        return actor_id
+    actor_id = str(os.environ.get("ONECOLLEAGUE_ACTOR_ID") or os.environ.get("CCCC_ACTOR_ID") or "").strip()
+    if actor_id or explicit_by not in {"", "user"}:
+        raise ValueError("CLI messaging is user-only; actor messages must use the runtime-bound MCP surface")
     return "user"
+
+
+def _cli_sender_or_error(args: argparse.Namespace) -> str | None:
+    try:
+        return _resolve_cli_message_sender(args)
+    except ValueError as exc:
+        _print_json({"ok": False, "error": {"code": "permission_denied", "message": str(exc)}})
+        return None
 
 
 def cmd_send(args: argparse.Namespace) -> int:
@@ -50,7 +57,9 @@ def cmd_send(args: argparse.Namespace) -> int:
     if group is None:
         _print_json({"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {group_id}"}})
         return 2
-    by = _resolve_cli_message_sender(args)
+    by = _cli_sender_or_error(args)
+    if by is None:
+        return 2
 
     to_tokens = _to_tokens_from_args(args)
     priority = str(getattr(args, "priority", "normal") or "normal").strip() or "normal"
@@ -58,82 +67,27 @@ def cmd_send(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
         return 2
     reply_required = bool(getattr(args, "reply_required", False))
-
-    if _ensure_daemon_running():
-        resp = call_daemon(
-            {
-                "op": "send",
-                "args": {
-                    "group_id": group_id,
-                    "text": args.text,
-                    "by": by,
-                    "path": str(args.path or ""),
-                    "to": to_tokens,
-                    "priority": priority,
-                    "reply_required": reply_required,
-                },
-            }
-        )
-        if resp.get("ok"):
-            _print_json(resp)
-            return 0
-        if not _daemon_response_allows_local_fallback(resp):
-            return _return_daemon_rejection(resp)
-
-    # Fallback: local execution (dev convenience)
-    try:
-        to = resolve_recipient_tokens(group, to_tokens)
-    except Exception as e:
-        _print_json({"ok": False, "error": {"code": "invalid_recipient", "message": str(e)}})
+    if not _ensure_daemon_running():
+        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "send requires the daemon"}})
         return 2
-    scope_key = str(group.doc.get("active_scope_key") or "")
-    if args.path:
-        scope = detect_scope(Path(args.path))
-        scope_key = scope.scope_key
-        scopes = group.doc.get("scopes")
-        attached = False
-        if isinstance(scopes, list):
-            attached = any(isinstance(item, dict) and item.get("scope_key") == scope_key for item in scopes)
-        if not attached:
-            _print_json(
-                {
-                    "ok": False,
-                    "error": {
-                        "code": "scope_not_attached",
-                        "message": f"scope not attached: {scope_key}",
-                        "details": {"hint": "onecolleague attach <path> --group <id>"},
-                    },
-                }
-            )
-            return 2
-    if not scope_key:
-        scope_key = ""
-    event = append_event(
-        group.ledger_path,
-        kind="chat.message",
-        group_id=group.group_id,
-        scope_key=scope_key,
-        by=by,
-        data=ChatMessageData(
-            text=args.text,
-            format="plain",
-            to=to,
-            priority=priority,
-            reply_required=reply_required,
-        ).model_dump(),
+    resp = call_daemon(
+        {
+            "op": "cli_message_send",
+            "args": {
+                "group_id": group_id,
+                "text": args.text,
+                "by": by,
+                "path": str(args.path or ""),
+                "to": to_tokens,
+                "priority": priority,
+                "reply_required": reply_required,
+            },
+        }
     )
-    try:
-        reg = load_registry()
-        meta = reg.groups.get(group.group_id)
-        if isinstance(meta, dict):
-            ts = str(event.get("ts") or meta.get("updated_at") or "")
-            if ts:
-                meta["updated_at"] = ts
-                reg.save()
-    except Exception:
-        pass
-    _print_json({"ok": True, "result": {"event": event}})
-    return 0
+    if resp.get("ok"):
+        _print_json(resp)
+        return 0
+    return _return_daemon_rejection(resp)
 
 
 def cmd_tracked_send(args: argparse.Namespace) -> int:
@@ -146,13 +100,15 @@ def cmd_tracked_send(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
         return 2
     checklist = [{"text": line.strip()} for line in str(getattr(args, "checklist", "") or "").splitlines() if line.strip()]
-    by = _resolve_cli_message_sender(args)
+    by = _cli_sender_or_error(args)
+    if by is None:
+        return 2
     if not _ensure_daemon_running():
         _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "tracked-send requires the daemon"}})
         return 2
     resp = call_daemon(
         {
-            "op": "tracked_send",
+            "op": "cli_tracked_send",
             "args": {
                 "group_id": group_id,
                 "by": by,
@@ -186,7 +142,9 @@ def cmd_reply(args: argparse.Namespace) -> int:
     if group is None:
         _print_json({"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {group_id}"}})
         return 2
-    by = _resolve_cli_message_sender(args)
+    by = _cli_sender_or_error(args)
+    if by is None:
+        return 2
 
     reply_to = str(args.event_id or "").strip()
     if not reply_to:
@@ -215,66 +173,47 @@ def cmd_reply(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
         return 2
     reply_required = bool(getattr(args, "reply_required", False))
+    completion_receipt = None
+    raw_completion_receipt = str(getattr(args, "completion_receipt", "") or "").strip()
+    if raw_completion_receipt:
+        try:
+            completion_receipt = json.loads(raw_completion_receipt)
+        except Exception:
+            completion_receipt = None
+        if not isinstance(completion_receipt, dict):
+            _print_json(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "invalid_completion_receipt",
+                        "message": "completion receipt must be a JSON object",
+                    },
+                }
+            )
+            return 2
 
-    if _ensure_daemon_running():
-        resp = call_daemon(
-            {
-                "op": "reply",
-                "args": {
-                    "group_id": group_id,
-                    "text": args.text,
-                    "by": by,
-                    "reply_to": reply_to,
-                    "to": to_tokens,
-                    "priority": priority,
-                    "reply_required": reply_required,
-                },
-            }
-        )
-        if resp.get("ok"):
-            _print_json(resp)
-            return 0
-        if not _daemon_response_allows_local_fallback(resp):
-            return _return_daemon_rejection(resp)
-
-    # Fallback: local execution
-    if not to_tokens:
-        to_tokens = default_reply_recipients(group, by=by, original_event=original)
-    try:
-        to = resolve_recipient_tokens(group, to_tokens)
-    except Exception as e:
-        _print_json({"ok": False, "error": {"code": "invalid_recipient", "message": str(e)}})
+    if not _ensure_daemon_running():
+        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "reply requires the daemon"}})
         return 2
-
-    scope_key = str(group.doc.get("active_scope_key") or "")
-    event = append_event(
-        group.ledger_path,
-        kind="chat.message",
-        group_id=group.group_id,
-        scope_key=scope_key,
-        by=by,
-        data=ChatMessageData(
-            text=args.text,
-            format="plain",
-            to=to,
-            priority=priority,
-            reply_required=reply_required,
-            reply_to=reply_to,
-            quote_text=quote_text,
-        ).model_dump(),
+    resp = call_daemon(
+        {
+            "op": "cli_message_reply",
+            "args": {
+                "group_id": group_id,
+                "text": args.text,
+                "by": by,
+                "reply_to": reply_to,
+                "to": to_tokens,
+                "priority": priority,
+                "reply_required": reply_required,
+                "completion_receipt": completion_receipt,
+            },
+        }
     )
-    try:
-        reg = load_registry()
-        meta = reg.groups.get(group.group_id)
-        if isinstance(meta, dict):
-            ts = str(event.get("ts") or meta.get("updated_at") or "")
-            if ts:
-                meta["updated_at"] = ts
-                reg.save()
-    except Exception:
-        pass
-    _print_json({"ok": True, "result": {"event": event}})
-    return 0
+    if resp.get("ok"):
+        _print_json(resp)
+        return 0
+    return _return_daemon_rejection(resp)
 
 def cmd_tail(args: argparse.Namespace) -> int:
     group_id = _resolve_group_id(getattr(args, "group", ""))

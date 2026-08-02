@@ -126,7 +126,6 @@ def build_group_template_from_group(group: Group, *, cccc_version: str = "") -> 
         "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=True),
         "terminal_transcript_notify_lines": _as_int(tt.get("notify_lines", 20), 20),
         "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
-        "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
     }
 
     def _prompt_value(filename: str) -> Optional[str]:
@@ -247,7 +246,6 @@ def preview_group_template_replace(group: Group, template: GroupTemplate) -> Gro
         "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=True),
         "terminal_transcript_notify_lines": _as_int(tt.get("notify_lines", 20), 20),
         "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
-        "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
     }
     desired_settings = template.settings.model_dump()
     settings_changed: Dict[str, Tuple[Any, Any]] = {}

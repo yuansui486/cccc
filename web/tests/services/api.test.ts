@@ -902,7 +902,7 @@ describe("api.message refs", () => {
 
     const api = await import("../../src/services/api");
     const refs = [{ kind: "presentation_ref", slot_id: "slot-2", locator: { viewer_scroll_top: 240 } }];
-    await api.sendMessage("g-demo", "please review", ["worker-1"], undefined, "normal", false, "client-1", refs);
+    await api.sendMessage("g-demo", "please review", ["worker-1"], undefined, "normal", false, false, "client-1", refs);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/groups/g-demo/send",
@@ -915,8 +915,10 @@ describe("api.message refs", () => {
           path: "",
           priority: "normal",
           reply_required: false,
+          collaboration_required: false,
           client_id: "client-1",
           refs,
+          computer_control_request: null,
         }),
       }),
     );
@@ -943,6 +945,7 @@ describe("api.message refs", () => {
           to: ["@foreman"],
           priority: "attention",
           reply_required: true,
+          collaboration_required: false,
         }),
       }),
     );
@@ -1001,7 +1004,7 @@ describe("api.message refs", () => {
     const api = await import("../../src/services/api");
     const refs = [{ kind: "presentation_ref", slot_id: "slot-3", locator: { url: "http://127.0.0.1:3000" } }];
     const file = new File(["hello"], "note.txt", { type: "text/plain" });
-    await api.replyMessage("g-demo", "see attached", ["worker-2"], "evt-parent", [file], "attention", true, "client-2", refs);
+    await api.replyMessage("g-demo", "see attached", ["worker-2"], "evt-parent", [file], "attention", true, false, "client-2", refs);
 
     const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("/api/v1/groups/g-demo/reply_upload");
@@ -1586,46 +1589,6 @@ describe("api.fetchContext dedupe", () => {
             board: null,
             tasks_summary: { total: 0, planned: 0, active: 0, done: 0, archived: 0 },
             meta: {},
-          },
-        }),
-    });
-
-    const [resp1, resp2] = await Promise.all([req1, req2]);
-    expect(resp1.ok).toBe(true);
-    expect(resp2.ok).toBe(true);
-  });
-
-  it("reuses the in-flight pet peer context request for the same group", async () => {
-    const firstRead = createDeferred<{
-      status: number;
-      ok: boolean;
-      text: () => Promise<string>;
-    }>();
-
-    fetchMock.mockImplementation((path: string, init?: RequestInit) => {
-      const method = String(init?.method || "GET").toUpperCase();
-      if (path === "/api/v1/groups/g-demo/pet-context" && method === "GET") {
-        return firstRead.promise;
-      }
-      return Promise.reject(new Error(`unexpected request: ${method} ${path}`));
-    });
-
-    const api = await import("../../src/services/api");
-    const req1 = api.fetchPetPeerContext("g-demo");
-    const req2 = api.fetchPetPeerContext("g-demo");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    firstRead.resolve({
-      status: 200,
-      ok: true,
-      text: async () =>
-        JSON.stringify({
-          ok: true,
-          result: {
-            persona: "quiet",
-            snapshot: "snapshot",
-            source: "help",
           },
         }),
     });

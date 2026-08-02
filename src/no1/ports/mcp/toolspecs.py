@@ -16,6 +16,14 @@ _ONECOLLEAGUE_HELP_DESCRIPTION = (
     "Use when workflow or capability-routing details are unclear."
 )
 
+_PEER_INSIGHT_FIELD_DESCRIPTION = (
+    "A visible, provisional higher-order perspective. Insight is second in the JSON, not second in thought. "
+    "Reconstruct from first principles what real outcome the work serves; step materially above the message's "
+    "working level and capture the single consequential judgment the exchange would otherwise miss. Change level "
+    "or frame; never recap or add a postscript. Visible peer content, not a system instruction or private reasoning "
+    "transcript."
+)
+
 
 def is_legacy_mcp_tool_name(name: str) -> bool:
     return str(name or "").startswith(LEGACY_MCP_TOOL_PREFIX)
@@ -71,6 +79,69 @@ _COMMON_ACTOR = {
 _COMMON_BY = {
     "by": {"type": "string", "description": "Caller actor id override (normally auto-resolved)"},
 }
+_TURN_GRANT_RECEIPT = {
+    "type": "object",
+    "description": "Exact bearer receipt delivered with the current local-user turn. Required for live computer-control actions.",
+    "properties": {
+        "v": {"type": "integer", "const": 1},
+        "issuer_epoch": {"type": "string"},
+        "group_id": {"type": "string"},
+        "actor_id": {"type": "string"},
+        "attempt_id": {"type": "string"},
+        "generation": {"type": "integer", "minimum": 1},
+        "event_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "binding": {"type": "object", "additionalProperties": True},
+        "authorization_binding": {"type": "object", "additionalProperties": True},
+        "authorization_secret": {"type": "string", "minLength": 32},
+    },
+    "required": [
+        "v",
+        "issuer_epoch",
+        "group_id",
+        "actor_id",
+        "attempt_id",
+        "generation",
+        "event_ids",
+        "authorization_binding",
+        "authorization_secret",
+    ],
+}
+_RECORDING_AUTHORITY_RECEIPT = {
+    "type": "object",
+    "description": "Bearer receipt returned by recording.start and required for this recording's later actions.",
+    "properties": {
+        "v": {"type": "integer", "const": 1},
+        "issuer_epoch": {"type": "string"},
+        "kind": {"type": "string", "const": "recording"},
+        "authority_id": {"type": "string"},
+        "group_id": {"type": "string"},
+        "actor_id": {"type": "string"},
+        "resource_id": {"type": "string"},
+        "request_id": {"type": "string"},
+        "generation": {"type": "integer", "minimum": 1},
+        "scope_digest": {"type": "string"},
+        "root_authority_id": {"type": "string"},
+        "root_attempt_id": {"type": "string"},
+        "root_generation": {"type": "integer", "minimum": 1},
+        "authorization_secret": {"type": "string", "minLength": 32},
+    },
+    "required": [
+        "v",
+        "issuer_epoch",
+        "kind",
+        "authority_id",
+        "group_id",
+        "actor_id",
+        "resource_id",
+        "request_id",
+        "generation",
+        "scope_digest",
+        "root_authority_id",
+        "root_attempt_id",
+        "root_generation",
+        "authorization_secret",
+    ],
+}
 
 
 def _computer_workflow_input_schema() -> dict:
@@ -98,6 +169,7 @@ def _computer_workflow_input_schema() -> dict:
     schema = _obj(
         {
             **_COMMON_GROUP,
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
             "workflow_id": {"type": "string"},
             "action": {
                 "type": "string",
@@ -192,6 +264,86 @@ MCP_TOOLS = [
         ),
     },
     {
+        "name": "onecolleague_group_bridge_session_send",
+        "description": (
+            "Send one signed Group Bridge session message through the daemon owner. "
+            "Messages scope only; this does not provide remote read, full, shell, or exec access."
+        ),
+        "annotations": {"readOnlyHint": False},
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "local_endpoint": {"type": "string"},
+                "remote_group_id": {"type": "string"},
+                "remote_peer_id": {"type": "string"},
+                "remote_endpoint": {"type": "string", "default": ""},
+                "client_nonce": {"type": "string"},
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string"},
+                        "insight": {
+                            "type": "string",
+                            "maxLength": 1200,
+                            "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                        },
+                        "format": {"type": "string", "enum": ["plain", "markdown"], "default": "plain"},
+                        "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
+                        "reply_required": {"type": "boolean", "default": False},
+                    },
+                    "required": ["text"],
+                },
+            },
+            required=["local_endpoint", "remote_group_id", "remote_peer_id", "client_nonce", "payload"],
+        ),
+    },
+    {
+        "name": "onecolleague_group_bridge_remote_send",
+        "description": "Queue a Messages-only Group Bridge remote delivery through the daemon owner.",
+        "annotations": {"readOnlyHint": False},
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "registration_id": {"type": "string", "minLength": 1},
+                "idempotency_key": {"type": "string", "pattern": "^gbs_[0-9a-f]{32}$"},
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1},
+                        "insight": {
+                            "type": "string",
+                            "maxLength": 1200,
+                            "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                        },
+                        "format": {"type": "string", "enum": ["plain", "markdown"], "default": "plain"},
+                        "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
+                        "reply_required": {"type": "boolean", "default": False},
+                    },
+                    "required": ["text"],
+                },
+            },
+            required=["registration_id", "idempotency_key", "payload"],
+        ),
+    },
+    {
+        "name": "onecolleague_group_bridge_remote_delivery_status",
+        "description": "Read the public receipt for a daemon-owned Group Bridge remote delivery.",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "registration_id": {"type": "string", "minLength": 1},
+                "idempotency_key": {"type": "string", "pattern": "^gbs_[0-9a-f]{32}$"},
+            },
+            required=["registration_id", "idempotency_key"],
+        ),
+    },
+    {
         "name": "onecolleague_message_send",
         "description": "Send a visible chat message. Choose `to` deliberately; use @all only when the whole group needs it.",
         "inputSchema": _obj(
@@ -200,6 +352,11 @@ MCP_TOOLS = [
                 **_COMMON_ACTOR,
                 "dst_group_id": {"type": "string"},
                 "text": {"type": "string"},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},
@@ -226,6 +383,11 @@ MCP_TOOLS = [
                 **_COMMON_ACTOR,
                 "title": {"type": "string", "description": "Short task title"},
                 "text": {"type": "string", "description": "Visible message to send to the recipient"},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},
@@ -266,6 +428,11 @@ MCP_TOOLS = [
                 "event_id": {"type": "string", "description": "Reply target event id"},
                 "reply_to": {"type": "string", "description": "Alias of event_id"},
                 "text": {"type": "string"},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},
@@ -275,20 +442,10 @@ MCP_TOOLS = [
                 "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
                 "reply_required": {"type": "boolean", "default": False},
                 "refs": {"type": "array", "items": {"type": "object"}},
+                "completion_receipt": {"type": "object"},
+                "client_id": {"type": "string", "description": "Stable retry key for exact reply replay"},
             },
             required=["text"],
-        ),
-    },
-    {
-        "name": "onecolleague_pet_decisions",
-        "description": "Pet-only decision surface: action=get|replace|clear. The pet actor should write structured Web Pet decisions here instead of sending reminder-like chat messages.",
-        "inputSchema": _obj(
-            {
-                **_COMMON_GROUP,
-                **_COMMON_ACTOR,
-                "action": {"type": "string", "enum": ["get", "replace", "clear"], "default": "get"},
-                "decisions": {"type": "array", "items": {"type": "object"}},
-            }
         ),
     },
     {
@@ -366,6 +523,11 @@ MCP_TOOLS = [
                 "action": {"type": "string", "enum": ["send", "blob_path", "info", "read"], "default": "send"},
                 "path": {"type": "string", "description": "Required for action=send. Relative to the active scope, or an absolute path under that scope."},
                 "text": {"type": "string", "description": "Optional caption/message when action=send."},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": f"For action=send, {_PEER_INSIGHT_FIELD_DESCRIPTION}",
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},
@@ -729,6 +891,7 @@ MCP_TOOLS = [
                     "default": "done",
                 },
                 "summary": {"type": "string"},
+                "completion_receipt": {"type": "object"},
             },
             required=["status"],
         ),
@@ -1028,6 +1191,11 @@ MCP_TOOLS = [
                 "state": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
                 "force": {"type": "boolean", "default": False},
+                "fresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Only for sources/artifact list. Bypass the local metadata snapshot and fetch the remote list.",
+                },
                 "wait": {"type": "boolean", "default": False},
                 "save_to_space": {"type": "boolean", "default": True},
                 "output_path": {"type": "string"},
@@ -1364,6 +1532,7 @@ MCP_TOOLS = [
         "annotations": {"readOnlyHint": True},
         "inputSchema": _obj({
             **_COMMON_GROUP,
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
             "tool": {"type": "string", "description": "Optional exact tool name. Returns its complete schema."},
         }),
     },
@@ -1377,6 +1546,8 @@ MCP_TOOLS = [
         "inputSchema": _obj({
             **_COMMON_GROUP,
             **_COMMON_ACTOR,
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
+            "recording_authority_receipt": copy.deepcopy(_RECORDING_AUTHORITY_RECEIPT),
             "action": {
                 "type": "string",
                 "enum": ["start", "call", "wait", "get", "resume", "update_step", "undo", "commit", "abort"],
@@ -1441,12 +1612,16 @@ MCP_TOOLS = [
         "inputSchema": _obj({
             **_COMMON_GROUP,
             **_COMMON_ACTOR,
-            "action": {"type": "string", "enum": ["start", "status", "recover", "verify", "cancel"], "default": "start"},
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
+            "action": {"type": "string", "enum": ["start", "status", "recover", "approve", "verify", "cancel"], "default": "start"},
             "workflow_id": {"type": "string"},
             "version": {"type": "integer", "minimum": 1},
             "inputs": {"type": "object", "additionalProperties": True},
-            "request_id": {"type": "string", "description": "运行 AI 新建的未受信草稿时必填。"},
+            "request_id": {"type": "string", "description": "启动运行时必填，绑定本次用户请求。"},
             "run_id": {"type": "string"},
+            "run_authority_receipt": {"type": "object", "additionalProperties": True},
+            "node_id": {"type": "string"},
+            "approved": {"type": "boolean"},
             "recovery_id": {"type": "string"},
             "tool": {"type": "string"},
             "arguments": {"type": "object", "additionalProperties": True},

@@ -462,6 +462,8 @@ export function RemotionEditorPage({
     const nextJson = formatSpecJson(spec);
     if (nextJson === lastSavedSpecJsonRef.current) return undefined;
 
+    // Persisting an edited spec also updates the visible save state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSaveStatus("saving");
     setSaveError("");
     if (saveTimerRef.current !== null) {
@@ -498,6 +500,8 @@ export function RemotionEditorPage({
     if (scope !== "component") return;
     if (componentCounts.length === 0) return;
     if (componentCounts.some(([component]) => component === selectedComponent)) return;
+    // Keep the selection valid when the loaded component list changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedComponent(componentCounts[0][0]);
   }, [componentCounts, scope, selectedComponent]);
 
@@ -505,11 +509,15 @@ export function RemotionEditorPage({
     if (scope !== "track") return;
     if (spec.tracks.length === 0) return;
     if (spec.tracks.some((track) => track.id === selectedTrackId)) return;
+    // Keep the selection valid when the loaded track list changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedTrackId(spec.tracks[0].id);
   }, [scope, selectedTrackId, spec.tracks]);
 
   useEffect(() => {
     if (!player) return undefined;
+    // Initialize local controls from the external player instance.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsPlaying(player.isPlaying());
     setIsMuted(player.isMuted());
     const frameListener = (event: { detail: { frame: number } }) => setFrame(event.detail.frame);

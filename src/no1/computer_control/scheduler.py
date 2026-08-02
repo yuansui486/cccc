@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -41,11 +42,13 @@ class ComputerControlScheduler:
         self.service = service
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        self._daemon_thread: threading.Thread | None = None
+        self._daemon_stop = threading.Event()
+        self._daemon_lock = threading.Lock()
+        self._daemon_generation_claim: Any = None
 
     async def start(self) -> None:
-        if self._task is None or self._task.done():
-            self._stop.clear()
-            self._task = asyncio.create_task(self._loop(), name="onecolleague-computer-trigger-scheduler")
+        raise PermissionError("passive computer-control scheduler cannot execute workflows")
 
     async def stop(self) -> None:
         self._stop.set()
@@ -57,6 +60,94 @@ class ComputerControlScheduler:
                 await task
             except asyncio.CancelledError:
                 pass
+
+    def start_daemon(self, owner: Any) -> None:
+        from .services import _claim_daemon_generation, _release_daemon_generation
+
+        generation_claim = _claim_daemon_generation(
+            owner,
+            home=self.service.home,
+            subject="scheduler",
+        )
+        if getattr(self.service, "role", "passive") != "daemon":
+            _release_daemon_generation(generation_claim)
+            raise PermissionError("daemon scheduler requires a daemon service")
+        with self._daemon_lock:
+            if self._daemon_thread is None and self._daemon_generation_claim is not None:
+                prior_claim = self._daemon_generation_claim
+                self._daemon_generation_claim = None
+                _release_daemon_generation(prior_claim)
+            if self._daemon_thread is not None:
+                if self._daemon_thread.is_alive():
+                    _release_daemon_generation(generation_claim)
+                    return
+                self._daemon_thread = None
+                prior_claim = self._daemon_generation_claim
+                self._daemon_generation_claim = None
+                _release_daemon_generation(prior_claim)
+            self._daemon_stop.clear()
+            thread = threading.Thread(
+                target=self._run_daemon_thread,
+                args=(owner,),
+                name="onecolleague-computer-trigger-scheduler",
+                daemon=True,
+            )
+            self._daemon_thread = thread
+            self._daemon_generation_claim = generation_claim
+            try:
+                thread.start()
+            except Exception:
+                self._daemon_thread = None
+                self._daemon_generation_claim = None
+                _release_daemon_generation(generation_claim)
+                raise
+
+    def stop_daemon(self, *, timeout: Optional[float] = None) -> bool:
+        from .services import _release_daemon_generation
+
+        self._daemon_stop.set()
+        with self._daemon_lock:
+            thread = self._daemon_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
+        stopped = thread is None or not thread.is_alive()
+        if stopped:
+            with self._daemon_lock:
+                if self._daemon_thread is thread:
+                    self._daemon_thread = None
+                generation_claim = self._daemon_generation_claim
+                self._daemon_generation_claim = None
+            _release_daemon_generation(generation_claim)
+        return stopped
+
+    def _run_daemon_thread(self, owner: Any) -> None:
+        try:
+            asyncio.run(self._daemon_loop(owner))
+        finally:
+            with self._daemon_lock:
+                if self._daemon_thread is threading.current_thread():
+                    self._daemon_thread = None
+
+    async def _daemon_loop(self, owner: Any) -> None:
+        from .services import _daemon_owner_state
+
+        while not self._daemon_stop.is_set():
+            try:
+                _daemon_owner_state(owner, home=self.service.home)
+            except PermissionError:
+                return
+            try:
+                self.service.require_daemon_ready(owner)
+            except PermissionError:
+                return
+            except RuntimeError:
+                await asyncio.to_thread(self._daemon_stop.wait, self.LOOP_SECONDS)
+                continue
+            try:
+                await self._tick()
+            except Exception:
+                pass
+            await asyncio.to_thread(self._daemon_stop.wait, self.LOOP_SECONDS)
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
@@ -480,7 +571,10 @@ class ComputerControlScheduler:
             }
         return {
             "available": True,
-            "running": bool(self._task is not None and not self._task.done()),
+            "running": bool(
+                (self._task is not None and not self._task.done())
+                or (self._daemon_thread is not None and self._daemon_thread.is_alive())
+            ),
             "supported_types": sorted(self.EXECUTED_TYPES),
             "workflow_id": workflow_id,
             "published_version": published or None,

@@ -1,7 +1,7 @@
 // useChatTab - Encapsulates ChatTab business logic and state.
 // Reduces prop drilling by providing state from stores and computed values directly.
 
-import { useMemo, useCallback, useEffect, useRef, useState } from "react";
+import { useMemo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useGroupStore,
@@ -43,6 +43,26 @@ import {
   type SlashSkillScope,
 } from "../utils/slashCommands";
 import { useSlashSkillDispatch } from "./useSlashSkillDispatch";
+import { buildComposerHistoryEntries } from "../pages/chat/chatComposerHistory";
+import { buildComposerMentionSuggestions, type ComposerMentionSuggestion } from "../pages/chat/chatMentionSuggestions";
+import { latestSuggestedUserMessage } from "../utils/suggestedUserMessage";
+import {
+  buildActiveGroupBridgeRemoteTargets,
+  createGroupBridgeIdempotencyKey,
+  groupBridgeApi,
+  type GroupBridgeRemoteReceipt,
+  type GroupBridgeRemoteTarget,
+} from "../services/api/groupBridge";
+import {
+  GroupBridgeRemoteLifecycle,
+  captureGroupBridgeRemoteComposerIntent,
+  decideGroupBridgeRemoteSend,
+  isGroupBridgeRemoteViewCurrent,
+  isGroupBridgeRemoteComposerIntentCurrent,
+  normalizeGroupBridgeRemoteGroupId,
+  pollGroupBridgeRemoteReceipt,
+  type GroupBridgeRemoteOperationToken,
+} from "./groupBridgeRemoteOrchestration";
 
 export const CHAT_SCROLL_SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -642,6 +662,7 @@ interface UseChatTabOptions {
   selectedGroupRunning: boolean;
   actors: Actor[];
   recipientActors: Actor[];
+  groupLabelById: Record<string, string>;
   /** Callback for when message is sent */
   onMessageSent?: () => void;
   /** Refs for composer interactions */
@@ -702,6 +723,11 @@ export function restoreFailedSendComposerState(
   const currentSelectedGroupId = String(useGroupStore.getState().selectedGroupId || "").trim();
   const currentActiveGroupId = String(composerState.activeGroupId || "").trim();
   const stillOnOriginGroup = currentSelectedGroupId === originGroupId && currentActiveGroupId === originGroupId;
+  const computerControlPermissions = snapshot.computerControlPermissions || {
+    publish: true,
+    trust: true,
+    unattendedTriggers: true,
+  };
 
   if (stillOnOriginGroup) {
     restoreActions.setComposerText(snapshot.composerText);
@@ -715,7 +741,7 @@ export function restoreFailedSendComposerState(
     restoreActions.setComputerControlEnabled(snapshot.computerControlEnabled);
     restoreActions.setComputerControlWorkflowId(snapshot.computerControlWorkflowId);
     restoreActions.setComputerControlActorId(snapshot.computerControlActorId);
-    for (const [permission, value] of Object.entries(snapshot.computerControlPermissions)) {
+    for (const [permission, value] of Object.entries(computerControlPermissions)) {
       restoreActions.setComputerControlPermission(permission as "publish" | "trust" | "unattendedTriggers", value);
     }
     restoreActions.setToText(snapshot.toText);
@@ -735,7 +761,7 @@ export function restoreFailedSendComposerState(
     computerControlEnabled: snapshot.computerControlEnabled,
     computerControlWorkflowId: snapshot.computerControlWorkflowId,
     computerControlActorId: snapshot.computerControlActorId,
-    computerControlPermissions: snapshot.computerControlPermissions,
+    computerControlPermissions,
   }));
 }
 
@@ -789,6 +815,7 @@ export function useChatTab({
   selectedGroupRunning,
   actors,
   recipientActors,
+  groupLabelById,
   onMessageSent,
   composerRef,
   fileInputRef,
@@ -880,7 +907,161 @@ export function useChatTab({
   const enqueueOutbox = useChatOutboxStore((s) => s.enqueue);
   const removeOutbox = useChatOutboxStore((s) => s.remove);
   const sendInFlightRef = useRef(false);
+  const remoteSendOwnerRef = useRef<GroupBridgeRemoteOperationToken | null>(null);
+  const remoteLifecycleRef = useRef<GroupBridgeRemoteLifecycle | null>(null);
+  if (!remoteLifecycleRef.current) remoteLifecycleRef.current = new GroupBridgeRemoteLifecycle();
+  const remoteLifecycle = remoteLifecycleRef.current;
   const [slashSkillScope, setSlashSkillScope] = useState<SlashSkillScope>("team");
+  const [remoteViewGroupId, setRemoteViewGroupId] = useState(() => (
+    normalizeGroupBridgeRemoteGroupId(selectedGroupId)
+  ));
+  const [remoteTargets, setRemoteTargets] = useState<GroupBridgeRemoteTarget[]>([]);
+  const [remoteTargetsBusy, setRemoteTargetsBusy] = useState(false);
+  const [remoteTargetId, setRemoteTargetIdState] = useState("");
+  const [remoteReceipt, setRemoteReceipt] = useState<GroupBridgeRemoteReceipt | null>(null);
+  const [remoteStatusUnavailable, setRemoteStatusUnavailable] = useState(false);
+  const [remoteRequest, setRemoteRequest] = useState<{
+    groupId: string;
+    registrationId: string;
+    messageGeneration: number;
+    idempotencyKey: string;
+    receipt: GroupBridgeRemoteReceipt;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    const groupId = normalizeGroupBridgeRemoteGroupId(selectedGroupId);
+    remoteLifecycle.selectGroup(groupId);
+    setRemoteViewGroupId(groupId);
+    setRemoteTargets([]);
+    setRemoteTargetIdState("");
+    setRemoteReceipt(null);
+    setRemoteRequest(null);
+    setRemoteStatusUnavailable(false);
+    setRemoteTargetsBusy(Boolean(groupId));
+    if (!groupId) return undefined;
+
+    const token = remoteLifecycle.begin("load", groupId);
+    if (!token) return undefined;
+    void (async () => {
+      try {
+        const [registrationsResponse, trustsResponse] = await Promise.all([
+          groupBridgeApi.registrations(groupId, { signal: token.signal }),
+          groupBridgeApi.trusts(groupId, { signal: token.signal }),
+        ]);
+        remoteLifecycle.commit(token, () => {
+          if (!registrationsResponse.ok || !trustsResponse.ok) {
+            remoteLifecycle.selectRoute(groupId, "");
+            setRemoteTargets([]);
+            setRemoteTargetIdState("");
+            setRemoteReceipt(null);
+            setRemoteRequest(null);
+            setRemoteStatusUnavailable(false);
+            return;
+          }
+          const targets = buildActiveGroupBridgeRemoteTargets(
+            registrationsResponse.result.registrations || [],
+            trustsResponse.result.trusts || [],
+            groupId,
+          );
+          const currentRoute = remoteLifecycle.currentRoute(groupId);
+          const nextRoute = targets.some((target) => target.registration_id === currentRoute)
+            ? currentRoute
+            : "";
+          if (nextRoute !== currentRoute) {
+            remoteLifecycle.selectRoute(groupId, nextRoute);
+            setRemoteReceipt(null);
+            setRemoteRequest(null);
+            setRemoteStatusUnavailable(false);
+          }
+          setRemoteTargets(targets);
+          setRemoteTargetIdState(nextRoute);
+        });
+      } catch {
+        remoteLifecycle.commit(token, () => {
+          remoteLifecycle.selectRoute(groupId, "");
+          setRemoteTargets([]);
+          setRemoteTargetIdState("");
+          setRemoteReceipt(null);
+          setRemoteRequest(null);
+          setRemoteStatusUnavailable(false);
+        });
+      } finally {
+        if (remoteLifecycle.finish(token)) setRemoteTargetsBusy(false);
+      }
+    })();
+
+    return () => {
+      remoteLifecycle.selectGroup("");
+    };
+  }, [remoteLifecycle, selectedGroupId]);
+
+  const remoteViewCurrent = isGroupBridgeRemoteViewCurrent(selectedGroupId, remoteViewGroupId);
+  const visibleRemoteTargets = useMemo(
+    () => remoteViewCurrent ? remoteTargets : [],
+    [remoteTargets, remoteViewCurrent],
+  );
+  const visibleRemoteTargetId = remoteViewCurrent ? remoteTargetId : "";
+  const visibleRemoteReceipt = remoteViewCurrent ? remoteReceipt : null;
+  const visibleRemoteStatusUnavailable = remoteViewCurrent ? remoteStatusUnavailable : false;
+  const visibleRemoteTargetsBusy = remoteViewCurrent ? remoteTargetsBusy : false;
+
+  const selectedRemoteTarget = useMemo(
+    () => visibleRemoteTargets.find((target) => target.registration_id === visibleRemoteTargetId) || null,
+    [visibleRemoteTargetId, visibleRemoteTargets],
+  );
+
+  const setRemoteTargetId = useCallback((registrationId: string) => {
+    if (!remoteViewCurrent) return;
+    const next = String(registrationId || "").trim();
+    if (!remoteLifecycle.selectRoute(selectedGroupId, next)) return;
+    setRemoteTargetIdState(next);
+    setDestGroupId(selectedGroupId);
+    setRemoteReceipt(null);
+    setRemoteRequest(null);
+    setRemoteStatusUnavailable(false);
+  }, [remoteLifecycle, remoteViewCurrent, selectedGroupId, setDestGroupId]);
+
+  useEffect(() => {
+    const request = remoteRequest;
+    if (!request || !remoteViewCurrent || request.groupId !== remoteViewGroupId) return undefined;
+    const token = remoteLifecycle.begin(
+      "poll",
+      request.groupId,
+      request.registrationId,
+      request.messageGeneration,
+    );
+    if (!token) return undefined;
+    void pollGroupBridgeRemoteReceipt({
+      initialReceipt: request.receipt,
+      signal: token.signal,
+      getStatus: async (signal) => {
+        const response = await groupBridgeApi.remoteStatus(
+          request.groupId,
+          request.registrationId,
+          request.idempotencyKey,
+          { signal },
+        );
+        return response.ok
+          ? { ok: true as const, receipt: response.result.receipt }
+          : { ok: false as const };
+      },
+      onReceipt: (receipt) => {
+        remoteLifecycle.commit(token, () => {
+          setRemoteReceipt(receipt);
+          setRemoteStatusUnavailable(false);
+        });
+      },
+    }).then((result) => {
+      if (result.kind === "unavailable") {
+        remoteLifecycle.commit(token, () => setRemoteStatusUnavailable(true));
+      }
+    }).finally(() => {
+      remoteLifecycle.finish(token);
+    });
+    return () => {
+      remoteLifecycle.abort(token);
+    };
+  }, [remoteLifecycle, remoteRequest, remoteViewCurrent, remoteViewGroupId]);
 
   // ============ Computed Values ============
 
@@ -941,11 +1122,10 @@ export function useChatTab({
   }, [toText, validRecipientSet]);
 
   // Mention suggestions
-  const mentionSuggestions = useMemo(() => {
-    const base = ["@all"];
-    const actorIds = recipientActors.map((a) => String(a.id || "")).filter((id) => id);
-    return [...base, ...actorIds];
-  }, [recipientActors]);
+  const mentionSuggestions = useMemo<ComposerMentionSuggestion[]>(
+    () => buildComposerMentionSuggestions(recipientActors, groupLabelById),
+    [groupLabelById, recipientActors],
+  );
 
   // Send group ID (respects cross-group destination)
   const sendGroupId = useMemo(() => {
@@ -1107,6 +1287,15 @@ export function useChatTab({
     if (inChatWindow && chatWindow) return (chatWindow.events || []).filter(isFormalChatMessageEvent);
     return liveChatMessages;
   }, [chatWindow, inChatWindow, liveChatMessages]);
+
+  const composerHistoryEntries = useMemo(
+    () => buildComposerHistoryEntries(events),
+    [events],
+  );
+  const suggestedUserMessage = useMemo(
+    () => latestSuggestedUserMessage(events),
+    [events],
+  );
 
   const hasAnyChatMessages = useMemo(
     () => events.some(isFormalChatMessageEvent) || outboxEntries.length > 0,
@@ -1286,6 +1475,98 @@ export function useChatTab({
 
     const dstGroup = routingSnapshot.destGroupId;
     const isCrossGroup = routingSnapshot.isCrossGroup;
+    const remoteDecision = decideGroupBridgeRemoteSend({
+      groupId: selectedGroupId,
+      remoteTargetId: visibleRemoteTargetId,
+      remoteTarget: selectedRemoteTarget,
+      attachmentCount: composerFilesSnapshot.length,
+      hasReply: Boolean(composerStateSnapshot.replyTarget),
+      hasQuote: Boolean(composerStateSnapshot.quotedPresentationRef),
+      collaborationRequired: composerStateSnapshot.collaborationRequired,
+      computerControlEnabled: composerStateSnapshot.computerControlEnabled,
+      selectedSkillCommand: selectedSkillCommandSnapshot,
+      text: txt,
+    });
+    if (remoteDecision.kind === "reject") {
+      if (remoteDecision.reason === "target_unavailable") {
+        showError("The selected Group Bridge target is no longer active.");
+      } else {
+        showError("Group Bridge remote messages do not support replies, quotes, attachments, skills, or computer control.");
+      }
+      return;
+    }
+    if (remoteDecision.kind === "remote") {
+      const composerIntent = captureGroupBridgeRemoteComposerIntent(selectedGroupId, composerStateSnapshot);
+      const token = remoteLifecycle.begin("send", selectedGroupId, remoteDecision.target.registration_id);
+      if (!token) return;
+      if (!remoteLifecycle.commit(token, () => {
+        setRemoteReceipt(null);
+        setRemoteRequest(null);
+        setRemoteStatusUnavailable(false);
+      })) return;
+
+      sendInFlightRef.current = true;
+      remoteSendOwnerRef.current = token;
+      try {
+        const idempotencyKey = createGroupBridgeIdempotencyKey();
+        const response = await groupBridgeApi.remoteSend(
+          selectedGroupId,
+          remoteDecision.target.registration_id,
+          idempotencyKey,
+          {
+            text: txt,
+            format: "plain",
+            priority: composerStateSnapshot.replyRequired ? "attention" : composerStateSnapshot.priority,
+            reply_required: composerStateSnapshot.replyRequired,
+          },
+          { signal: token.signal },
+        );
+        if (!remoteLifecycle.isCurrent(token)) return;
+        if (!response.ok) {
+          showError(formatSendMessageError({
+            code: response.error.code,
+            message: response.error.message,
+            groupSendBlockedReason,
+            t,
+          }));
+          return;
+        }
+        const receipt = response.result.receipt;
+        remoteLifecycle.commit(token, () => {
+          const consumeComposerIntent = isGroupBridgeRemoteComposerIntentCurrent(
+            composerIntent,
+            useComposerStore.getState(),
+          );
+          setRemoteReceipt(receipt);
+          setRemoteRequest({
+            groupId: selectedGroupId,
+            registrationId: remoteDecision.target.registration_id,
+            messageGeneration: token.messageGeneration,
+            idempotencyKey,
+            receipt,
+          });
+          setRemoteStatusUnavailable(false);
+          if (consumeComposerIntent) {
+            clearComposer();
+            clearDraft(selectedGroupId);
+            if (fileInputRef?.current) fileInputRef.current.value = "";
+            setDestGroupId(selectedGroupId);
+          }
+          onMessageSent?.();
+        });
+      } catch (error) {
+        remoteLifecycle.commit(token, () => {
+          showError(error instanceof Error ? error.message : "Group Bridge remote send failed");
+        });
+      } finally {
+        remoteLifecycle.finish(token);
+        if (remoteSendOwnerRef.current === token) {
+          remoteSendOwnerRef.current = null;
+          sendInFlightRef.current = false;
+        }
+      }
+      return;
+    }
     if (!skillDispatchText && await tryExecuteSlashCommand({
       text: sendText,
       composerFilesCount: composerFilesSnapshot.length,
@@ -1634,6 +1915,9 @@ export function useChatTab({
     resolveAssistantTargets,
     upsertStreamingEvent,
     actors,
+    visibleRemoteTargetId,
+    selectedRemoteTarget,
+    remoteLifecycle,
     t,
   ]);
 
@@ -1848,7 +2132,15 @@ export function useChatTab({
     destGroupId: sendGroupId,
     setDestGroupId,
     composerGroupSettled,
+    remoteTargets: visibleRemoteTargets,
+    remoteTargetsBusy: visibleRemoteTargetsBusy,
+    remoteTargetId: visibleRemoteTargetId,
+    setRemoteTargetId,
+    remoteReceipt: visibleRemoteReceipt,
+    remoteStatusUnavailable: visibleRemoteStatusUnavailable,
     mentionSuggestions,
+    composerHistoryEntries,
+    suggestedUserMessage,
     slashSkillScope,
     setSlashSkillScope,
 

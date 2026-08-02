@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from tests.mcp_router_harness import route_tool_call
+
 
 class TestMcpCapabilityImport(unittest.TestCase):
     def test_capability_install_wrapper_calls_daemon(self) -> None:
@@ -72,8 +74,6 @@ class TestMcpCapabilityImport(unittest.TestCase):
 
     def test_mcp_router_capability_import_accepts_actor_id_without_by(self) -> None:
         import os
-        from no1.ports.mcp.server import handle_tool_call
-
         with patch(
             "no1.ports.mcp.server.capability_import",
             return_value={"ok": True, "state": "runnable"},
@@ -81,7 +81,7 @@ class TestMcpCapabilityImport(unittest.TestCase):
             os.environ,
             {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"},
         ):
-            result = handle_tool_call(
+            result = route_tool_call(
                 "onecolleague_capability_import",
                 {
                     "group_id": "g1",

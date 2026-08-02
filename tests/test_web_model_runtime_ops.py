@@ -8,17 +8,20 @@ from unittest.mock import ANY, patch
 
 class TestWebModelRuntimeOps(unittest.TestCase):
     def _with_home(self):
-        old_home = os.environ.get("CCCC_HOME")
+        home_vars = ("ONECOLLEAGUE_HOME", "CCCC_HOME")
+        old_homes = {name: os.environ.get(name) for name in home_vars}
         td_ctx = tempfile.TemporaryDirectory()
         td = td_ctx.__enter__()
-        os.environ["CCCC_HOME"] = td
+        for name in home_vars:
+            os.environ[name] = td
 
         def cleanup() -> None:
+            for name, old_home in old_homes.items():
+                if old_home is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = old_home
             td_ctx.__exit__(None, None, None)
-            if old_home is None:
-                os.environ.pop("CCCC_HOME", None)
-            else:
-                os.environ["CCCC_HOME"] = old_home
 
         return td, cleanup
 
@@ -95,6 +98,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
         return group
 
     def test_wait_next_turn_does_not_advance_cursor_until_complete(self) -> None:
+        from no1.daemon.messaging.turn_provenance import build_send_turn_provenance, get_current_turn_grant
         from no1.daemon.runner_state_ops import read_headless_state
         from no1.kernel.inbox import get_cursor, has_chat_ack
         from no1.kernel.ledger import append_event
@@ -108,7 +112,15 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 group_id=group.group_id,
                 scope_key="",
                 by="user",
-                data={"text": "first task", "to": ["peer1"], "priority": "attention", "reply_required": True},
+                data={
+                    "text": "first task",
+                    "to": ["peer1"],
+                    "priority": "attention",
+                    "reply_required": True,
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
             )
             second = append_event(
                 group.ledger_path,
@@ -116,7 +128,13 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 group_id=group.group_id,
                 scope_key="",
                 by="user",
-                data={"text": "second task", "to": ["peer1"]},
+                data={
+                    "text": "second task",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
             )
 
             wait, should_stop = self._call(
@@ -128,6 +146,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             turn = ((wait.result or {}).get("turn") or {})
             self.assertEqual((wait.result or {}).get("status"), "work_available")
             self.assertEqual(turn.get("event_ids"), [first["id"], second["id"]])
+            first_receipt = turn.get("completion_receipt")
+            self.assertIsInstance(first_receipt, dict)
+            self.assertEqual(get_current_turn_grant(group, "peer1")["event_ids"], [first["id"], second["id"]])
             self.assertEqual(get_cursor(group, "peer1"), ("", ""))
             self.assertEqual(str(read_headless_state(group.group_id, "peer1").get("status") or ""), "working")
 
@@ -136,7 +157,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 {"group_id": group.group_id, "actor_id": "peer1", "limit": 20},
             )
             self.assertTrue(repeat.ok, getattr(repeat, "error", None))
-            self.assertEqual(((repeat.result or {}).get("turn") or {}).get("event_ids"), [first["id"], second["id"]])
+            repeat_turn = ((repeat.result or {}).get("turn") or {})
+            self.assertEqual(repeat_turn.get("event_ids"), [first["id"], second["id"]])
+            repeat_receipt = repeat_turn.get("completion_receipt")
+            self.assertIsInstance(repeat_receipt, dict)
+            self.assertNotEqual(first_receipt.get("generation"), repeat_receipt.get("generation"))
 
             complete, _ = self._call(
                 "web_model_runtime_complete_turn",
@@ -148,6 +173,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                     "event_ids": [first["id"], second["id"]],
                     "status": "done",
                     "summary": "processed",
+                    "completion_receipt": repeat_receipt,
                 },
             )
             self.assertTrue(complete.ok, getattr(complete, "error", None))
@@ -157,6 +183,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             self.assertEqual(get_cursor(group, "peer1")[0], second["id"])
             self.assertTrue(has_chat_ack(group, event_id=first["id"], actor_id="peer1"))
             self.assertEqual(str(read_headless_state(group.group_id, "peer1").get("status") or ""), "waiting")
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
         finally:
             cleanup()
 
@@ -206,6 +233,70 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             self.assertEqual(actor.get("web_model_queued_after_event_id"), active["id"])
             self.assertEqual(actor.get("web_model_queued_latest_event_id"), queued_2["id"])
             self.assertNotEqual(actor.get("web_model_queued_latest_event_id"), queued_1["id"])
+        finally:
+            cleanup()
+
+    def test_wait_next_turn_idle_does_not_issue_grant_or_receipt(self) -> None:
+        from no1.daemon.messaging.turn_provenance import get_current_turn_grant
+
+        _, cleanup = self._with_home()
+        try:
+            group = self._create_group_with_actor()
+            wait, should_stop = self._call(
+                "web_model_runtime_wait_next_turn",
+                {"group_id": group.group_id, "actor_id": "peer1"},
+            )
+            self.assertFalse(should_stop)
+            self.assertTrue(wait.ok, getattr(wait, "error", None))
+            self.assertEqual((wait.result or {}).get("status"), "idle")
+            self.assertIsNone((wait.result or {}).get("turn"))
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
+        finally:
+            cleanup()
+
+    def test_wait_next_turn_finalize_write_after_error_returns_failure_without_grant(self) -> None:
+        from no1.daemon.messaging.turn_provenance import (
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt as real_finalize,
+            get_current_turn_grant,
+        )
+        from no1.daemon.runner_state_ops import read_headless_state
+        from no1.kernel.ledger import append_event
+
+        _, cleanup = self._with_home()
+        try:
+            group = self._create_group_with_actor()
+            append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data={
+                    "text": "pull finalize uncertain",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
+            )
+
+            def write_then_raise(*args, **kwargs):
+                real_finalize(*args, **kwargs)
+                raise OSError("grant persistence acknowledgement lost")
+
+            with patch(
+                "no1.daemon.actors.web_model_runtime_ops.finalize_turn_delivery_attempt",
+                side_effect=write_then_raise,
+            ):
+                wait, _ = self._call(
+                    "web_model_runtime_wait_next_turn",
+                    {"group_id": group.group_id, "actor_id": "peer1"},
+                )
+            self.assertFalse(wait.ok)
+            self.assertEqual(getattr(wait.error, "code", ""), "turn_delivery_failed")
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
+            self.assertNotEqual(read_headless_state(group.group_id, "peer1").get("status"), "working")
         finally:
             cleanup()
 
@@ -293,6 +384,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
     def test_browser_delivery_projected_session_submits_turn_and_commits_cursor(self) -> None:
         from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.messaging.turn_provenance import build_send_turn_provenance, get_current_turn_grant
         from no1.daemon.runner_state_ops import read_headless_state
         from no1.kernel.inbox import get_cursor
         from no1.kernel.ledger import append_event, read_last_lines
@@ -309,7 +401,13 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 group_id=group.group_id,
                 scope_key="",
                 by="user",
-                data={"text": "browser-delivered task", "to": ["peer1"]},
+                data={
+                    "text": "browser-delivered task",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
             )
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
             calls: list[dict] = []
@@ -332,6 +430,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             self.assertEqual(result.get("status"), "submitted")
             self.assertEqual(get_cursor(group, "peer1")[0], event["id"])
             self.assertTrue(bool(result.get("cursor_committed")))
+            self.assertEqual(get_current_turn_grant(group, "peer1")["event_ids"], [event["id"]])
             self.assertEqual(str(read_headless_state(group.group_id, "peer1").get("status") or ""), "waiting")
             browser_state = read_chatgpt_browser_state(group.group_id, "peer1")
             self.assertEqual(browser_state.get("auto_reload_active"), True)
@@ -375,6 +474,189 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             self.assertTrue(
                 any("web_model.browser_delivery.submitted" in line for line in read_last_lines(group.ledger_path, 20))
             )
+        finally:
+            if old_mode is None:
+                os.environ.pop("CCCC_WEB_MODEL_DELIVERY_MODE", None)
+            else:
+                os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = old_mode
+            cleanup()
+
+    def test_browser_sync_terminal_blocks_late_grant_and_old_completion_cannot_revoke_next(self) -> None:
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.messaging.turn_provenance import build_send_turn_provenance, get_current_turn_grant
+        from no1.kernel.ledger import append_event
+
+        _, cleanup = self._with_home()
+        old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
+        try:
+            group = self._create_group_with_actor()
+            self._bind_chatgpt_conversation(group)
+            os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
+            first = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data={
+                    "text": "sync terminal",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
+            )
+
+            first_receipt: dict = {}
+
+            def receipt_from_prompt(prompt: str) -> dict:
+                prefix = "[onecolleague] completion_receipt="
+                line = next(item for item in str(prompt or "").splitlines() if item.startswith(prefix))
+                value = json.loads(line[len(prefix) :])
+                self.assertIsInstance(value, dict)
+                return value
+
+            def complete_during_submit(**kwargs) -> dict:
+                first_receipt.update(receipt_from_prompt(str(kwargs.get("prompt") or "")))
+                completed, _ = self._call(
+                    "web_model_runtime_complete_turn",
+                    {
+                        "group_id": group.group_id,
+                        "actor_id": "peer1",
+                        "by": "peer1",
+                        "event_ids": [first["id"]],
+                        "status": "cancelled",
+                        "completion_receipt": dict(first_receipt),
+                    },
+                )
+                self.assertTrue(completed.ok, getattr(completed, "error", None))
+                return self._projected_submit_result(delivery_id="delivery-sync-terminal")
+
+            with patch(
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                side_effect=complete_during_submit,
+            ):
+                delivered = submit_next_web_model_browser_turn(group.group_id, "peer1")
+            self.assertTrue(delivered.get("ok"), delivered)
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
+
+            second = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data={
+                    "text": "next browser turn",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
+            )
+            second_receipt: dict = {}
+
+            def submit_next(**kwargs) -> dict:
+                second_receipt.update(receipt_from_prompt(str(kwargs.get("prompt") or "")))
+                return self._projected_submit_result(delivery_id="delivery-next")
+
+            with patch(
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                side_effect=submit_next,
+            ):
+                delivered = submit_next_web_model_browser_turn(group.group_id, "peer1")
+            self.assertTrue(delivered.get("ok"), delivered)
+            next_grant = get_current_turn_grant(group, "peer1")
+            self.assertIsNotNone(next_grant)
+            self.assertEqual(next_grant["event_ids"], [second["id"]])
+
+            replayed, _ = self._call(
+                "web_model_runtime_complete_turn",
+                {
+                    "group_id": group.group_id,
+                    "actor_id": "peer1",
+                    "by": "peer1",
+                    "event_ids": [first["id"]],
+                    "status": "done",
+                    "completion_receipt": dict(first_receipt),
+                },
+            )
+            self.assertTrue(replayed.ok, getattr(replayed, "error", None))
+            self.assertEqual(get_current_turn_grant(group, "peer1"), next_grant)
+
+            completed_next, _ = self._call(
+                "web_model_runtime_complete_turn",
+                {
+                    "group_id": group.group_id,
+                    "actor_id": "peer1",
+                    "by": "peer1",
+                    "event_ids": [second["id"]],
+                    "status": "done",
+                    "completion_receipt": dict(second_receipt),
+                },
+            )
+            self.assertTrue(completed_next.ok, getattr(completed_next, "error", None))
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
+        finally:
+            if old_mode is None:
+                os.environ.pop("CCCC_WEB_MODEL_DELIVERY_MODE", None)
+            else:
+                os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = old_mode
+            cleanup()
+
+    def test_browser_finalize_write_after_error_is_failed_and_not_retried(self) -> None:
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.messaging.turn_provenance import (
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt as real_finalize,
+            get_current_turn_grant,
+        )
+        from no1.daemon.runner_state_ops import read_headless_state
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+
+        _, cleanup = self._with_home()
+        old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
+        try:
+            group = self._create_group_with_actor()
+            self._bind_chatgpt_conversation(group)
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data={
+                    "text": "browser finalize uncertain",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
+            )
+            os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
+
+            def write_then_raise(*args, **kwargs):
+                real_finalize(*args, **kwargs)
+                raise OSError("grant persistence acknowledgement lost")
+
+            with patch(
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                return_value=self._projected_submit_result(delivery_id="delivery-uncertain"),
+            ) as submit, patch(
+                "no1.daemon.actors.web_model_browser_delivery.finalize_turn_delivery_attempt",
+                side_effect=write_then_raise,
+            ):
+                result = submit_next_web_model_browser_turn(group.group_id, "peer1")
+            submit.assert_called_once()
+            self.assertFalse(result.get("ok"), result)
+            self.assertEqual(result.get("status"), "delivery_finalize_uncertain")
+            self.assertFalse(result.get("reschedule", True))
+            self.assertEqual(get_cursor(group, "peer1")[0], event["id"])
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
+            self.assertNotEqual(read_headless_state(group.group_id, "peer1").get("status"), "working")
+            self.assertEqual(read_chatgpt_browser_state(group.group_id, "peer1").get("last_delivery_status"), "failed")
         finally:
             if old_mode is None:
                 os.environ.pop("CCCC_WEB_MODEL_DELIVERY_MODE", None)
@@ -511,8 +793,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = old_mode
             cleanup()
 
-    def test_builtin_browser_delivery_retries_once_after_transient_projected_page_close(self) -> None:
+    def test_builtin_browser_delivery_does_not_retry_after_submit_timeout(self) -> None:
         from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.messaging.turn_provenance import get_current_turn_grant
         from no1.kernel.inbox import get_cursor
         from no1.kernel.ledger import append_event
 
@@ -530,26 +813,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 data={"text": "retry transient page close", "to": ["peer1"]},
             )
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
-            calls: list[str] = []
+            prompts: list[str] = []
 
             def submit_via_session(**kwargs) -> dict:
-                calls.append(str(kwargs.get("delivery_id") or ""))
-                if len(calls) == 1:
-                    raise RuntimeError("Page.evaluate: Target page, context or browser has been closed")
-                return {
-                    "ok": True,
-                    "delivery_id": "delivery-after-retry",
-                    "transport": "projected_session",
-                    "browser_surface": {
-                        "state": "ready",
-                        "url": "https://chatgpt.com/c/bound-session",
-                    },
-                    "browser": {
-                        "tab_url": "https://chatgpt.com/c/bound-session",
-                        "conversation_url": "https://chatgpt.com/c/bound-session",
-                        "submission_evidence": "message_echo",
-                    },
-                }
+                prompts.append(str(kwargs.get("prompt") or ""))
+                raise RuntimeError("browser command timed out after prompt may have been submitted")
 
             with (
                 patch(
@@ -560,11 +828,14 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
 
-            self.assertTrue(result.get("ok"), result)
-            self.assertEqual(result.get("status"), "submitted")
-            self.assertEqual(len(calls), 2)
+            self.assertFalse(result.get("ok"), result)
+            self.assertEqual(result.get("status"), "ambiguous")
+            self.assertFalse(result.get("reschedule", True))
+            self.assertEqual(len(prompts), 1)
+            self.assertIn("retry transient page close", prompts[0])
             close_session.assert_called_once_with(group_id=group.group_id, actor_id="peer1")
             self.assertEqual(get_cursor(group, "peer1")[0], event["id"])
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
         finally:
             if old_mode is None:
                 os.environ.pop("CCCC_WEB_MODEL_DELIVERY_MODE", None)
@@ -572,7 +843,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = old_mode
             cleanup()
 
-    def test_builtin_browser_delivery_retries_once_after_transient_hidden_input_click(self) -> None:
+    def test_builtin_browser_delivery_does_not_retry_after_locator_error(self) -> None:
         from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
         from no1.kernel.inbox import get_cursor
         from no1.kernel.ledger import append_event
@@ -595,11 +866,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             def submit_via_session(**kwargs) -> dict:
                 calls.append(str(kwargs.get("delivery_id") or ""))
-                if len(calls) == 1:
-                    raise RuntimeError(
-                        'Locator.click: Timeout 5000ms exceeded; locator("textarea:not([disabled])").first; element is not visible'
-                    )
-                return self._projected_submit_result(delivery_id="delivery-after-retry")
+                raise RuntimeError(
+                    'Locator.click: Timeout 5000ms exceeded; locator("textarea:not([disabled])").first; element is not visible'
+                )
 
             with (
                 patch(
@@ -610,9 +879,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
 
-            self.assertTrue(result.get("ok"), result)
-            self.assertEqual(result.get("status"), "submitted")
-            self.assertEqual(len(calls), 2)
+            self.assertFalse(result.get("ok"), result)
+            self.assertEqual(result.get("status"), "ambiguous")
+            self.assertFalse(result.get("reschedule", True))
+            self.assertEqual(len(calls), 1)
             close_session.assert_called_once_with(group_id=group.group_id, actor_id="peer1")
             self.assertEqual(get_cursor(group, "peer1")[0], event["id"])
         finally:
@@ -622,7 +892,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = old_mode
             cleanup()
 
-    def test_builtin_browser_delivery_retries_once_after_inserted_without_submit(self) -> None:
+    def test_builtin_browser_delivery_does_not_retry_after_inserted_without_submit(self) -> None:
         from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
         from no1.kernel.inbox import get_cursor
         from no1.kernel.ledger import append_event
@@ -645,11 +915,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             def submit_via_session(**kwargs) -> dict:
                 calls.append(str(kwargs.get("delivery_id") or ""))
-                if len(calls) == 1:
-                    raise RuntimeError(
-                        "ChatGPT prompt was inserted but did not submit; diagnostics={\"send_enabled_count\":0}"
-                    )
-                return self._projected_submit_result(delivery_id="delivery-after-retry")
+                raise RuntimeError(
+                    "ChatGPT prompt was inserted but did not submit; diagnostics={\"send_enabled_count\":0}"
+                )
 
             with (
                 patch(
@@ -660,9 +928,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
 
-            self.assertTrue(result.get("ok"), result)
-            self.assertEqual(result.get("status"), "submitted")
-            self.assertEqual(len(calls), 2)
+            self.assertFalse(result.get("ok"), result)
+            self.assertEqual(result.get("status"), "ambiguous")
+            self.assertFalse(result.get("reschedule", True))
+            self.assertEqual(len(calls), 1)
             close_session.assert_called_once_with(group_id=group.group_id, actor_id="peer1")
             self.assertEqual(get_cursor(group, "peer1")[0], event["id"])
         finally:
@@ -781,8 +1050,13 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = old_mode
             cleanup()
 
-    def test_browser_delivery_projected_session_failure_marks_turn_failed_without_redelivery(self) -> None:
+    def test_browser_delivery_projected_session_error_is_ambiguous_without_redelivery(self) -> None:
         from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.messaging.turn_provenance import (
+            build_send_turn_provenance,
+            finalize_turn_delivery_success,
+            get_current_turn_grant,
+        )
         from no1.daemon.runner_state_ops import read_headless_state
         from no1.kernel.inbox import unread_messages
         from no1.kernel.inbox import get_cursor
@@ -800,8 +1074,15 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 group_id=group.group_id,
                 scope_key="",
                 by="user",
-                data={"text": "retry after failed browser delivery", "to": ["peer1"]},
+                data={
+                    "text": "retry after failed browser delivery",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
             )
+            self.assertIsNotNone(finalize_turn_delivery_success(group, actor_id="peer1", event_ids=[event["id"]]))
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
 
             with patch(
@@ -811,7 +1092,8 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
 
             self.assertFalse(result.get("ok"), result)
-            self.assertEqual(result.get("status"), "failed")
+            self.assertEqual(result.get("status"), "ambiguous")
+            self.assertFalse(result.get("reschedule", True))
             self.assertTrue(result.get("cursor_committed"))
             self.assertEqual(get_cursor(group, "peer1")[0], event["id"])
             self.assertEqual(unread_messages(group, actor_id="peer1", limit=10, kind_filter="all"), [])
@@ -819,16 +1101,17 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             self.assertEqual(str(state.get("status") or ""), "waiting")
             self.assertEqual(str(state.get("active_turn_id") or ""), "")
             browser_state = read_chatgpt_browser_state(group.group_id, "peer1")
-            self.assertEqual(browser_state.get("last_delivery_status"), "failed")
+            self.assertEqual(browser_state.get("last_delivery_status"), "ambiguous")
             self.assertIn("browser unavailable", str(browser_state.get("last_error") or ""))
-            failed_events = [
+            ambiguous_events = [
                 json.loads(line)
                 for line in read_last_lines(group.ledger_path, 20)
-                if "web_model.browser_delivery.failed" in line
+                if "web_model.browser_delivery.ambiguous" in line
             ]
-            self.assertTrue(failed_events)
-            self.assertEqual((failed_events[-1].get("data") or {}).get("event_ids"), [event["id"]])
-            self.assertEqual((failed_events[-1].get("data") or {}).get("cursor_committed"), True)
+            self.assertTrue(ambiguous_events)
+            self.assertEqual((ambiguous_events[-1].get("data") or {}).get("event_ids"), [event["id"]])
+            self.assertEqual((ambiguous_events[-1].get("data") or {}).get("cursor_committed"), True)
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
 
             second = append_event(
                 group.ledger_path,
@@ -865,6 +1148,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
     def test_browser_delivery_ambiguous_submit_commits_cursor_without_failed_status(self) -> None:
         from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.messaging.turn_provenance import (
+            build_send_turn_provenance,
+            finalize_turn_delivery_success,
+            get_current_turn_grant,
+        )
         from no1.daemon.runner_state_ops import read_headless_state
         from no1.kernel.inbox import get_cursor, unread_messages
         from no1.kernel.ledger import append_event, read_last_lines
@@ -881,8 +1169,15 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 group_id=group.group_id,
                 scope_key="",
                 by="user",
-                data={"text": "possibly submitted message", "to": ["peer1"]},
+                data={
+                    "text": "possibly submitted message",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
             )
+            self.assertIsNotNone(finalize_turn_delivery_success(group, actor_id="peer1", event_ids=[event["id"]]))
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
 
             with patch(
@@ -912,6 +1207,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             self.assertTrue(ambiguous_events)
             self.assertEqual((ambiguous_events[-1].get("data") or {}).get("event_ids"), [event["id"]])
             self.assertEqual((ambiguous_events[-1].get("data") or {}).get("cursor_committed"), True)
+            self.assertIsNone(get_current_turn_grant(group, "peer1"))
         finally:
             if old_mode is None:
                 os.environ.pop("CCCC_WEB_MODEL_DELIVERY_MODE", None)
@@ -1072,6 +1368,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
     def test_browser_delivery_new_chat_without_final_url_commits_delivered_turn(self) -> None:
         from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.messaging.turn_provenance import build_send_turn_provenance, get_current_turn_grant
         from no1.kernel.inbox import get_cursor
         from no1.kernel.ledger import append_event, read_last_lines
         from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
@@ -1094,7 +1391,13 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 group_id=group.group_id,
                 scope_key="",
                 by="user",
-                data={"text": "new chat but no final URL", "to": ["peer1"]},
+                data={
+                    "text": "new chat but no final URL",
+                    "to": ["peer1"],
+                    "turn_provenance": build_send_turn_provenance(
+                        {"__turn_ingress": "web_user", "by": "user"}
+                    ).model_dump(),
+                },
             )
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
 
@@ -1124,6 +1427,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             ensure_watcher.assert_called_once_with(group.group_id, "peer1", logger=ANY)
             self.assertTrue(result.get("cursor_committed"))
             self.assertEqual(get_cursor(group, "peer1")[0], event["id"])
+            self.assertEqual(get_current_turn_grant(group, "peer1")["event_ids"], [event["id"]])
             state = read_chatgpt_browser_state(group.group_id, "peer1")
             self.assertEqual(state.get("pending_new_chat_bind"), True)
             self.assertEqual(state.get("pending_new_chat_submitted"), True)

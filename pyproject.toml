@@ -7,7 +7,7 @@ name = "no1"
 version = "0.4.22"
 description = "Global multi-agent delivery kernel with working groups, scopes, and an append-only collaboration ledger"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
   { name = "ChesterRa", email = "ra@ike.ba" }
 ]
@@ -18,10 +18,11 @@ dependencies = [
   "PyYAML>=6.0,<7.0",
   "dingtalk-stream>=0.24.3",
   "fastapi>=0.110,<1.0",
+  "filelock>=3.13,<4",
   "httpx[socks]>=0.24,<1.0",
   "lark-oapi>=1.0.0",
   "pydantic>=2.0,<3.0",
-  "pywinpty>=2.0; platform_system == 'Windows'",
+  "pywinpty>=2.0,<3.0.4; platform_system == 'Windows'",
   "comtypes>=1.4; platform_system == 'Windows'",
   "python-multipart>=0.0.7,<1.0",
   "uvicorn[standard]>=0.27,<1.0",
@@ -35,9 +36,10 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Environment :: Console",
   "Operating System :: POSIX :: Linux",
   "Operating System :: MacOS",
@@ -69,6 +71,19 @@ include = ["no1*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "packaged_web_dist: requires the Web build artifact consumed by package CI",
+]
+
+[tool.ruff]
+target-version = "py311"
+exclude = [
+  "src/no1/providers/notebooklm/_vendor",
+  "src/no1/vendor",
+]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
 
 [dependency-groups]
 dev = [

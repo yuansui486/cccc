@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.actors import find_actor, is_internal_actor, list_actors, update_actor
+from ...kernel.actors import find_actor, is_internal_actor, is_supported_internal_actor, list_actors, update_actor
 from ...kernel.context import ContextStorage
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
@@ -21,11 +21,27 @@ from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
 from .actor_runtime_ops import model_from_runtime_command, resolve_actor_launch_spec
 from .actor_profile_runtime import ActorProfileAccessDeniedError, resolve_linked_actor_before_start
-from ..pet.review_scheduler import request_pet_review
+from ..messaging.turn_provenance import invalidate_turn_grant
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
     return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
+
+
+def _is_unsupported_internal_actor(actor: Any) -> bool:
+    return isinstance(actor, dict) and is_internal_actor(actor) and not is_supported_internal_actor(actor)
+
+
+def _unsupported_internal_actor_error(group_id: str, actor_id: str, actor: Dict[str, Any]) -> DaemonResponse:
+    return _error(
+        "unsupported_internal_actor",
+        "unsupported internal actor cannot be started",
+        details={
+            "group_id": group_id,
+            "actor_id": actor_id,
+            "internal_kind": str(actor.get("internal_kind") or "").strip(),
+        },
+    )
 
 
 def _stop_actor_runtime_handles(
@@ -84,6 +100,8 @@ def handle_actor_start(
 
     try:
         require_actor_permission(group, by=by, action="actor.start", target_actor_id=actor_id)
+        if _is_unsupported_internal_actor(previous_actor):
+            return _unsupported_internal_actor_error(group.group_id, actor_id, previous_actor)
         actor = update_actor(group, actor_id, {"enabled": True})
         enabled_was_updated = True
         actor = resolve_linked_actor_before_start(
@@ -108,6 +126,13 @@ def handle_actor_start(
     env = actor.get("env") if isinstance(actor.get("env"), dict) else {}
     runner_kind = str(actor.get("runner") or "pty").strip()
     runtime = str(actor.get("runtime") or "codex").strip()
+    # A new start attempt invalidates execution state left by the prior
+    # session before runtime initialization can fail or raise.
+    try:
+        ContextStorage(group).clear_agent_status_if_present(actor_id)
+    except Exception:
+        pass
+
     try:
         start_result = start_actor_process(
             group,
@@ -123,6 +148,7 @@ def handle_actor_start(
     except Exception as e:
         _restore_previous_enabled()
         return _error("actor_start_failed", str(e))
+
     if not start_result["success"]:
         _restore_previous_enabled()
         return _error("actor_start_failed", start_result.get("error") or "unknown error")
@@ -155,6 +181,9 @@ def handle_actor_stop(
     try:
         require_actor_permission(group, by=by, action="actor.stop", target_actor_id=actor_id)
         current_actor = find_actor(group, actor_id)
+        if not isinstance(current_actor, dict):
+            return _error("actor_stop_failed", f"actor not found: {actor_id}")
+        invalidate_turn_grant(group, actor_id, reason="actor_stop")
         if isinstance(current_actor, dict) and is_internal_actor(current_actor):
             actor = dict(current_actor)
         else:
@@ -208,16 +237,6 @@ def handle_actor_stop(
 
     from ...kernel.events import publish_event
     publish_event("actor.stop", {"group_id": group.group_id, "actor_id": actor_id})
-    try:
-        request_pet_review(
-            group.group_id,
-            reason="actor_stop",
-            source_event_id=str(event.get("id") or "").strip(),
-            immediate=True,
-        )
-    except Exception:
-        pass
-
     return DaemonResponse(ok=True, result={"actor": actor, "event": event})
 
 
@@ -259,6 +278,12 @@ def handle_actor_restart(
     is_admin = coerce_bool(args.get("is_admin"), default=not caller_context_explicit)
     try:
         require_actor_permission(group, by=by, action="actor.restart", target_actor_id=actor_id)
+        current_actor = find_actor(group, actor_id)
+        if not isinstance(current_actor, dict):
+            return _error("actor_restart_failed", f"actor not found: {actor_id}")
+        if _is_unsupported_internal_actor(current_actor):
+            return _unsupported_internal_actor_error(group.group_id, actor_id, current_actor)
+        invalidate_turn_grant(group, actor_id, reason="actor_restart")
         actor = update_actor(group, actor_id, {"enabled": True})
         actor = resolve_linked_actor_before_start(
             group,
@@ -275,6 +300,9 @@ def handle_actor_restart(
             remove_headless_state=remove_headless_state,
             remove_pty_state_if_pid=remove_pty_state_if_pid,
         )
+        # A restart begins a new execution lifecycle. Clear old status before
+        # launch so a failed runtime handshake cannot resurrect it.
+        ContextStorage(group).clear_agent_status_if_present(actor_id)
         clear_preamble_sent(group, actor_id)
         throttle_reset_actor(group.group_id, actor_id, keep_pending=True)
     except Exception as e:
@@ -472,16 +500,6 @@ def handle_actor_restart(
 
     from ...kernel.events import publish_event
     publish_event("actor.restart", {"group_id": group.group_id, "actor_id": actor_id})
-    try:
-        request_pet_review(
-            group.group_id,
-            reason="actor_restart",
-            source_event_id=str(event.get("id") or "").strip(),
-            immediate=True,
-        )
-    except Exception:
-        pass
-
     return DaemonResponse(ok=True, result={"actor": actor, "event": event})
 
 

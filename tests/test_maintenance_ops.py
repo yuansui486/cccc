@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class TestMaintenanceOps(unittest.TestCase):
@@ -162,16 +163,66 @@ class TestMaintenanceOps(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "").strip()
             self.assertTrue(group_id)
 
-            ok, _ = self._call(
-                "term_resize",
-                {"group_id": group_id, "actor_id": "peer1", "cols": 10, "rows": 2},
-            )
+            with patch(
+                "no1.daemon.ops.maintenance_ops.pty_runner.SUPERVISOR.resize_if_writer",
+                return_value=True,
+            ) as resize_if_writer:
+                ok, _ = self._call(
+                    "term_resize",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "peer1",
+                        "cols": 10,
+                        "rows": 2,
+                        "writer_lease": "current",
+                    },
+                )
             self.assertTrue(ok.ok, getattr(ok, "error", None))
+            resize_if_writer.assert_called_once_with(
+                group_id=group_id,
+                actor_id="peer1",
+                writer_lease="current",
+                cols=10,
+                rows=2,
+            )
             result = ok.result if isinstance(ok.result, dict) else {}
             self.assertIsInstance(result, dict)
             assert isinstance(result, dict)
             self.assertEqual(int(result.get("cols") or 0), 10)
             self.assertEqual(int(result.get("rows") or 0), 2)
+        finally:
+            cleanup()
+
+    def test_term_resize_rejects_missing_and_stale_writer_lease(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "resize-lease", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+
+            missing, _ = self._call(
+                "term_resize",
+                {"group_id": group_id, "actor_id": "peer1", "cols": 10, "rows": 2},
+            )
+            with patch(
+                "no1.daemon.ops.maintenance_ops.pty_runner.SUPERVISOR.resize_if_writer",
+                return_value=False,
+            ):
+                stale, _ = self._call(
+                    "term_resize",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "peer1",
+                        "cols": 10,
+                        "rows": 2,
+                        "writer_lease": "old",
+                    },
+                )
+
+            self.assertFalse(missing.ok)
+            self.assertEqual(str(getattr(missing.error, "code", "") or ""), "terminal_writer_lease_required")
+            self.assertFalse(stale.ok)
+            self.assertEqual(str(getattr(stale.error, "code", "") or ""), "terminal_not_writable")
         finally:
             cleanup()
 

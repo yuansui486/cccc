@@ -29,8 +29,8 @@ _RESERVED_IDS = frozenset({
     "@all", "@peers", "@foreman", "@user",
 })
 
-INTERNAL_KIND_PET = "pet"
 INTERNAL_KIND_VOICE_SECRETARY = "voice_secretary"
+SUPPORTED_INTERNAL_ACTOR_KINDS = frozenset({INTERNAL_KIND_VOICE_SECRETARY})
 
 
 def _normalize_capability_id_list(raw: Any) -> List[str]:
@@ -126,12 +126,13 @@ def is_internal_actor(actor: Dict[str, Any]) -> bool:
     return bool(str(actor.get("internal_kind") or "").strip())
 
 
-def is_pet_actor(actor: Dict[str, Any]) -> bool:
-    return str(actor.get("internal_kind") or "").strip() == INTERNAL_KIND_PET
-
-
 def is_voice_secretary_actor(actor: Dict[str, Any]) -> bool:
     return str(actor.get("internal_kind") or "").strip() == INTERNAL_KIND_VOICE_SECRETARY
+
+
+def is_supported_internal_actor(actor: Dict[str, Any]) -> bool:
+    kind = str(actor.get("internal_kind") or "").strip()
+    return bool(kind and kind in SUPPORTED_INTERNAL_ACTOR_KINDS)
 
 
 def list_visible_actors(group: Group) -> List[Dict[str, Any]]:
@@ -243,6 +244,7 @@ def add_actor(
             runtime=runtime_name,
             runner=runner_kind,
             requested_source=runtime_state_source,
+            command=command_list,
         ),
         internal_kind=(str(internal_kind or "").strip() or None),
         created_at=now,
@@ -316,6 +318,8 @@ def update_actor(group: Group, actor_id: str, patch: Dict[str, Any]) -> Dict[str
     if item is None:
         raise ValueError(f"actor not found: {actor_id.strip()}")
 
+    previous_runtime = str(item.get("runtime") or "codex").strip() or "codex"
+    previous_runner = str(item.get("runner") or "pty").strip() or "pty"
     current_internal_kind = str(item.get("internal_kind") or "").strip()
     patch_runtime_key = str(patch.get("runtime") or "").strip().lower()
     effective_runtime_key = str(patch.get("runtime") or item.get("runtime") or "").strip().lower()
@@ -425,15 +429,35 @@ def update_actor(group: Group, actor_id: str, patch: Dict[str, Any]) -> Dict[str
         item["runner"] = "headless"
         item["command"] = []
 
+    runtime_changed = str(item.get("runtime") or "codex").strip() != previous_runtime
+    runner_changed = str(item.get("runner") or "pty").strip() != previous_runner
     if str(item.get("runtime") or "").strip() != "codex" or str(item.get("runner") or "pty").strip() != "pty":
         item["runtime_state_source"] = "terminal"
-    elif "runtime_state_source" not in patch and (
-        "runtime" in patch or "runner" in patch or not str(item.get("runtime_state_source") or "").strip()
-    ):
+    elif "runtime_state_source" not in patch and (runtime_changed or runner_changed):
         item["runtime_state_source"] = default_runtime_state_source(
             runtime=str(item.get("runtime") or ""),
             runner=str(item.get("runner") or ""),
             requested_source=None,
+            command=list(item.get("command") or []) if isinstance(item.get("command"), list) else [],
+        )
+    elif "runtime_state_source" not in patch and "command" in patch:
+        # A provider/profile command cannot be represented faithfully by the
+        # auxiliary app-server process. Keep an existing terminal choice when
+        # that custom command is later removed.
+        inferred_source = default_runtime_state_source(
+            runtime=str(item.get("runtime") or ""),
+            runner=str(item.get("runner") or ""),
+            requested_source=None,
+            command=list(item.get("command") or []) if isinstance(item.get("command"), list) else [],
+        )
+        if inferred_source == "terminal":
+            item["runtime_state_source"] = "terminal"
+    elif "runtime_state_source" not in patch and not str(item.get("runtime_state_source") or "").strip():
+        item["runtime_state_source"] = default_runtime_state_source(
+            runtime=str(item.get("runtime") or ""),
+            runner=str(item.get("runner") or ""),
+            requested_source=None,
+            command=list(item.get("command") or []) if isinstance(item.get("command"), list) else [],
         )
 
     if "internal_kind" in patch:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ntpath
 import os
 import re
 import threading
@@ -31,12 +32,16 @@ _CODEX_RESUME_RE = re.compile(rf"\bcodex\s+resume\s+{_ID_RE}\b")
 _GEMINI_RESUME_RE = re.compile(rf"\bgemini\s+(?:--resume|-r)\s+{_ID_RE}\b")
 _CODEX_SESSION_ID_RE = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 _CODEX_STATUS_SESSION_RE = re.compile(rf"\bSession:\s*{_CODEX_SESSION_ID_RE}\b")
+_CODEX_MCP_DISABLE_CONFIG_RE = re.compile(
+    r'^mcp_servers\.(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*")\.enabled=false$'
+)
 
 _NO_RESUME_ENV_VALUES = {"0", "false", "no", "off"}
 _DEFAULT_CODEX_STATUS_CAPTURE_SECONDS = 8.0
 _DEFAULT_CODEX_STATUS_SUBMIT_DELAY_SECONDS = 1.5
 _DEFAULT_PTY_RESUME_VERIFY_SECONDS = 20.0
 _DEFAULT_PTY_RESUME_FOREGROUND_VERIFY_SECONDS = 2.0
+_RUNTIME_SESSION_WRITE_LOCK = threading.RLock()
 _CODEX_KNOWN_SUBCOMMANDS = {
     "app-server",
     "completion",
@@ -58,6 +63,28 @@ _GEMINI_KNOWN_SUBCOMMANDS = {
     "help",
     "mcp",
     "resume",
+}
+_GROK_KNOWN_SUBCOMMANDS = {
+    "agent",
+    "completions",
+    "dashboard",
+    "export",
+    "help",
+    "inspect",
+    "leader",
+    "login",
+    "logout",
+    "mcp",
+    "memory",
+    "models",
+    "plugin",
+    "sessions",
+    "setup",
+    "trace",
+    "update",
+    "version",
+    "worktree",
+    "wrap",
 }
 
 
@@ -86,35 +113,51 @@ def write_runtime_session(group_id: str, actor_id: str, payload: Dict[str, Any])
     out["group_id"] = str(group_id)
     out["actor_id"] = str(actor_id)
     out.setdefault("updated_at", utc_now_iso())
-    atomic_write_json(path, out, indent=2)
+    with _RUNTIME_SESSION_WRITE_LOCK:
+        atomic_write_json(path, out, indent=2)
 
 
 def remove_runtime_session(group_id: str, actor_id: str) -> None:
     try:
-        runtime_session_path(group_id, actor_id).unlink(missing_ok=True)
+        with _RUNTIME_SESSION_WRITE_LOCK:
+            runtime_session_path(group_id, actor_id).unlink(missing_ok=True)
     except Exception:
         pass
 
 
 def _stable_runtime_command_argv(command: Iterable[str]) -> list[str]:
     argv = [str(item) for item in list(command or []) if str(item).strip()]
-    if len(argv) < 2 or Path(argv[0]).name != "codex" or argv[1] != "app-server":
+    executable = str(Path(ntpath.basename(argv[0])).stem or "").strip().lower() if argv else ""
+    if executable != "codex" or "app-server" not in argv[1:]:
         return argv
 
     stable: list[str] = []
-    skip_next = False
-    for item in argv:
-        if skip_next:
-            skip_next = False
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item in {"-c", "--config"} and index + 1 < len(argv):
+            value = argv[index + 1]
+            if _CODEX_MCP_DISABLE_CONFIG_RE.fullmatch(value):
+                index += 2
+                continue
+        for prefix in ("-c=", "--config="):
+            if item.startswith(prefix) and _CODEX_MCP_DISABLE_CONFIG_RE.fullmatch(item[len(prefix) :]):
+                index += 1
+                break
+        else:
+            prefix = ""
+        if prefix:
             continue
         if item == "--listen":
             stable.append(item)
-            skip_next = True
+            index += 2
             continue
         if item.startswith("--listen="):
             stable.append("--listen")
+            index += 1
             continue
         stable.append(item)
+        index += 1
     return stable
 
 
@@ -453,6 +496,41 @@ def _codex_resume_command(base_command: list[str], session_id: str) -> list[str]
     return [base_command[0], *base_command[1:], "resume", session_id]
 
 
+def _has_grok_session_control(args: list[str]) -> bool:
+    for item in args[1:]:
+        value = str(item or "").strip()
+        if value in {
+            "--resume",
+            "-r",
+            "--continue",
+            "-c",
+            "--session-id",
+            "-s",
+            "--fork-session",
+        }:
+            return True
+        if value.startswith(("--resume=", "--session-id=")):
+            return True
+        if len(value) > 2 and value[:2] in {"-r", "-s"}:
+            return True
+    return False
+
+
+def _grok_command_allows_managed_sessions(base_command: list[str]) -> bool:
+    if not base_command or _has_grok_session_control(base_command):
+        return False
+    rest = [str(item or "").strip() for item in base_command[1:]]
+    if any(item in _GROK_KNOWN_SUBCOMMANDS for item in rest):
+        return False
+    return True
+
+
+def _grok_resume_command(base_command: list[str], session_id: str) -> list[str]:
+    if not _grok_command_allows_managed_sessions(base_command):
+        return []
+    return [base_command[0], "--resume", session_id, *base_command[1:]]
+
+
 def _claude_initial_session_command(
     *,
     group_id: str,
@@ -500,6 +578,31 @@ def _gemini_initial_session_command(
         provider_session_id=session_id,
         resume_command_hint=f"gemini --resume {session_id}",
         captured_from="gemini_generated_session_id",
+        status="usable",
+        resume_eligible=True,
+    )
+    return [base_command[0], "--session-id", session_id, *base_command[1:]], doc
+
+
+def _grok_initial_session_command(
+    *,
+    group_id: str,
+    actor_id: str,
+    cwd: Path,
+    base_command: list[str],
+) -> Tuple[list[str], Optional[Dict[str, Any]]]:
+    if not _grok_command_allows_managed_sessions(base_command):
+        return base_command, None
+    session_id = str(uuid.uuid4())
+    doc = record_pty_runtime_session(
+        group_id=group_id,
+        actor_id=actor_id,
+        runtime="grok",
+        cwd=cwd,
+        command=base_command,
+        provider_session_id=session_id,
+        resume_command_hint=f"grok --resume {session_id}",
+        captured_from="grok_generated_session_id",
         status="usable",
         resume_eligible=True,
     )
@@ -757,6 +860,8 @@ def prepare_initial_pty_session_command(
         return _gemini_initial_session_command(group_id=group_id, actor_id=actor_id, cwd=cwd, base_command=command)
     if runtime_norm == "codex":
         return command, None
+    if runtime_norm == "grok":
+        return _grok_initial_session_command(group_id=group_id, actor_id=actor_id, cwd=cwd, base_command=command)
     return command, None
 
 
@@ -774,7 +879,7 @@ def prepare_pty_resume_command(
         return command, None
 
     runtime_norm = str(runtime or "").strip().lower()
-    if runtime_norm not in {"claude", "codex", "gemini"}:
+    if runtime_norm not in {"claude", "codex", "gemini", "grok"}:
         return command, None
 
     doc = read_runtime_session(group_id, actor_id)
@@ -805,8 +910,10 @@ def prepare_pty_resume_command(
         resume_command = _claude_resume_command(command, session_id)
     elif runtime_norm == "gemini":
         resume_command = _gemini_resume_command(command, session_id)
-    else:
+    elif runtime_norm == "codex":
         resume_command = _codex_resume_command(command, session_id)
+    else:
+        resume_command = _grok_resume_command(command, session_id)
     if not resume_command:
         return command, None
 
@@ -838,6 +945,44 @@ def mark_runtime_session_resume_failed(
     next_doc["updated_at"] = utc_now_iso()
     write_runtime_session(group_id, actor_id, next_doc)
     return next_doc
+
+
+def mark_runtime_session_auth_failed(
+    *,
+    group_id: str,
+    actor_id: str,
+    error: str,
+    expected_command: Iterable[str] = (),
+    expected_provider_thread_id: str = "",
+    require_provider_thread_id_match: bool = False,
+) -> Dict[str, Any]:
+    with _RUNTIME_SESSION_WRITE_LOCK:
+        doc = read_runtime_session(group_id, actor_id)
+        if not doc:
+            return {}
+        expected_command_items = [str(part) for part in (expected_command or [])]
+        if expected_command_items:
+            expected_fingerprint = runtime_session_command_fingerprint(expected_command_items)
+            if str(doc.get("command_fingerprint") or "") != expected_fingerprint:
+                return {}
+        expected_thread = str(expected_provider_thread_id or "").strip()
+        current_thread = str(doc.get("provider_thread_id") or "").strip()
+        if expected_thread and current_thread != expected_thread:
+            return {}
+        if bool(require_provider_thread_id_match) and current_thread and not expected_thread:
+            return {}
+        next_doc = dict(doc)
+        try:
+            failure_count = int(next_doc.get("failure_count") or 0)
+        except Exception:
+            failure_count = 0
+        next_doc["status"] = "auth_failed"
+        next_doc["resume_eligible"] = False
+        next_doc["failure_count"] = failure_count + 1
+        next_doc["last_resume_error"] = str(error or "").strip()[:1000]
+        next_doc["updated_at"] = utc_now_iso()
+        write_runtime_session(group_id, actor_id, next_doc)
+        return next_doc
 
 
 def _verify_pty_resume_start(
@@ -985,7 +1130,7 @@ def _start_fresh_pty_actor_after_resume_failure(
     runtime_norm = str(runtime or "").strip().lower()
     fresh_command = list(base_command)
     fresh_doc: Optional[Dict[str, Any]] = None
-    if runtime_norm in {"claude", "gemini"}:
+    if runtime_norm in {"claude", "gemini", "grok"}:
         fresh_command, fresh_doc = prepare_initial_pty_session_command(
             group_id=group_id,
             actor_id=actor_id,

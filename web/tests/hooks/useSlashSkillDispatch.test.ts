@@ -19,6 +19,7 @@ describe("sendSlashSkillMessageRequest", () => {
       toTokens: ["@all"],
       priority: "attention",
       replyRequired: true,
+      collaborationRequired: false,
       localId: "local-1",
       replyTarget: {
         eventId: "evt-original",
@@ -35,6 +36,7 @@ describe("sendSlashSkillMessageRequest", () => {
       undefined,
       "attention",
       true,
+      false,
       "local-1",
       [],
     );
@@ -50,6 +52,7 @@ describe("sendSlashSkillMessageRequest", () => {
       toTokens: ["@all"],
       priority: "normal",
       replyRequired: false,
+      collaborationRequired: false,
       localId: "local-2",
       replyTarget: null,
     })).resolves.toEqual({ ok: true, result: {} });
@@ -60,6 +63,7 @@ describe("sendSlashSkillMessageRequest", () => {
       ["@all"],
       undefined,
       "normal",
+      false,
       false,
       "local-2",
       [],

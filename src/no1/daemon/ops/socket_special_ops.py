@@ -40,7 +40,8 @@ def try_handle_socket_special_op(
     dump_response: Callable[[DaemonResponse], Dict[str, Any]],
     error: Callable[[str, str, Optional[Dict[str, Any]]], DaemonResponse],
     actor_running: Callable[[str, str], bool],
-    attach_actor_socket: Callable[[str, str, Any], None],
+    attach_actor_socket: Callable[..., Any],
+    backlog_start_offset: Optional[Callable[[str, str], int]] = None,
     load_group: Callable[[str], Any],
     find_actor: Callable[[Any, str], Any],
     effective_runner_kind: Callable[[str], str],
@@ -53,6 +54,17 @@ def try_handle_socket_special_op(
     if op == "term_attach":
         group_id = str(args.get("group_id") or "").strip()
         actor_id = str(args.get("actor_id") or "").strip()
+        since_raw = args.get("since")
+        mode = str(args.get("mode") or "control").strip().lower()
+        if mode not in {"control", "viewer"}:
+            mode = "control"
+        takeover = bool(args.get("takeover")) if mode == "control" else False
+        since: Optional[int] = None
+        if since_raw is not None and str(since_raw).strip() != "":
+            try:
+                since = int(since_raw)
+            except Exception:
+                since = None
         if not group_id:
             resp = error("missing_group_id", "missing group_id")
         elif not actor_id:
@@ -81,14 +93,51 @@ def try_handle_socket_special_op(
                         resp = error("actor_not_running", "actor is not running")
                     else:
                         resp = DaemonResponse(ok=True, result={"group_id": group_id, "actor_id": actor_id})
+        reservation = None
         try:
-            send_json(conn, dump_response(resp))
-            if resp.ok:
+            if not resp.ok:
+                send_json(conn, dump_response(resp))
+            else:
                 _set_blocking_io(conn)
-                attach_actor_socket(group_id, actor_id, conn)
+                reservation = attach_actor_socket(group_id, actor_id, conn, since, mode, takeover)
+                metadata = reservation.metadata
+                base_result = resp.result if isinstance(resp.result, dict) else {}
+                resp = DaemonResponse(
+                    ok=True,
+                    result={
+                        **base_result,
+                        "terminal_mode": str(metadata.get("mode") or "viewer"),
+                        "terminal_writable": bool(metadata.get("writable")),
+                        "writer_replaced": bool(metadata.get("writer_replaced")),
+                        "writer_lease": str(metadata.get("writer_lease") or ""),
+                        "replay_cursor": int(metadata.get("replay_cursor") or 0),
+                        "backlog_start_cursor": int(metadata.get("backlog_start_cursor") or 0),
+                        "backlog_end_cursor": int(metadata.get("backlog_end_cursor") or 0),
+                    },
+                )
+                send_json(conn, dump_response(resp))
+                if not reservation.activate():
+                    raise RuntimeError("terminal attach activation failed")
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            if reservation is not None:
+                try:
+                    reservation.cancel()
+                except Exception:
+                    pass
+            if str(getattr(exc, "code", "") or "") == "terminal_attach_busy":
+                try:
+                    send_json(
+                        conn,
+                        dump_response(
+                            error(
+                                "terminal_attach_busy",
+                                "another terminal writer attach is still pending; retry shortly",
+                            )
+                        ),
+                    )
+                except Exception:
+                    pass
         try:
             conn.close()
         except Exception:

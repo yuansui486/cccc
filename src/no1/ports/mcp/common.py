@@ -39,6 +39,7 @@ class _RuntimeContext:
     home: str
     group_id: str
     actor_id: str
+    source: str
 
 
 _RUNTIME_CONTEXT_OVERRIDE: ContextVar[Optional[_RuntimeContext]] = ContextVar(
@@ -48,11 +49,12 @@ _RUNTIME_CONTEXT_OVERRIDE: ContextVar[Optional[_RuntimeContext]] = ContextVar(
 
 
 @contextmanager
-def runtime_context_override(*, home: str = "", group_id: str = "", actor_id: str = "") -> Iterable[None]:
+def runtime_context_override(*, home: str = "", group_id: str = "", actor_id: str = "", source: str = "local_mcp") -> Iterable[None]:
     ctx = _RuntimeContext(
         home=str(home or "").strip(),
         group_id=str(group_id or "").strip(),
         actor_id=str(actor_id or "").strip(),
+        source=str(source or "").strip(),
     )
     token = _RUNTIME_CONTEXT_OVERRIDE.set(ctx)
     try:
@@ -369,6 +371,7 @@ def _runtime_context() -> _RuntimeContext:
             home=override.home or default_home,
             group_id=override.group_id,
             actor_id=override.actor_id,
+            source=override.source,
         )
 
     home = _normalize_home(_env_str("ONECOLLEAGUE_HOME") or _env_str("CCCC_HOME"))
@@ -408,7 +411,7 @@ def _runtime_context() -> _RuntimeContext:
             if gid and aid:
                 break
 
-    return _RuntimeContext(home=home or default_home, group_id=gid, actor_id=aid)
+    return _RuntimeContext(home=home or default_home, group_id=gid, actor_id=aid, source="local_mcp")
 
 
 def _validate_self_actor_id(actor_id: str) -> str:

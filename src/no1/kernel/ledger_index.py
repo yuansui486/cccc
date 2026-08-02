@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, TypeVar
 
+from ..util.file_lock import LockUnavailableError, acquire_lockfile, release_lockfile
 from .ledger_segments import ACTIVE_SOURCE_SEQ, iter_source_lines, list_ledger_sources, open_ledger_source_text
 
 
+LOGGER = logging.getLogger("no1.ledger.index")
 _SCHEMA_VERSION = 4
 _DEFAULT_TIMEOUT_SECONDS = 5.0
+_REBUILDABLE_SQLITE_ERRORS = {11, 26}  # SQLITE_CORRUPT, SQLITE_NOTADB
+_REBUILDABLE_SQLITE_MESSAGES = {"database disk image is malformed", "file is not a database"}
+_QueryResult = TypeVar("_QueryResult")
 _EVENTS_REQUIRED_COLUMNS = {
     "event_id",
     "ts",
@@ -27,13 +33,38 @@ def _index_path_for_ledger(ledger_path: Path) -> Path:
     return ledger_path.parent / "state" / "ledger" / "index.sqlite3"
 
 
+def _index_lock_path_for_ledger(ledger_path: Path) -> Path:
+    return ledger_path.parent / "state" / "ledger" / "index.lock"
+
+
 def _connect(index_path: Path) -> sqlite3.Connection:
     index_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(index_path), timeout=_DEFAULT_TIMEOUT_SECONDS)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA temp_store=MEMORY")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
+    except Exception:
+        conn.close()
+        raise
     return conn
+
+
+def _is_rebuildable_index_error(exc: sqlite3.DatabaseError) -> bool:
+    error_code = getattr(exc, "sqlite_errorcode", None)
+    if error_code is None:
+        return str(exc).strip().lower() in _REBUILDABLE_SQLITE_MESSAGES
+    try:
+        primary_code = int(error_code) & 0xFF
+    except (TypeError, ValueError):
+        return False
+    return primary_code in _REBUILDABLE_SQLITE_ERRORS
+
+
+def _discard_index_files(index_path: Path) -> None:
+    sidecars = (Path(f"{index_path}-wal"), Path(f"{index_path}-shm"), Path(f"{index_path}-journal"))
+    for path in (index_path, *sidecars):
+        path.unlink(missing_ok=True)
 
 
 def _meta_int(conn: sqlite3.Connection, key: str) -> int:
@@ -128,6 +159,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             last_line_no INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS source_integrity (
+            source_path TEXT PRIMARY KEY,
+            indexed_event_count INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS event_search (
             event_id TEXT PRIMARY KEY,
             searchable_text TEXT NOT NULL
@@ -140,6 +176,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM chat_ack")
         conn.execute("DELETE FROM events")
         conn.execute("DELETE FROM source_state")
+        conn.execute("DELETE FROM source_integrity")
         conn.execute("DELETE FROM event_search")
         conn.execute(
             "INSERT INTO meta(key, value) VALUES(?, ?) "
@@ -156,11 +193,67 @@ def _source_stat(path: Path) -> tuple[int, int]:
         return 0, 0
 
 
+def _plain_source_index_bounds(conn: sqlite3.Connection, source_path: str) -> tuple[int, int]:
+    row = conn.execute(
+        "SELECT COUNT(*), COALESCE(MAX(line_no), 0) FROM events WHERE source_path = ?",
+        (source_path,),
+    ).fetchone()
+    if row is None:
+        return 0, 0
+    return max(0, int(row[0] or 0)), max(0, int(row[1] or 0))
+
+
+def _source_search_count(conn: sqlite3.Connection, source_path: str) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM event_search AS search
+        JOIN events ON events.event_id = search.event_id
+        WHERE events.source_path = ?
+        """,
+        (source_path,),
+    ).fetchone()
+    return max(0, int(row[0] or 0)) if row is not None else 0
+
+
+def _record_source_integrity(conn: sqlite3.Connection, source_path: str) -> None:
+    indexed_count, _ = _plain_source_index_bounds(conn, source_path)
+    conn.execute(
+        """
+        INSERT INTO source_integrity(source_path, indexed_event_count)
+        VALUES(?, ?)
+        ON CONFLICT(source_path) DO UPDATE SET
+            indexed_event_count=excluded.indexed_event_count
+        """,
+        (source_path, indexed_count),
+    )
+
+
+def _source_index_is_consistent(conn: sqlite3.Connection, source_path: str, *, last_line_no: int) -> bool:
+    integrity = conn.execute(
+        "SELECT indexed_event_count FROM source_integrity WHERE source_path = ?",
+        (source_path,),
+    ).fetchone()
+    if integrity is None:
+        return False
+    try:
+        expected_count = max(0, int(integrity[0] or 0))
+    except (TypeError, ValueError):
+        return False
+    indexed_count, indexed_max_line = _plain_source_index_bounds(conn, source_path)
+    if indexed_count != expected_count:
+        return False
+    if indexed_count > max(0, int(last_line_no or 0)) or indexed_max_line > max(0, int(last_line_no or 0)):
+        return False
+    return _source_search_count(conn, source_path) == indexed_count
+
+
 def _delete_source_rows(conn: sqlite3.Connection, source_path: str) -> None:
     conn.execute("DELETE FROM event_search WHERE event_id IN (SELECT event_id FROM events WHERE source_path = ?)", (source_path,))
     conn.execute("DELETE FROM chat_ack WHERE event_id IN (SELECT event_id FROM events WHERE source_path = ?)", (source_path,))
     conn.execute("DELETE FROM events WHERE source_path = ?", (source_path,))
     conn.execute("DELETE FROM source_state WHERE source_path = ?", (source_path,))
+    conn.execute("DELETE FROM source_integrity WHERE source_path = ?", (source_path,))
 
 
 def _searchable_text(event: Dict[str, Any]) -> str:
@@ -168,7 +261,7 @@ def _searchable_text(event: Dict[str, Any]) -> str:
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     parts: list[str] = [kind]
     if isinstance(data, dict):
-        for key in ("text", "title", "message", "quote_text"):
+        for key in ("text", "insight", "title", "message", "quote_text"):
             value = data.get(key)
             if isinstance(value, str) and value.strip():
                 parts.append(value.strip())
@@ -261,6 +354,7 @@ def _reindex_source(conn: sqlite3.Connection, ledger_path: Path, source: Dict[st
             """,
             (source_path, 1, size_bytes, mtime_ns, size_bytes, line_no),
         )
+        _record_source_integrity(conn, source_path)
         return
 
     offset_bytes = 0
@@ -295,6 +389,7 @@ def _reindex_source(conn: sqlite3.Connection, ledger_path: Path, source: Dict[st
         """,
         (source_path, 0, size_bytes, mtime_ns, offset_bytes, line_no),
     )
+    _record_source_integrity(conn, source_path)
 
 
 def _catch_up_plain_source(conn: sqlite3.Connection, ledger_path: Path, source: Dict[str, Any]) -> None:
@@ -318,12 +413,21 @@ def _catch_up_plain_source(conn: sqlite3.Connection, ledger_path: Path, source: 
         last_offset = int(row[3] or 0)
         last_line_no = int(row[4] or 0)
     except Exception:
-        _reindex_source(conn, abs_path, source)
+        _reindex_source(conn, ledger_path, source)
         return
     if compressed or size_bytes < last_offset or prev_mtime_ns > mtime_ns:
-        _reindex_source(conn, abs_path, source)
+        _reindex_source(conn, ledger_path, source)
         return
-    if size_bytes == prev_size and mtime_ns == prev_mtime_ns:
+    if size_bytes <= last_offset:
+        indexed_count, indexed_max_line = _plain_source_index_bounds(conn, source_path)
+        if indexed_count > last_line_no or indexed_max_line > last_line_no:
+            _reindex_source(conn, ledger_path, source)
+            return
+        if size_bytes == prev_size and mtime_ns == prev_mtime_ns:
+            return
+        _reindex_source(conn, ledger_path, source)
+        return
+    elif size_bytes == prev_size and mtime_ns == prev_mtime_ns:
         return
     line_no = last_line_no
     with abs_path.open("rb") as handle:
@@ -357,60 +461,119 @@ def _catch_up_plain_source(conn: sqlite3.Connection, ledger_path: Path, source: 
         """,
         (source_path, 0, size_bytes, mtime_ns, last_offset, line_no),
     )
+    _record_source_integrity(conn, source_path)
 
 
-def catch_up_ledger_index(ledger_path: Path) -> None:
+def catch_up_ledger_index(ledger_path: Path, *, force_rebuild: bool = False) -> None:
     index_path = _index_path_for_ledger(ledger_path)
-    conn = _connect(index_path)
+    index_lock = acquire_lockfile(_index_lock_path_for_ledger(ledger_path), blocking=True)
     try:
-        _ensure_schema(conn)
-        sources = list_ledger_sources(ledger_path.parent)
-        current_paths = {str(source.get("path") or "").strip() for source in sources}
-        stale_rows = conn.execute("SELECT source_path FROM source_state").fetchall()
-        for row in stale_rows:
-            source_path = str(row[0] or "").strip()
-            if source_path and source_path not in current_paths:
-                _delete_source_rows(conn, source_path)
-
-        for source in sources:
-            source_path = str(source.get("path") or "").strip()
-            abs_path = source.get("abs_path")
-            compressed = bool(source.get("compressed"))
-            if not source_path or not isinstance(abs_path, Path) or not abs_path.exists():
-                continue
-            row = conn.execute(
-                "SELECT compressed, file_size, mtime_ns, last_offset_bytes, last_line_no FROM source_state WHERE source_path = ?",
-                (source_path,),
-            ).fetchone()
-            size_bytes, mtime_ns = _source_stat(abs_path)
-            if row is None:
-                _reindex_source(conn, ledger_path, source)
-                continue
+        if force_rebuild:
+            _discard_index_files(index_path)
+        for attempt in range(2):
+            conn: Optional[sqlite3.Connection] = None
             try:
-                prev_compressed = bool(int(row[0] or 0))
-                prev_size = int(row[1] or 0)
-                prev_mtime_ns = int(row[2] or 0)
-            except Exception:
-                _reindex_source(conn, ledger_path, source)
-                continue
-            if compressed:
-                if prev_compressed and prev_size == size_bytes and prev_mtime_ns == mtime_ns:
-                    continue
-                _reindex_source(conn, ledger_path, source)
-                continue
-            if prev_compressed:
-                _reindex_source(conn, ledger_path, source)
-                continue
-            _catch_up_plain_source(conn, ledger_path, source)
-        conn.commit()
+                conn = _connect(index_path)
+                _ensure_schema(conn)
+                sources = list_ledger_sources(ledger_path.parent)
+                current_paths = {str(source.get("path") or "").strip() for source in sources}
+                stale_rows = conn.execute("SELECT source_path FROM source_state").fetchall()
+                for row in stale_rows:
+                    source_path = str(row[0] or "").strip()
+                    if source_path and source_path not in current_paths:
+                        _delete_source_rows(conn, source_path)
+
+                for source in sources:
+                    source_path = str(source.get("path") or "").strip()
+                    abs_path = source.get("abs_path")
+                    compressed = bool(source.get("compressed"))
+                    if not source_path or not isinstance(abs_path, Path) or not abs_path.exists():
+                        continue
+                    row = conn.execute(
+                        "SELECT compressed, file_size, mtime_ns, last_offset_bytes, last_line_no FROM source_state WHERE source_path = ?",
+                        (source_path,),
+                    ).fetchone()
+                    size_bytes, mtime_ns = _source_stat(abs_path)
+                    if row is None:
+                        _reindex_source(conn, ledger_path, source)
+                        continue
+                    try:
+                        prev_compressed = bool(int(row[0] or 0))
+                        prev_size = int(row[1] or 0)
+                        prev_mtime_ns = int(row[2] or 0)
+                        prev_last_line_no = int(row[4] or 0)
+                    except Exception:
+                        _reindex_source(conn, ledger_path, source)
+                        continue
+                    if not _source_index_is_consistent(conn, source_path, last_line_no=prev_last_line_no):
+                        _reindex_source(conn, ledger_path, source)
+                        continue
+                    if compressed:
+                        if prev_compressed and prev_size == size_bytes and prev_mtime_ns == mtime_ns:
+                            continue
+                        _reindex_source(conn, ledger_path, source)
+                        continue
+                    if prev_compressed:
+                        _reindex_source(conn, ledger_path, source)
+                        continue
+                    _catch_up_plain_source(conn, ledger_path, source)
+                conn.commit()
+                return
+            except sqlite3.DatabaseError as exc:
+                if conn is not None:
+                    conn.close()
+                    conn = None
+                if attempt > 0 or not _is_rebuildable_index_error(exc):
+                    raise
+                LOGGER.warning(
+                    "ledger index is corrupt; rebuilding path=%s sqlite_error=%s",
+                    index_path,
+                    getattr(exc, "sqlite_errorname", type(exc).__name__),
+                )
+                _discard_index_files(index_path)
+            finally:
+                if conn is not None:
+                    conn.close()
     finally:
-        conn.close()
+        release_lockfile(index_lock)
+
+
+def _query_ledger_index(
+    ledger_path: Path,
+    operation: Callable[[sqlite3.Connection], _QueryResult],
+) -> _QueryResult:
+    catch_up_ledger_index(ledger_path)
+    index_path = _index_path_for_ledger(ledger_path)
+    for attempt in range(2):
+        conn: Optional[sqlite3.Connection] = None
+        try:
+            conn = _connect(index_path)
+            _ensure_schema(conn)
+            return operation(conn)
+        except sqlite3.DatabaseError as exc:
+            if attempt > 0 or not _is_rebuildable_index_error(exc):
+                raise
+            LOGGER.warning(
+                "ledger index query failed on corrupt data; rebuilding path=%s sqlite_error=%s",
+                index_path,
+                getattr(exc, "sqlite_errorname", type(exc).__name__),
+            )
+        finally:
+            if conn is not None:
+                conn.close()
+        catch_up_ledger_index(ledger_path, force_rebuild=True)
+    raise AssertionError("unreachable")
 
 
 def append_event_to_index(ledger_path: Path, event: Dict[str, Any], *, next_offset_bytes: int) -> None:
     index_path = _index_path_for_ledger(ledger_path)
-    conn = _connect(index_path)
     try:
+        index_lock = acquire_lockfile(_index_lock_path_for_ledger(ledger_path), blocking=False)
+    except LockUnavailableError:
+        return
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = _connect(index_path)
         _ensure_schema(conn)
         source_path = "ledger.jsonl"
         row = conn.execute(
@@ -442,9 +605,12 @@ def append_event_to_index(ledger_path: Path, event: Dict[str, Any], *, next_offs
             """,
             (source_path, 0, size_bytes, mtime_ns, int(next_offset_bytes or 0), last_line_no + 1),
         )
+        _record_source_integrity(conn, source_path)
         conn.commit()
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+        release_lockfile(index_lock)
 
 
 def _read_event_from_source(group_path: Path, *, source_path: str, line_no: int, offset_bytes: int) -> Optional[Dict[str, Any]]:
@@ -494,22 +660,18 @@ def lookup_event_by_id(ledger_path: Path, event_id: str) -> Optional[Dict[str, A
     wanted = str(event_id or "").strip()
     if not wanted:
         return None
-    catch_up_ledger_index(ledger_path)
-    index_path = _index_path_for_ledger(ledger_path)
-    conn = _connect(index_path)
-    try:
-        _ensure_schema(conn)
-        row = conn.execute(
+    row = _query_ledger_index(
+        ledger_path,
+        lambda conn: conn.execute(
             "SELECT source_path, line_no, offset_bytes FROM events WHERE event_id = ?",
             (wanted,),
-        ).fetchone()
-        if row is None:
-            return None
-        source_path = str(row[0] or "").strip()
-        line_no = int(row[1] or 0)
-        offset_bytes = int(row[2] or 0)
-    finally:
-        conn.close()
+        ).fetchone(),
+    )
+    if row is None:
+        return None
+    source_path = str(row[0] or "").strip()
+    line_no = int(row[1] or 0)
+    offset_bytes = int(row[2] or 0)
     return _read_event_from_source(ledger_path.parent, source_path=source_path, line_no=line_no, offset_bytes=offset_bytes)
 
 
@@ -522,18 +684,14 @@ def lookup_events_by_ids(ledger_path: Path, event_ids: list[str]) -> list[Option
     if not unique_ids:
         return [None for _ in wanted_ids]
 
-    catch_up_ledger_index(ledger_path)
-    index_path = _index_path_for_ledger(ledger_path)
-    conn = _connect(index_path)
-    try:
-        _ensure_schema(conn)
-        placeholders = ", ".join("?" for _ in unique_ids)
-        rows = conn.execute(
+    placeholders = ", ".join("?" for _ in unique_ids)
+    rows = _query_ledger_index(
+        ledger_path,
+        lambda conn: conn.execute(
             f"SELECT event_id, source_path, line_no, offset_bytes FROM events WHERE event_id IN ({placeholders})",
             tuple(unique_ids),
-        ).fetchall()
-    finally:
-        conn.close()
+        ).fetchall(),
+    )
 
     found: dict[str, Optional[Dict[str, Any]]] = {}
     for row in rows:
@@ -557,11 +715,7 @@ def has_chat_ack_indexed(ledger_path: Path, *, event_id: str, actor_id: str) -> 
     actor = str(actor_id or "").strip()
     if not wanted:
         return False
-    catch_up_ledger_index(ledger_path)
-    index_path = _index_path_for_ledger(ledger_path)
-    conn = _connect(index_path)
-    try:
-        _ensure_schema(conn)
+    def query(conn: sqlite3.Connection) -> bool:
         if actor:
             row = conn.execute(
                 "SELECT 1 FROM chat_ack WHERE event_id = ? AND actor_id = ? LIMIT 1",
@@ -573,8 +727,69 @@ def has_chat_ack_indexed(ledger_path: Path, *, event_id: str, actor_id: str) -> 
                 (wanted,),
             ).fetchone()
         return row is not None
-    finally:
-        conn.close()
+
+    return _query_ledger_index(ledger_path, query)
+
+
+def _search_event_ids(
+    conn: sqlite3.Connection,
+    *,
+    allowed_kinds: set[str],
+    query: str = "",
+    by_filter: str = "",
+    before_id: str = "",
+    after_id: str = "",
+    limit: int = 50,
+) -> tuple[list[str], bool]:
+    params: list[Any] = []
+    where: list[str] = []
+    if allowed_kinds:
+        where.append("kind IN (%s)" % ", ".join("?" for _ in allowed_kinds))
+        params.extend(sorted(allowed_kinds))
+    if by_filter:
+        where.append("by_actor = ?")
+        params.append(str(by_filter or "").strip())
+    query_lower = str(query or "").strip().lower()
+    join_sql = ""
+    if query_lower:
+        join_sql = "JOIN event_search es ON es.event_id = events.event_id"
+        where.append("es.searchable_text LIKE ?")
+        params.append(f"%{query_lower}%")
+
+    anchor_id = str(before_id or after_id or "").strip()
+    order_dir = "DESC"
+    if anchor_id:
+        anchor = conn.execute(
+            "SELECT ts, source_seq, line_no FROM events WHERE event_id = ?",
+            (anchor_id,),
+        ).fetchone()
+        if anchor is None:
+            return [], False
+        anchor_ts = str(anchor[0] or "").strip()
+        anchor_seq = int(anchor[1] or 0)
+        anchor_line = int(anchor[2] or 0)
+        if before_id:
+            where.append("(ts < ? OR (ts = ? AND (source_seq < ? OR (source_seq = ? AND line_no < ?))))")
+            params.extend([anchor_ts, anchor_ts, anchor_seq, anchor_seq, anchor_line])
+        else:
+            where.append("(ts > ? OR (ts = ? AND (source_seq > ? OR (source_seq = ? AND line_no > ?))))")
+            params.extend([anchor_ts, anchor_ts, anchor_seq, anchor_seq, anchor_line])
+            order_dir = "ASC"
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = (
+        f"SELECT events.event_id FROM events {join_sql} {where_sql} "
+        f"ORDER BY events.ts {order_dir}, events.source_seq {order_dir}, events.line_no {order_dir} "
+        "LIMIT ?"
+    )
+    wanted_limit = max(1, int(limit or 50))
+    rows = conn.execute(sql, tuple([*params, wanted_limit + 1])).fetchall()
+    event_ids = [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
+    has_more = len(event_ids) > wanted_limit
+    event_ids = event_ids[:wanted_limit]
+    if before_id:
+        event_ids.reverse()
+    return event_ids, has_more
 
 
 def search_event_ids_indexed(
@@ -587,62 +802,15 @@ def search_event_ids_indexed(
     after_id: str = "",
     limit: int = 50,
 ) -> tuple[list[str], bool]:
-    catch_up_ledger_index(ledger_path)
-    index_path = _index_path_for_ledger(ledger_path)
-    conn = _connect(index_path)
-    try:
-        _ensure_schema(conn)
-        params: list[Any] = []
-        where: list[str] = []
-        if allowed_kinds:
-            where.append("kind IN (%s)" % ", ".join("?" for _ in allowed_kinds))
-            params.extend(sorted(allowed_kinds))
-        if by_filter:
-            where.append("by_actor = ?")
-            params.append(str(by_filter or "").strip())
-        query_lower = str(query or "").strip().lower()
-        join_sql = ""
-        if query_lower:
-            join_sql = "JOIN event_search es ON es.event_id = events.event_id"
-            where.append("es.searchable_text LIKE ?")
-            params.append(f"%{query_lower}%")
-
-        anchor_id = str(before_id or after_id or "").strip()
-        comparator = ""
-        order_dir = "DESC"
-        if anchor_id:
-            anchor = conn.execute(
-                "SELECT ts, source_seq, line_no FROM events WHERE event_id = ?",
-                (anchor_id,),
-            ).fetchone()
-            if anchor is None:
-                return [], False
-            anchor_ts = str(anchor[0] or "").strip()
-            anchor_seq = int(anchor[1] or 0)
-            anchor_line = int(anchor[2] or 0)
-            if before_id:
-                comparator = "(ts < ? OR (ts = ? AND (source_seq < ? OR (source_seq = ? AND line_no < ?))))"
-                params.extend([anchor_ts, anchor_ts, anchor_seq, anchor_seq, anchor_line])
-                order_dir = "DESC"
-            else:
-                comparator = "(ts > ? OR (ts = ? AND (source_seq > ? OR (source_seq = ? AND line_no > ?))))"
-                params.extend([anchor_ts, anchor_ts, anchor_seq, anchor_seq, anchor_line])
-                order_dir = "ASC"
-            where.append(comparator)
-
-        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-        sql = (
-            f"SELECT events.event_id FROM events {join_sql} {where_sql} "
-            f"ORDER BY events.ts {order_dir}, events.source_seq {order_dir}, events.line_no {order_dir} "
-            "LIMIT ?"
-        )
-        query_params = [*params, max(1, int(limit or 50)) + 1]
-        rows = conn.execute(sql, tuple(query_params)).fetchall()
-        event_ids = [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
-        has_more = len(event_ids) > max(1, int(limit or 50))
-        event_ids = event_ids[: max(1, int(limit or 50))]
-        if before_id:
-            event_ids.reverse()
-        return event_ids, has_more
-    finally:
-        conn.close()
+    return _query_ledger_index(
+        ledger_path,
+        lambda conn: _search_event_ids(
+            conn,
+            allowed_kinds=allowed_kinds,
+            query=query,
+            by_filter=by_filter,
+            before_id=before_id,
+            after_id=after_id,
+            limit=limit,
+        ),
+    )

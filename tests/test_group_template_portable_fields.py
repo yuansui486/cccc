@@ -66,8 +66,8 @@ class TestGroupTemplatePortableFields(unittest.TestCase):
                 actors = parsed.get("actors") if isinstance(parsed.get("actors"), list) else []
                 self.assertEqual(actors[0].get("capability_autoload"), ["pack:space", "skill:anthropic:triage"])
                 settings = parsed.get("settings") if isinstance(parsed.get("settings"), dict) else {}
-                self.assertTrue(bool(settings.get("desktop_pet_enabled")))
                 self.assertTrue(bool(settings.get("panorama_enabled")))
+                self.assertNotIn("desktop_pet_enabled", settings)
         finally:
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)
@@ -184,7 +184,7 @@ automation:
                 self.assertIn("peer1", diff.get("actors_update") or [])
                 settings_changed = diff.get("settings_changed") if isinstance(diff.get("settings_changed"), dict) else {}
                 self.assertIn("panorama_enabled", settings_changed)
-                self.assertIn("desktop_pet_enabled", settings_changed)
+                self.assertNotIn("desktop_pet_enabled", settings_changed)
         finally:
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)
@@ -250,7 +250,7 @@ automation:
                 )
                 features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
                 self.assertTrue(bool(features.get("panorama_enabled")))
-                self.assertTrue(bool(features.get("desktop_pet_enabled")))
+                self.assertNotIn("desktop_pet_enabled", features)
         finally:
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)

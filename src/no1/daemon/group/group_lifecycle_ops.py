@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.actors import list_actors, update_actor
+from ...kernel.actors import is_internal_actor, is_supported_internal_actor, list_actors, update_actor
 from ...kernel.context import ContextStorage
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
@@ -27,9 +27,7 @@ from ..assistants.voice_secretary_runtime_ops import (
     restore_voice_secretary_actor_state,
     sync_voice_secretary_actor_from_foreman,
 )
-from ..pet.pet_runtime_ops import capture_pet_actor_state, restore_pet_actor_state, sync_pet_actor_from_foreman
-from ..pet.review_scheduler import cancel_pet_review, request_pet_review
-from ..pet.profile_refresh import maybe_request_pet_profile_refresh
+from ..messaging.turn_provenance import invalidate_group_turn_grants
 
 logger = logging.getLogger(__name__)
 
@@ -86,29 +84,6 @@ def handle_group_start(
             caller_id=caller_id,
             is_admin=is_admin,
         )
-        pet_state_before = capture_pet_actor_state(group, load_actor_private_env=load_actor_private_env)
-        try:
-            sync_pet_actor_from_foreman(
-                group,
-                effective_runner_kind=effective_runner_kind,
-                load_actor_private_env=load_actor_private_env,
-                update_actor_private_env=update_actor_private_env,
-                delete_actor_private_env=delete_actor_private_env,
-                resolve_linked_actor_before_start=resolve_before_start,
-                caller_id=str(args.get("caller_id") or "").strip(),
-                is_admin=coerce_bool(args.get("is_admin"), default=False),
-            )
-        except Exception as e:
-            logger.warning("Pet actor sync skipped for %s during group start: %s", group.group_id, e)
-            try:
-                restore_pet_actor_state(
-                    group,
-                    None if str(e).strip() == "desktop pet requires a foreman actor" else pet_state_before,
-                    update_actor_private_env=update_actor_private_env,
-                    delete_actor_private_env=delete_actor_private_env,
-                )
-            except Exception:
-                pass
         voice_state_before = capture_voice_secretary_actor_state(group, load_actor_private_env=load_actor_private_env)
         try:
             sync_voice_secretary_actor_from_foreman(
@@ -139,6 +114,14 @@ def handle_group_start(
                 continue
             aid = str(actor.get("id") or "").strip()
             if not aid:
+                continue
+            if is_internal_actor(actor) and not is_supported_internal_actor(actor):
+                logger.info(
+                    "group start skipped unsupported internal actor group=%s actor=%s kind=%s",
+                    group.group_id,
+                    aid,
+                    str(actor.get("internal_kind") or "").strip(),
+                )
                 continue
 
             try:
@@ -330,23 +313,6 @@ def handle_group_start(
 
     data: Dict[str, Any] = {"started": started}
     event = append_event(group.ledger_path, kind="group.start", group_id=group.group_id, scope_key="", by=by, data=data)
-    try:
-        request_pet_review(
-            group.group_id,
-            reason="group_start",
-            source_event_id=str(event.get("id") or "").strip(),
-            immediate=True,
-        )
-    except Exception:
-        pass
-    try:
-        maybe_request_pet_profile_refresh(
-            group.group_id,
-            source_event_id=str(event.get("id") or "").strip(),
-            reason="group_start",
-        )
-    except Exception:
-        pass
     result: Dict[str, Any] = {"group_id": group.group_id, "started": started, "event": event}
     return DaemonResponse(ok=True, result=result)
 
@@ -367,6 +333,11 @@ def handle_group_stop(
     try:
         require_group_permission(group, by=by, action="group.stop")
         actors = list_actors(group)
+        actor_ids = [
+            str(actor.get("id") or "").strip()
+            for actor in actors
+            if isinstance(actor, dict) and str(actor.get("id") or "").strip()
+        ]
         stopped: list[str] = []
         for actor in actors:
             if not isinstance(actor, dict):
@@ -380,10 +351,13 @@ def handle_group_stop(
             except Exception:
                 pass
 
-        pty_runner.SUPERVISOR.stop_group(group_id=group.group_id)
-        headless_runner.SUPERVISOR.stop_group(group_id=group.group_id)
-        codex_app_supervisor.stop_group(group_id=group.group_id)
-        claude_app_supervisor.stop_group(group_id=group.group_id)
+        try:
+            pty_runner.SUPERVISOR.stop_group(group_id=group.group_id)
+            headless_runner.SUPERVISOR.stop_group(group_id=group.group_id)
+            codex_app_supervisor.stop_group(group_id=group.group_id)
+            claude_app_supervisor.stop_group(group_id=group.group_id)
+        finally:
+            invalidate_group_turn_grants(group, actor_ids, reason="group_stop")
 
         try:
             pdir = pty_state_dir_for_group(group.group_id)
@@ -411,7 +385,6 @@ def handle_group_stop(
         group.save()
     except Exception:
         pass
-    cancel_pet_review(group.group_id)
     event = append_event(group.ledger_path, kind="group.stop", group_id=group.group_id, scope_key="", by=by, data={"stopped": stopped})
     return DaemonResponse(ok=True, result={"group_id": group.group_id, "stopped": stopped, "event": event})
 

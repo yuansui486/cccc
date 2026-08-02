@@ -130,11 +130,12 @@ def compact(group: Group, *, reason: str = "auto", force: bool = False) -> Dict[
     lock = _ledger_lock_path(group)
     lk = acquire_lockfile(lock, blocking=True)
     try:
-        rotation = rotate_active_ledger(group.path, reason=reason)
+        rotation = rotate_active_ledger(group.path, reason=reason, _lock_held=True)
         compressed = compress_sealed_segments(
             group.path,
             keep_recent=max(0, int(cfg.keep_recent_segments_uncompressed or 0)),
             force=force,
+            _lock_held=True,
         )
         if not bool(rotation.get("rotated")) and int(compressed.get("count") or 0) <= 0:
             return {"ok": True, "skipped": True, "reason": str(rotation.get("reason") or "nothing_to_do")}

@@ -30,6 +30,16 @@ class PtySupervisor:
     def tail_output(self, *, group_id: str, actor_id: str, max_bytes: int = 2_000_000) -> bytes:
         return b""
 
+    def history_page(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        before: Optional[int] = None,
+        limit_bytes: int = 64_000,
+    ):
+        return {"data": b"", "start_cursor": 0, "end_cursor": 0, "has_more": False, "cursor_expired": False}
+
     def terminal_override(self, *, group_id: str, actor_id: str):
         return None
 
@@ -58,7 +68,34 @@ class PtySupervisor:
     def stop_all(self) -> None:
         return None
 
-    def attach(self, *, group_id: str, actor_id: str, sock: socket.socket) -> None:
+    def attach(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        sock: socket.socket,
+        since: Optional[int] = None,
+        mode: str = "control",
+        takeover: bool = False,
+    ) -> dict[str, object]:
+        _ = since
+        _ = mode
+        _ = takeover
+        raise RuntimeError(pty_support_error_message() or "PTY runner is not supported in this environment.")
+
+    def reserve_attach(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        sock: socket.socket,
+        since: Optional[int] = None,
+        mode: str = "control",
+        takeover: bool = False,
+    ):
+        _ = since
+        _ = mode
+        _ = takeover
         raise RuntimeError(pty_support_error_message() or "PTY runner is not supported in this environment.")
 
     def bracketed_paste_enabled(self, *, group_id: str, actor_id: str) -> bool:
@@ -75,6 +112,17 @@ class PtySupervisor:
 
     def resize(self, *, group_id: str, actor_id: str, cols: int, rows: int) -> None:
         return None
+
+    def resize_if_writer(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        writer_lease: str,
+        cols: int,
+        rows: int,
+    ) -> bool:
+        return False
 
     def write_input(self, *, group_id: str, actor_id: str, data: bytes) -> bool:
         return False

@@ -144,6 +144,7 @@ export type HeadlessPreviewSession = {
 // Chat message payload
 export type ChatMessageData = {
   text?: string;
+  insight?: string;
   to?: string[];
   priority?: "normal" | "attention";
   reply_required?: boolean;
@@ -177,6 +178,9 @@ export type ChatMessageData = {
   src_event_id?: string;
   dst_group_id?: string;
   dst_to?: string[];
+  dst_event_id?: string;
+  remote_event_id?: string;
+  suggested_user_message?: string;
   activities?: StreamingActivity[];
   refs?: MessageRef[];
   attachments?: MessageAttachment[];
@@ -785,7 +789,6 @@ export type GroupSettings = {
   terminal_transcript_notify_tail: boolean;
   terminal_transcript_notify_lines: number;
 
-  desktop_pet_enabled: boolean;
 };
 
 export type BuiltinAssistantPolicy = {
@@ -795,7 +798,7 @@ export type BuiltinAssistantPolicy = {
 
 export type BuiltinAssistant = {
   assistant_id: string;
-  kind: "pet" | "voice_secretary" | string;
+  kind: "voice_secretary" | string;
   enabled: boolean;
   principal?: string;
   lifecycle: "disabled" | "idle" | "running" | "working" | "waiting" | "failed" | string;
@@ -1123,7 +1126,7 @@ export type WebAccessSession = {
   can_access_global_settings?: boolean;
   runtime_visibility?: {
     peer_runtime?: "hidden" | "visible" | string;
-    pet_runtime?: "hidden" | "visible" | string;
+    assistant_runtime?: "hidden" | "visible" | string;
   };
 };
 

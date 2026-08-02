@@ -124,6 +124,7 @@ Default: `CCCC_HOME=~/.cccc`
 | `actor.restart` | Restart an actor runtime |
 | `actor.remove` | Remove an actor |
 | `actor.activity` | Runtime activity/status snapshot |
+| `actor.delivery.failed` | Failed actor message delivery attempt |
 | `context.sync` | Context/control-plane sync event |
 | `chat.message` | Chat message |
 | `chat.stream` | Progressive stream chunk/update |

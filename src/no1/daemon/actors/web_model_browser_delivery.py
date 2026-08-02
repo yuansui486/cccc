@@ -31,6 +31,14 @@ from ...ports.web_model_browser_sidecar import (
 from ..messaging.actor_turn_rendering import render_actor_event_batch_for_delivery
 from ..messaging.delivery import MCP_REMINDER_LINE
 from ..messaging.experience_reminder import append_experience_reminder, commit_experience_reminder, plan_experience_reminder
+from ..messaging.turn_provenance import (
+    TurnDeliveryBusyError,
+    begin_turn_delivery_attempt,
+    fail_turn_delivery_attempt,
+    finalize_turn_delivery_attempt,
+    terminalize_uncertain_delivery_attempt,
+    turn_delivery_completion_receipt,
+)
 from ..runner_state_ops import read_headless_state, update_headless_state
 from .web_model_runtime_ops import commit_web_model_delivered_turn
 
@@ -258,9 +266,18 @@ def build_web_model_browser_turn_prompt(
     setup_block = f"{setup_seed}\n\n" if setup_seed else ""
     reminder = str(MCP_REMINDER_LINE or "").strip()
     reminder_block = f"{reminder}\n\n" if reminder else ""
+    completion_receipt = turn.get("completion_receipt") if isinstance(turn.get("completion_receipt"), dict) else {}
+    receipt_block = (
+        "[onecolleague] completion_receipt="
+        + json.dumps(completion_receipt, ensure_ascii=True, separators=(",", ":"))
+        + "\n"
+        if completion_receipt
+        else ""
+    )
     return (
         f"{setup_block}"
         f"[onecolleague] Browser batch {delivery_id} events={event_label} actor={actor_id}\n"
+        f"{receipt_block}"
         f"{reminder_block}"
         f"{coalesced_text}"
     )
@@ -296,27 +313,6 @@ def _record_delivery_submitting(
         pass
 
 
-def _is_transient_projected_browser_error(error: str) -> bool:
-    lowered = str(error or "").lower()
-    if any(
-        fragment in lowered
-        for fragment in (
-            "target page, context or browser has been closed",
-            "browser command timed out",
-            "page.evaluate",
-            "page.goto",
-            "page.reload",
-            "locator.click",
-            "element is not visible",
-            "composer input was found but could not be focused",
-            "chatgpt prompt insertion did not stick",
-            "chatgpt prompt was inserted but did not submit",
-        )
-    ):
-        return True
-    return False
-
-
 def _is_submission_ambiguous_error(error: str) -> bool:
     lowered = str(error or "").lower()
     return (
@@ -350,6 +346,68 @@ def _append_delivery_event(
         )
     except Exception:
         return None
+
+
+def _finalize_accepted_browser_attempt(
+    *,
+    group: Any,
+    actor_id: str,
+    turn: Dict[str, Any],
+    attempt: Any,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(attempt, dict):
+        return None
+    try:
+        finalize_turn_delivery_attempt(group, actor_id=actor_id, attempt=attempt)
+        return None
+    except Exception as exc:
+        terminalize_uncertain_delivery_attempt(
+            group,
+            actor_id=actor_id,
+            attempt=attempt,
+            reason="web_model_browser_finalize_uncertain",
+        )
+        update_headless_state(
+            group.group_id,
+            actor_id,
+            status="waiting",
+            active_turn_id="",
+            latest_event_id="",
+        )
+        try:
+            record_chatgpt_browser_state(
+                group.group_id,
+                actor_id,
+                {
+                    "last_delivery_at": utc_now_iso(),
+                    "last_turn_id": str(turn.get("turn_id") or ""),
+                    "last_event_ids": list(turn.get("event_ids") or []),
+                    "last_delivery_id": str(turn.get("delivery_id") or ""),
+                    "last_delivery_status": "failed",
+                    "last_error": "grant_finalize_uncertain",
+                },
+            )
+        except Exception:
+            pass
+        event = _append_delivery_event(
+            group=group,
+            actor_id=actor_id,
+            turn=turn,
+            kind="web_model.browser_delivery.failed",
+            data={
+                "delivery_id": str(turn.get("delivery_id") or ""),
+                "accepted": True,
+                "retryable": False,
+                "error": f"grant finalize uncertain: {exc}",
+            },
+        )
+        return {
+            "ok": False,
+            "status": "delivery_finalize_uncertain",
+            "error": "grant finalize uncertain after browser acceptance",
+            "event": event,
+            "reschedule": False,
+        }
 
 
 def _has_unread_work(group: Any, actor_id: str) -> bool:
@@ -520,6 +578,20 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
     bootstrap_seed = _bootstrap_seed_required(group.group_id, aid, target_url=target_url, seed_digest=seed_digest)
     bootstrap_seed_text = candidate_seed_text if bootstrap_seed else ""
     delivery_id = str(turn.get("delivery_id") or "")
+    try:
+        delivery_attempt = begin_turn_delivery_attempt(
+            group,
+            actor_id=aid,
+            event_ids=turn.get("event_ids") or [],
+            binding={
+                "transport": "web_model_browser",
+                "turn_id": str(turn.get("turn_id") or ""),
+                "delivery_id": delivery_id,
+            },
+        )
+    except TurnDeliveryBusyError as exc:
+        return {"ok": False, "status": "busy", "error": str(exc), "reschedule": True}
+    turn["completion_receipt"] = turn_delivery_completion_receipt(delivery_attempt)
     delivery_timeout_seconds = _timeout_seconds(actor)
     _record_delivery_submitting(
         group.group_id,
@@ -549,6 +621,7 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
     )
     prompt = append_experience_reminder(prompt, experience_decision)
     browser_surface: Dict[str, Any] = {}
+    submission_uncertain = False
     try:
         from .web_model_browser_session import close_web_model_chatgpt_browser_session, submit_prompt_via_web_model_chatgpt_browser_session
 
@@ -575,30 +648,18 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
                 maximum=120.0,
             ),
         }
-        try:
-            delivery_result = submit_prompt_via_web_model_chatgpt_browser_session(**submit_kwargs)
-        except Exception as first_exc:
-            first_error = str(first_exc)
-            if not _is_transient_projected_browser_error(first_error):
-                raise
-            try:
-                close_web_model_chatgpt_browser_session(group_id=group.group_id, actor_id=aid)
-            except Exception:
-                pass
-            _record_delivery_submitting(
-                group.group_id,
-                aid,
-                turn=turn,
-                delivery_id=delivery_id,
-                timeout_seconds=delivery_timeout_seconds,
-            )
-            try:
-                delivery_result = submit_prompt_via_web_model_chatgpt_browser_session(**submit_kwargs)
-            except Exception as second_exc:
-                raise RuntimeError(f"{second_exc}; retry_after_transient_error={first_error[:300]}") from second_exc
+        delivery_result = submit_prompt_via_web_model_chatgpt_browser_session(**submit_kwargs)
         browser_surface = delivery_result.get("browser_surface") if isinstance(delivery_result.get("browser_surface"), dict) else {}
     except Exception as exc:
-        delivery_result = {"ok": False, "error": str(exc)}
+        submission_uncertain = True
+        try:
+            close_web_model_chatgpt_browser_session(group_id=group.group_id, actor_id=aid)
+        except Exception:
+            pass
+        delivery_result = {
+            "ok": False,
+            "error": f"{exc}; submission_verification=ambiguous",
+        }
 
     ok = bool(delivery_result.get("ok", True))
     browser_result = delivery_result.get("browser") if isinstance(delivery_result.get("browser"), dict) else {}
@@ -638,6 +699,14 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
     if pending_conversation_url:
         pending_delivery_id = str(delivery_result.get("delivery_id") or turn.get("delivery_id") or "")
         commit = commit_web_model_delivered_turn(group, actor_id=aid, turn=turn, by=aid)
+        finalize_failure = _finalize_accepted_browser_attempt(
+            group=group,
+            actor_id=aid,
+            turn=turn,
+            attempt=delivery_attempt,
+        )
+        if finalize_failure is not None:
+            return finalize_failure
         if bool(commit.get("ok")) and bool(commit.get("cursor_committed")):
             commit_experience_reminder(group, experience_decision)
         pending_seed_state = (
@@ -753,6 +822,14 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
         except Exception:
             pass
         commit = commit_web_model_delivered_turn(group, actor_id=aid, turn=turn, by=aid)
+        finalize_failure = _finalize_accepted_browser_attempt(
+            group=group,
+            actor_id=aid,
+            turn=turn,
+            attempt=delivery_attempt,
+        )
+        if finalize_failure is not None:
+            return finalize_failure
         if bool(commit.get("ok")) and bool(commit.get("cursor_committed")):
             commit_experience_reminder(group, experience_decision)
         update_headless_state(
@@ -839,7 +916,22 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
         }
 
     error = str(delivery_result.get("error") or "browser delivery failed")
-    if _is_submission_ambiguous_error(error):
+    if isinstance(delivery_attempt, dict):
+        if submission_uncertain:
+            terminalize_uncertain_delivery_attempt(
+                group,
+                actor_id=aid,
+                attempt=delivery_attempt,
+                reason="web_model_browser_submission_uncertain",
+            )
+        else:
+            fail_turn_delivery_attempt(
+                group,
+                actor_id=aid,
+                attempt=delivery_attempt,
+                reason="web_model_browser_delivery_not_verified",
+            )
+    if submission_uncertain or _is_submission_ambiguous_error(error):
         delivery_id = str(delivery_result.get("delivery_id") or turn.get("delivery_id") or "")
         ambiguous_browser = delivery_result.get("browser") if isinstance(delivery_result.get("browser"), dict) else {}
         ambiguous_evidence = str(ambiguous_browser.get("submission_evidence") or "submit_unverified").strip()
@@ -908,6 +1000,7 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
             "cursor_committed": bool(commit.get("cursor_committed")),
             "commit": commit,
             "event": event,
+            "reschedule": False,
         }
 
     commit = commit_web_model_delivered_turn(group, actor_id=aid, turn=turn, by="system")

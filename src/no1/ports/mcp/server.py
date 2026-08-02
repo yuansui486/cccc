@@ -5,6 +5,7 @@ Static MCP surface (role and capability-pack visibility may hide some tools):
 - onecolleague_help / onecolleague_bootstrap / onecolleague_project_info
 - onecolleague_inbox_list / onecolleague_inbox_mark_read
 - onecolleague_message_send / onecolleague_message_reply
+- onecolleague_group_bridge_session_send
 - onecolleague_file / onecolleague_repo / onecolleague_repo_edit / onecolleague_apply_patch / onecolleague_shell / onecolleague_exec_command / onecolleague_write_stdin / onecolleague_git / onecolleague_voice_secretary_document / onecolleague_voice_secretary_request / onecolleague_group / onecolleague_actor / onecolleague_runtime_list
 - onecolleague_capability_search / onecolleague_capability_enable / onecolleague_capability_state / onecolleague_capability_install / onecolleague_capability_use
 - onecolleague_space / onecolleague_automation
@@ -23,20 +24,24 @@ from __future__ import annotations
 import base64
 import json
 import os
+import secrets
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Kernel/util imports needed by routing
-from ...kernel.actors import find_actor, get_effective_role, is_pet_actor, is_voice_secretary_actor
+from ...kernel.actors import find_actor, get_effective_role, is_internal_actor, is_voice_secretary_actor
 from ...kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ...kernel.group import load_group
 from ...kernel.capabilities import (
-    BUILTIN_CAPABILITY_PACKS,
     CAPABILITY_ADMIN_TOOLS,
     CORE_ADMIN_TOOLS,
+    LOCAL_COMPUTER_CONTROL_TOOLS,
     WEB_MODEL_CORE_TOOLS,
+    WEB_MODEL_DENIED_CAPABILITY_TOOLS,
+    WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS,
     resolve_visible_tool_names,
     web_model_advertised_tool_names,
 )
@@ -54,6 +59,12 @@ from .common import (
     _resolve_group_id,
     _resolve_self_actor_id,
     _runtime_context,
+)
+from .ownership import (
+    MCP_TOOL_PRIMARY_OWNERS,
+    MCP_TOOL_SURFACE_METADATA,
+    MCPToolOwner,
+    resolve_mcp_tool_owner,
 )
 from .toolspecs import (
     CANONICAL_MCP_TOOLS,
@@ -84,6 +95,13 @@ from .handlers.onecolleague_messaging import (  # noqa: F401
     message_send,
     tracked_send,
 )
+from .actor_authority import ActorMessageAuthority, _issue_actor_message_authority
+from .group_bridge import (
+    group_bridge_session_send,
+    remote_delivery_status,
+    remote_send,
+    require_local_runtime_binding,
+)  # noqa: F401
 from .handlers.onecolleague_repo import (  # noqa: F401
     apply_codex_patch_tool,
     exec_command_tool,
@@ -298,26 +316,98 @@ _WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES = frozenset(
 _WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES = frozenset(
     web_model_advertised_tool_names(_BUILTIN_MCP_TOOL_NAMES, actor_role="foreman")
 )
-_WEB_MODEL_PACK_TOOL_NAMES = frozenset(
-    str(name or "").strip()
-    for name in set().union(*(set(pack.get("tool_names") or ()) for pack in BUILTIN_CAPABILITY_PACKS.values()))
-    if str(name or "").strip() in _BUILTIN_MCP_TOOL_NAMES
-)
 _WEB_MODEL_PEER_ALLOWED_TOOL_NAMES = frozenset(WEB_MODEL_CORE_TOOLS)
-_BUILTIN_MCP_TOOL_DISPLAY_NAMES = frozenset(_display_tool_name(name) for name in _BUILTIN_MCP_TOOL_NAMES)
-_CAPABILITY_USE_NESTED_BUILTIN_CALL: ContextVar[bool] = ContextVar(
+_WEB_MODEL_HARD_DENIED_TOOLS = frozenset(WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS) | frozenset(
+    WEB_MODEL_DENIED_CAPABILITY_TOOLS
+)
+_TOOL_CALL_CERTIFICATE_SEAL = object()
+_TOOL_CALL_SESSION_ID = secrets.token_hex(24)
+_CAPABILITY_USE_NESTED_BUILTIN_CALL: ContextVar[Optional[str]] = ContextVar(
     "onecolleague_capability_use_nested_builtin_call",
-    default=False,
+    default=None,
 )
 
 
 @contextmanager
-def capability_use_nested_builtin_call_scope():
-    token = _CAPABILITY_USE_NESTED_BUILTIN_CALL.set(True)
+def capability_use_nested_builtin_call_scope(capability_id: str = ""):
+    token = _CAPABILITY_USE_NESTED_BUILTIN_CALL.set(str(capability_id or "").strip())
     try:
         yield
     finally:
         _CAPABILITY_USE_NESTED_BUILTIN_CALL.reset(token)
+
+
+def _current_capability_state(name: str) -> tuple[Dict[str, Any], str]:
+    runtime_ctx = _runtime_context()
+    gid = str(runtime_ctx.group_id or "").strip()
+    aid = str(runtime_ctx.actor_id or "").strip()
+    if not gid or not aid:
+        raise MCPError(code="capability_tool_not_found", message=f"tool is not currently admitted: {name}")
+    try:
+        state = _call_daemon_or_raise(
+            {
+                "op": "capability_state",
+                "args": {"group_id": gid, "actor_id": aid, "by": aid},
+            },
+            timeout_s=4.0,
+        )
+    except Exception as e:
+        raise MCPError(code="capability_tool_not_found", message=f"tool admission unavailable: {name}") from e
+    revision = str(state.get("admission_fingerprint") or "") if isinstance(state, dict) else ""
+    if not revision:
+        raise MCPError(code="capability_tool_not_found", message=f"tool admission revision unavailable: {name}")
+    return state, revision
+
+
+def _authorize_builtin_capability_tool_call(name: str) -> tuple[str, str]:
+    owner = resolve_mcp_tool_owner(name)
+    nested_capability_id = _CAPABILITY_USE_NESTED_BUILTIN_CALL.get()
+    if owner is None:
+        if name in _BUILTIN_MCP_TOOL_NAMES:
+            raise MCPError(code="capability_tool_not_found", message=f"canonical tool has no primary owner: {name}")
+        state, revision = _current_capability_state(name)
+        dynamic_tools = state.get("dynamic_tools") if isinstance(state.get("dynamic_tools"), list) else []
+        dynamic_names = {
+            str(item.get("name") or "").strip()
+            for item in dynamic_tools
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        }
+        if name in dynamic_names:
+            return f"dynamic:{name}", revision
+        raise MCPError(code="capability_tool_not_found", message=f"dynamic tool is not currently admitted: {name}")
+    if owner.kind == "disabled":
+        code = "capability_tool_not_found" if nested_capability_id is not None else "permission_denied"
+        raise MCPError(code=code, message=f"tool is disabled: {name}")
+    if owner.kind == "product":
+        if nested_capability_id is not None:
+            raise MCPError(code="capability_tool_not_found", message=f"tool is not a capability target: {name}")
+        return f"product:{owner.owner_id}", f"product:{owner.owner_id}"
+    if owner.kind == "core":
+        if nested_capability_id in {None, "core"}:
+            return "core", "core"
+        raise MCPError(
+            code="capability_tool_not_found",
+            message=f"capability does not grant core tool: {name}",
+            details={"capability_id": nested_capability_id, "tool_name": name},
+        )
+    state, revision = _current_capability_state(name)
+    raw_grants = state.get("builtin_tool_grants") if isinstance(state, dict) else {}
+    granted = {
+        str(item or "").strip()
+        for item in (raw_grants.get(name) if isinstance(raw_grants, dict) and isinstance(raw_grants.get(name), list) else [])
+        if str(item or "").strip()
+    }
+    if nested_capability_id is not None:
+        if nested_capability_id == owner.owner_id and nested_capability_id in granted:
+            return nested_capability_id, revision
+        raise MCPError(
+            code="capability_tool_not_found",
+            message=f"capability does not currently grant builtin tool: {name}",
+            details={"capability_id": nested_capability_id, "tool_name": name},
+        )
+    if owner.owner_id in granted:
+        return owner.owner_id, revision
+    raise MCPError(code="capability_tool_not_found", message=f"tool is not currently admitted: {name}")
 
 
 def _argument_or_default(arguments: Dict[str, Any], key: str, default: Any) -> Any:
@@ -346,15 +436,8 @@ def _require_web_model_actor(group_id: str, actor_id: str) -> None:
 
 
 def _authorize_web_model_builtin_tool_call(name: str) -> None:
-    """Keep Web Model schema stable while enforcing actor role at call time."""
+    """Restrict Web Model calls to the actor's closed advertised tool set."""
     tool_name = str(name or "").strip()
-    if tool_name in CODE_MODE_TOOL_ALIAS_NAMES and not code_mode_enabled():
-        raise MCPError(
-            code="code_mode_disabled",
-            message=f"{tool_name} is disabled by ONECOLLEAGUE_WEB_MODEL_CODE_MODE=0",
-        )
-    if tool_name not in _BUILTIN_MCP_TOOL_NAMES:
-        return
     runtime_ctx = _runtime_context()
     gid = str(runtime_ctx.group_id or "").strip()
     aid = str(runtime_ctx.actor_id or "").strip()
@@ -371,19 +454,27 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
         return
     if str(actor.get("runtime") or "").strip().lower() != "web_model":
         return
+    if tool_name in _WEB_MODEL_HARD_DENIED_TOOLS:
+        raise MCPError(
+            code="permission_denied",
+            message=f"{tool_name} is unavailable to Web Model actors",
+            details={"group_id": gid, "actor_id": aid, "tool_name": tool_name},
+        )
+    if tool_name in CODE_MODE_TOOL_ALIAS_NAMES and not code_mode_enabled():
+        raise MCPError(
+            code="code_mode_disabled",
+            message=f"{tool_name} is disabled by ONECOLLEAGUE_WEB_MODEL_CODE_MODE=0",
+        )
     try:
         role = str(get_effective_role(group, aid) or "").strip().lower()
     except Exception:
         role = "peer"
-    if (
-        role == "foreman"
-        and bool(_CAPABILITY_USE_NESTED_BUILTIN_CALL.get())
-        and tool_name in _WEB_MODEL_PACK_TOOL_NAMES
-    ):
-        return
-    if role == "foreman" and tool_name in _WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES:
-        return
-    if tool_name in _WEB_MODEL_PEER_ALLOWED_TOOL_NAMES:
+    allowed_names = (
+        _WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES
+        if role == "foreman"
+        else _WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES.intersection(_WEB_MODEL_PEER_ALLOWED_TOOL_NAMES)
+    )
+    if tool_name in allowed_names:
         return
     if role == "foreman":
         raise MCPError(
@@ -398,341 +489,194 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
     )
 
 
-def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if name in {
-        "onecolleague_computer_control_catalog",
-        "onecolleague_computer_recording",
-        "onecolleague_computer_workflow",
-        "onecolleague_computer_run",
-    }:
+_LOCAL_COMPUTER_CONTROL_TOOLS = frozenset(LOCAL_COMPUTER_CONTROL_TOOLS)
+
+
+def _local_computer_control_actor_allowed(runtime_ctx: Any, actor: Any) -> bool:
+    return bool(
+        str(getattr(runtime_ctx, "source", "") or "").strip().lower() == "local_mcp"
+        and str(getattr(runtime_ctx, "group_id", "") or "").strip()
+        and str(getattr(runtime_ctx, "actor_id", "") or "").strip() not in {"", "user"}
+        and isinstance(actor, dict)
+        and not is_internal_actor(actor)
+        and str(actor.get("runtime") or "").strip().lower() != "web_model"
+    )
+
+
+def _authorize_local_computer_control_tool_call(name: str) -> tuple[str, str]:
+    if name not in _LOCAL_COMPUTER_CONTROL_TOOLS:
+        raise MCPError(code="permission_denied", message="unknown computer-control tool")
+    runtime_ctx = _runtime_context()
+    gid = str(runtime_ctx.group_id or "").strip()
+    aid = str(runtime_ctx.actor_id or "").strip()
+    source = str(runtime_ctx.source or "").strip().lower()
+    if source != "local_mcp":
+        raise MCPError(
+            code="permission_denied",
+            message="computer control is restricted to trusted local MCP actors",
+            details={"source": source or "missing", "tool_name": name},
+        )
+    if not gid or not aid or aid == "user":
+        raise MCPError(
+            code="permission_denied",
+            message="computer control requires a bound local actor runtime",
+            details={"group_id": gid, "actor_id": aid},
+        )
+    group = load_group(gid)
+    actor = find_actor(group, aid) if group is not None else None
+    if not isinstance(actor, dict):
+        raise MCPError(code="permission_denied", message="computer control actor binding is invalid")
+    if str(actor.get("runtime") or "").strip().lower() == "web_model":
+        raise MCPError(code="permission_denied", message="computer control is unavailable to Web Model actors")
+    if not _local_computer_control_actor_allowed(runtime_ctx, actor):
+        raise MCPError(code="permission_denied", message="computer control requires a standard local actor")
+    return gid, aid
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolCallCertificate:
+    requested_name: str
+    canonical_name: str
+    principal: str
+    group_id: str
+    actor_id: str
+    source: str
+    session_id: str
+    state_revision: str
+    grant: str
+    nonce: str
+    seal: object
+
+
+_PENDING_TOOL_CALL_CERTIFICATE: ContextVar[Optional[_ToolCallCertificate]] = ContextVar(
+    "onecolleague_pending_tool_call_certificate",
+    default=None,
+)
+
+
+def _dispatch_identity(arguments: Dict[str, Any]) -> tuple[str, str, str, str]:
+    runtime_ctx = _runtime_context()
+    runtime_group_id = str(runtime_ctx.group_id or "").strip()
+    runtime_actor_id = str(runtime_ctx.actor_id or "").strip()
+    argument_group_id = str(arguments.get("group_id") or "").strip()
+    argument_actor_id = str(arguments.get("actor_id") or "").strip()
+    argument_by = str(arguments.get("by") or "").strip()
+    group_id = runtime_group_id or argument_group_id
+    actor_id = runtime_actor_id or argument_actor_id
+    source = str(runtime_ctx.source or "").strip().lower()
+    principal = runtime_actor_id or argument_by or argument_actor_id
+    return principal, group_id, actor_id, source
+
+
+def _trusted_tool_call_context(name: str, arguments: Dict[str, Any]) -> tuple[str, str, str, str]:
+    return _dispatch_identity(arguments)
+
+
+def _authorize_registered_surface(name: str) -> str:
+    owner = resolve_mcp_tool_owner(name)
+    if owner is None or owner.kind != "product":
+        return ""
+    precondition = owner.call_guard
+    runtime_ctx = _runtime_context()
+    if precondition == "local_group_bridge":
+        require_local_runtime_binding()
+    elif precondition == "local_computer_control":
+        _authorize_local_computer_control_tool_call(name)
+    elif precondition == "web_model_actor":
+        _require_web_model_actor(str(runtime_ctx.group_id or ""), str(runtime_ctx.actor_id or ""))
+    elif precondition == "voice_secretary":
+        if str(runtime_ctx.actor_id or "").strip() != VOICE_SECRETARY_ACTOR_ID:
+            raise MCPError(code="permission_denied", message=f"{name} is only available to the voice-secretary actor")
+    elif precondition == "runtime_turn":
+        _require_web_model_actor(str(runtime_ctx.group_id or ""), str(runtime_ctx.actor_id or ""))
+    elif precondition:
+        raise MCPError(code="permission_denied", message=f"unknown tool surface precondition: {precondition}")
+    return precondition
+
+
+def _issue_tool_call_certificate(
+    requested_name: str,
+    canonical_name: str,
+    arguments: Dict[str, Any],
+) -> _ToolCallCertificate:
+    _PENDING_TOOL_CALL_CERTIFICATE.set(None)
+    principal, group_id, actor_id, source = _trusted_tool_call_context(canonical_name, arguments)
+    nested_capability_id = _CAPABILITY_USE_NESTED_BUILTIN_CALL.get()
+    owner = resolve_mcp_tool_owner(canonical_name)
+    if owner is not None and owner.kind == "disabled":
+        grant, state_revision = _authorize_builtin_capability_tool_call(canonical_name)
+    elif nested_capability_id is None and owner is not None and owner.kind == "product":
+        _authorize_web_model_builtin_tool_call(canonical_name)
+        _authorize_registered_surface(canonical_name)
+        grant, state_revision = _authorize_builtin_capability_tool_call(canonical_name)
+    elif nested_capability_id is None:
+        _authorize_web_model_builtin_tool_call(canonical_name)
+        grant, state_revision = _authorize_builtin_capability_tool_call(canonical_name)
+    else:
+        grant, state_revision = _authorize_builtin_capability_tool_call(canonical_name)
+        _authorize_web_model_builtin_tool_call(canonical_name)
+    certificate = _ToolCallCertificate(
+        requested_name=requested_name,
+        canonical_name=canonical_name,
+        principal=principal,
+        group_id=group_id,
+        actor_id=actor_id,
+        source=source,
+        session_id=_TOOL_CALL_SESSION_ID,
+        state_revision=state_revision,
+        grant=grant,
+        nonce=secrets.token_hex(24),
+        seal=_TOOL_CALL_CERTIFICATE_SEAL,
+    )
+    _PENDING_TOOL_CALL_CERTIFICATE.set(certificate)
+    return certificate
+
+
+def _validate_tool_call_certificate(certificate: _ToolCallCertificate, arguments: Dict[str, Any]) -> None:
+    pending = _PENDING_TOOL_CALL_CERTIFICATE.get()
+    _PENDING_TOOL_CALL_CERTIFICATE.set(None)
+    if pending is not certificate:
+        raise MCPError(code="permission_denied", message="tool call certificate is not current")
+    if not isinstance(certificate, _ToolCallCertificate) or certificate.seal is not _TOOL_CALL_CERTIFICATE_SEAL:
+        raise MCPError(code="permission_denied", message="invalid tool call certificate")
+    if certificate.session_id != _TOOL_CALL_SESSION_ID:
+        raise MCPError(code="permission_denied", message="tool call certificate belongs to another session")
+    if certificate.canonical_name != canonical_mcp_tool_name(certificate.requested_name):
+        raise MCPError(code="permission_denied", message="tool call certificate name mismatch")
+    current = _dispatch_identity(arguments)
+    bound = (certificate.principal, certificate.group_id, certificate.actor_id, certificate.source)
+    if current != bound:
+        raise MCPError(code="permission_denied", message="tool call certificate runtime binding changed")
+
+
+def _handle_onecolleague_namespace(
+    name: str,
+    arguments: Dict[str, Any],
+    *,
+    actor_message_authority: Optional[ActorMessageAuthority] = None,
+) -> Optional[Dict[str, Any]]:
+    computer_command: Optional[str] = None
+    if name == "onecolleague_computer_control_catalog":
+        computer_command = "catalog"
+    elif name == "onecolleague_computer_recording":
+        computer_command = "recording"
+    elif name == "onecolleague_computer_workflow":
+        computer_command = "workflow"
+    elif name == "onecolleague_computer_run":
+        computer_command = "run"
+    if computer_command is not None:
+        gid, aid = _authorize_local_computer_control_tool_call(name)
         payload = dict(arguments)
-        payload["group_id"] = _resolve_group_id(arguments)
-        payload["command"] = {
-            "onecolleague_computer_control_catalog": "catalog",
-            "onecolleague_computer_recording": "recording",
-            "onecolleague_computer_workflow": "workflow",
-            "onecolleague_computer_run": "run",
-        }[name]
-        if name != "onecolleague_computer_control_catalog":
-            payload["actor_id"] = _resolve_self_actor_id(arguments)
+        payload["group_id"] = gid
+        payload["actor_id"] = aid
+        payload["caller_surface"] = "local_mcp"
+        payload["command"] = computer_command
         # Computer-control calls are cancellable but intentionally unbounded;
         # large recordings and runs must not be cut off by the IPC bridge.
         timeout = None
         value = _call_daemon_or_raise({"op": "computer_control", "args": payload}, timeout_s=timeout)
         bucket = "recordings" if name == "onecolleague_computer_recording" else "runs"
         return _attach_computer_artifacts(value, group_id=payload["group_id"], bucket=bucket)
-
-    if name == "onecolleague_computer_control_catalog":
-        from ...computer_control.services import get_services
-        from ...paths import ensure_home
-        from ...computer_control.risk import annotate_catalog
-
-        service = get_services(ensure_home())
-        try:
-            tools = annotate_catalog(service.session.catalog_sync())
-        except Exception as exc:
-            raise MCPError(code="windows_mcp_unavailable", message=str(exc)) from exc
-        requested_tool = str(arguments.get("tool") or "").strip()
-        if requested_tool:
-            selected = next((tool for tool in tools if str(tool.get("name") or "") == requested_tool), None)
-            if selected is None:
-                raise MCPError(code="tool_not_found", message=f"Windows-MCP tool not found: {requested_tool}")
-            payload = {"tool": selected}
-        else:
-            payload = {
-                "tools": [
-                    {
-                        "name": tool.get("name"),
-                        "title": tool.get("title") or tool.get("name"),
-                        "risk_level": tool.get("risk_level"),
-                        "description": str(tool.get("description") or "")[:240],
-                    }
-                    for tool in tools
-                ]
-            }
-        return {"ok": True, "result": {"setup": service.setup.status(), "lease": service.lease.status(), **payload}}
-
-    if name == "onecolleague_computer_recording":
-        from ...computer_control.services import get_services
-        from ...paths import ensure_home
-
-        gid = _resolve_group_id(arguments)
-        aid = _resolve_self_actor_id(arguments)
-        action = str(arguments.get("action") or "").strip().lower()
-        service = get_services(ensure_home())
-        recording_id = str(arguments.get("recording_id") or "").strip()
-        try:
-            if action == "start":
-                value = service.recordings.start(
-                    gid,
-                    actor_id=aid,
-                    request_id=str(arguments.get("request_id") or "").strip(),
-                    name=str(arguments.get("name") or "电脑控制工作流"),
-                    description=str(arguments.get("description") or ""),
-                    inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
-                    triggers=arguments.get("triggers") if isinstance(arguments.get("triggers"), list) else [],
-                )
-            elif action == "get":
-                value = service.recordings.get(gid, recording_id, actor_id=aid)
-            elif action == "call":
-                value = service.recordings.call(
-                    gid,
-                    recording_id,
-                    actor_id=aid,
-                    tool=str(arguments.get("tool") or "").strip(),
-                    arguments=arguments.get("arguments") if isinstance(arguments.get("arguments"), dict) else {},
-                    workflow_arguments=arguments.get("workflow_arguments") if isinstance(arguments.get("workflow_arguments"), dict) else None,
-                    record=arguments.get("record") is not False,
-                    title=str(arguments.get("title") or ""),
-                    success_condition=arguments.get("success_condition") or "",
-                    target=arguments.get("target") if isinstance(arguments.get("target"), dict) else None,
-                    element_id=str(arguments.get("element_id") or ""),
-                    timeout_seconds=(
-                        float(arguments["timeout_seconds"])
-                        if arguments.get("timeout_seconds") is not None
-                        else None
-                    ),
-                )
-            elif action == "wait":
-                value = service.recordings.wait(
-                    gid,
-                    recording_id,
-                    actor_id=aid,
-                    duration_seconds=float(arguments.get("duration_seconds") or 0),
-                    title=str(arguments.get("title") or ""),
-                )
-            elif action == "update_step":
-                value = service.recordings.update_step(
-                    gid,
-                    recording_id,
-                    actor_id=aid,
-                    step_id=str(arguments.get("step_id") or ""),
-                    patch=arguments.get("patch") if isinstance(arguments.get("patch"), dict) else {},
-                )
-            elif action == "undo":
-                value = service.recordings.undo(gid, recording_id, actor_id=aid)
-            elif action == "commit":
-                value = service.recordings.commit(gid, recording_id, actor_id=aid)
-            elif action == "abort":
-                value = service.recordings.abort(
-                    gid,
-                    recording_id,
-                    actor_id=aid,
-                    reason=str(arguments.get("reason") or "aborted"),
-                )
-            else:
-                raise MCPError(code="invalid_request", message=f"unsupported recording action: {action}")
-        except MCPError:
-            raise
-        except Exception as exc:
-            raise MCPError(code=str(getattr(exc, "code", "recording_failed")), message=str(exc)) from exc
-        return {"ok": True, "result": value}
-
-    if name == "onecolleague_computer_workflow":
-        from ...computer_control.services import get_services
-        from ...paths import ensure_home
-
-        gid = _resolve_group_id(arguments)
-        service = get_services(ensure_home())
-        action = str(arguments.get("action") or "list").strip().lower()
-        if action == "list":
-            return {"ok": True, "result": {"workflows": service.store.list(gid)}}
-        workflow_id = str(arguments.get("workflow_id") or "").strip()
-        if action == "get":
-            if not workflow_id:
-                raise MCPError(code="invalid_request", message="workflow_id is required for action=get")
-            return {"ok": True, "result": service.store.get(gid, workflow_id, version=arguments.get("version"))}
-        if action == "validate":
-            from ...computer_control.models import WorkflowDefinition
-            from ...computer_control.risk import workflow_risk
-
-            try:
-                definition = WorkflowDefinition.model_validate(arguments.get("definition") or {})
-            except Exception as exc:
-                raise MCPError(code="workflow_invalid", message=str(exc)) from exc
-            return {"ok": True, "result": {"valid": True, "risk": workflow_risk(definition.model_dump(mode="json"))}}
-        if action in {"publish", "trust", "update_triggers"}:
-            from ...computer_control.models import WorkflowDefinition
-
-            aid = _resolve_self_actor_id(arguments)
-            request_id = str(arguments.get("request_id") or "").strip()
-            if not workflow_id:
-                raise MCPError(code="invalid_request", message=f"workflow_id is required for action={action}")
-            try:
-                request = service.requests.require_authorized(gid, request_id, aid)
-            except (KeyError, PermissionError) as exc:
-                raise MCPError(code="computer_control_request_required", message=str(exc)) from exc
-            bound_workflow = str(request.get("workflow_id") or "")
-            if bound_workflow and bound_workflow != workflow_id:
-                raise MCPError(code="permission_denied", message="request is bound to another workflow")
-            current = service.store.get(gid, workflow_id)
-            if action == "publish":
-                if not bool(request.get("allow_publish")):
-                    raise MCPError(code="permission_denied", message="用户未授权 AI 发布工作流")
-                value = service.store.publish(gid, workflow_id, int(arguments.get("version") or current["version"]))
-            elif action == "trust":
-                if not bool(request.get("allow_trust")):
-                    raise MCPError(code="permission_denied", message="用户未授权 AI 授予长期信任")
-                fingerprint = str(service.setup.status().get("fingerprint") or "")
-                if not fingerprint:
-                    raise MCPError(code="windows_mcp_not_ready", message="Windows-MCP 尚未完成验证")
-                value = service.store.trust(gid, workflow_id, int(arguments.get("version") or current["version"]), fingerprint=fingerprint, permissions=["all_windows_mcp_tools"])
-            else:
-                if not all(bool(request.get(key)) for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
-                    raise MCPError(code="permission_denied", message="开启无人值守触发需要同时授权发布、长期信任和无人值守触发")
-                definition = WorkflowDefinition.model_validate(arguments.get("definition") or {})
-                value = service.store.update(
-                    gid,
-                    workflow_id,
-                    definition,
-                    expected_revision=int(arguments.get("expected_revision") or current["manifest"].get("revision") or 0),
-                    changed_by=aid,
-                    change_note=str(arguments.get("change_note") or "AI 开启无人值守触发"),
-                )
-            return {"ok": True, "result": value}
-        if action in {"create", "update", "propose"}:
-            from ...computer_control.models import WorkflowDefinition
-            from ...computer_control.storage import RevisionConflict
-
-            aid = _resolve_self_actor_id(arguments)
-            request_id = str(arguments.get("request_id") or "").strip()
-            try:
-                request = service.requests.require_authorized(gid, request_id, aid)
-            except (KeyError, PermissionError) as exc:
-                raise MCPError(code="computer_control_request_required", message=str(exc)) from exc
-            if str(request.get("mode") or "") != "create_and_run":
-                raise MCPError(code="permission_denied", message="this request does not authorize workflow editing")
-            try:
-                definition = WorkflowDefinition.model_validate(arguments.get("definition") or {})
-                has_enabled_triggers = any(trigger.enabled for trigger in definition.triggers)
-                if has_enabled_triggers and not all(bool(request.get(key)) for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
-                    raise MCPError(code="permission_denied", message="启用无人值守触发需要用户同时授权发布、长期信任和无人值守触发")
-                if action == "create":
-                    value = service.store.create(gid, definition, created_by=aid)
-                    workflow_id = str(value["manifest"]["workflow_id"])
-                    service.requests.update(gid, request_id, workflow_id=workflow_id, status="draft_created")
-                elif action == "update":
-                    if not workflow_id:
-                        raise MCPError(code="invalid_request", message="workflow_id is required for action=update")
-                    bound_workflow = str(request.get("workflow_id") or "")
-                    if bound_workflow and bound_workflow != workflow_id:
-                        raise MCPError(code="permission_denied", message="request is bound to another workflow")
-                    value = service.store.update(
-                        gid,
-                        workflow_id,
-                        definition,
-                        expected_revision=int(arguments.get("expected_revision") or 0),
-                        changed_by=aid,
-                        change_note=str(arguments.get("change_note") or "AI 编排更新"),
-                    )
-                    service.requests.update(gid, request_id, workflow_id=workflow_id, status="draft_updated")
-                else:
-                    if not workflow_id:
-                        raise MCPError(code="invalid_request", message="workflow_id is required for action=propose")
-                    current = service.store.get(gid, workflow_id)
-                    value = service.store.create_proposal(
-                        gid,
-                        workflow_id,
-                        definition,
-                        base_version=int(arguments.get("version") or current["version"]),
-                        created_by=aid,
-                        summary=str(arguments.get("change_note") or "AI 自适应优化建议"),
-                    )
-            except RevisionConflict as exc:
-                raise MCPError(code="revision_conflict", message=str(exc), details={"current_revision": exc.current_revision}) from exc
-            except MCPError:
-                raise
-            except Exception as exc:
-                raise MCPError(code="workflow_invalid", message=str(exc)) from exc
-            return {"ok": True, "result": value}
-        raise MCPError(code="invalid_request", message=f"unsupported workflow action: {action}")
-
-    if name == "onecolleague_computer_run":
-        from ...computer_control.services import get_services
-        from ...paths import ensure_home
-
-        gid = _resolve_group_id(arguments)
-        aid = _resolve_self_actor_id(arguments)
-        action = str(arguments.get("action") or "start").strip().lower()
-        service = get_services(ensure_home())
-        if action in {"status", "recover", "verify"}:
-            run_id = str(arguments.get("run_id") or "").strip()
-            if not run_id:
-                raise MCPError(code="invalid_request", message="run_id is required")
-            try:
-                current_run = service.runner.get(gid, run_id)
-            except KeyError as exc:
-                raise MCPError(code="run_not_found", message=run_id) from exc
-            if str(current_run.get("actor_id") or "") != aid:
-                raise MCPError(code="permission_denied", message="run belongs to another actor")
-            if action == "status":
-                return {"ok": True, "result": current_run}
-            if action == "verify":
-                try:
-                    result = service.runner.verify(
-                        gid,
-                        run_id,
-                        actor_id=aid,
-                        passed=bool(arguments.get("passed")),
-                        summary=str(arguments.get("summary") or ""),
-                        evidence_ids=arguments.get("evidence_ids") if isinstance(arguments.get("evidence_ids"), list) else [],
-                        fingerprint=str(service.setup.status().get("fingerprint") or ""),
-                    )
-                except (ValueError, PermissionError) as exc:
-                    raise MCPError(code="verification_failed", message=str(exc)) from exc
-                return {"ok": True, "result": result}
-            recovery_id = str(arguments.get("recovery_id") or "").strip()
-            try:
-                result = service.runner.submit_recovery(
-                    gid,
-                    run_id,
-                    recovery_id,
-                    actor_id=aid,
-                    tool=str(arguments.get("tool") or ""),
-                    arguments=arguments.get("arguments") if isinstance(arguments.get("arguments"), dict) else {},
-                )
-            except (ValueError, PermissionError) as exc:
-                raise MCPError(code="recovery_not_pending", message=str(exc)) from exc
-            return {"ok": True, "result": result}
-        if action != "start":
-            raise MCPError(code="invalid_request", message=f"unsupported run action: {action}")
-        workflow_id = str(arguments.get("workflow_id") or "").strip()
-        if not workflow_id:
-            raise MCPError(code="invalid_request", message="workflow_id is required")
-        manifest = service.store.get(gid, workflow_id)["manifest"]
-        version = int(arguments.get("version") or manifest.get("published_version") or 0)
-        trusted = manifest.get("trusted") if isinstance(manifest.get("trusted"), dict) else {}
-        fingerprint = str(service.setup.status().get("fingerprint") or "")
-        is_trusted = isinstance(trusted.get(str(version)), dict) and trusted[str(version)].get("fingerprint") == fingerprint
-        request_id = str(arguments.get("request_id") or "").strip()
-        request = None
-        if not is_trusted:
-            from ...computer_control.risk import workflow_risk
-
-            try:
-                request = service.requests.require_authorized(gid, request_id, aid)
-            except (KeyError, PermissionError) as exc:
-                raise MCPError(code="workflow_not_trusted", message="workflow version is not trusted and no valid one-time request was supplied") from exc
-            if str(request.get("mode") or "") != "create_and_run" or str(request.get("workflow_id") or "") != workflow_id:
-                raise MCPError(code="permission_denied", message="request does not authorize this workflow")
-            risk = workflow_risk(service.store.get(gid, workflow_id, version=version)["definition"])
-            if risk["level"] == "high" and not bool(request.get("allow_high_risk")) and str(request.get("status") or "") != "approved":
-                service.requests.update(gid, request_id, status="pending_approval", risk=risk)
-                raise MCPError(code="approval_required", message="工作流包含高风险电脑操作，需要用户批准后才能运行", details={"request_id": request_id, "risk": risk})
-        run = service.runner.start_sync(
-            gid,
-            workflow_id,
-            actor_id=aid,
-            version=version,
-            inputs=arguments.get("inputs") or {},
-            authorization=request,
-        )
-        if request_id:
-            try:
-                service.requests.update(gid, request_id, status="running", run_id=run.get("run_id"), workflow_id=workflow_id)
-            except KeyError:
-                pass
-        return {"ok": True, "result": run}
 
     if name == "onecolleague_code_exec":
         gid = _resolve_group_id(arguments)
@@ -772,7 +716,6 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                     except Exception:
                         role = None
                 actor = _safe_find_actor(g, aid)
-                actor_is_pet = bool(isinstance(actor, dict) and is_pet_actor(actor))
                 actor_is_voice_secretary = aid == "voice-secretary" or bool(isinstance(actor, dict) and is_voice_secretary_actor(actor))
                 if actor_is_voice_secretary:
                     role = "voice_secretary"
@@ -784,7 +727,6 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                                 pf.content,
                                 role=role,
                                 actor_id=aid,
-                                include_pet=actor_is_pet,
                                 include_voice_secretary=actor_is_voice_secretary,
                             ),
                             group_id=gid,
@@ -799,7 +741,6 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                                 _ONECOLLEAGUE_HELP_BUILTIN,
                                 role=role,
                                 actor_id=aid,
-                                include_pet=actor_is_pet,
                                 include_voice_secretary=actor_is_voice_secretary,
                             ),
                             group_id=gid,
@@ -884,6 +825,61 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         raise MCPError(code="invalid_request", message="onecolleague_inbox_mark_read action must be 'read' or 'read_all'")
 
     # --- Messaging ---
+    if name == "onecolleague_group_bridge_session_send":
+        allowed_fields = {
+            "group_id",
+            "actor_id",
+            "local_endpoint",
+            "remote_group_id",
+            "remote_peer_id",
+            "remote_endpoint",
+            "client_nonce",
+            "payload",
+        }
+        if set(arguments) - allowed_fields:
+            raise MCPError(code="invalid_request", message="Group Bridge session arguments are invalid")
+        require_local_runtime_binding()
+        gid = _resolve_group_id(arguments)
+        _resolve_self_actor_id(arguments)
+        return group_bridge_session_send(
+            group_id=gid,
+            local_endpoint=str(arguments.get("local_endpoint") or ""),
+            remote_group_id=str(arguments.get("remote_group_id") or ""),
+            remote_peer_id=str(arguments.get("remote_peer_id") or ""),
+            remote_endpoint=str(arguments.get("remote_endpoint") or ""),
+            client_nonce=str(arguments.get("client_nonce") or ""),
+            payload=arguments.get("payload") if isinstance(arguments.get("payload"), dict) else {},
+            actor_authority=actor_message_authority,
+        )
+
+    if name == "onecolleague_group_bridge_remote_send":
+        allowed_fields = {"group_id", "actor_id", "registration_id", "idempotency_key", "payload"}
+        if set(arguments) - allowed_fields:
+            raise MCPError(code="invalid_request", message="Group Bridge remote arguments are invalid")
+        require_local_runtime_binding()
+        gid = _resolve_group_id(arguments)
+        _resolve_self_actor_id(arguments)
+        return remote_send(
+            group_id=gid,
+            registration_id=str(arguments.get("registration_id") or ""),
+            idempotency_key=str(arguments.get("idempotency_key") or ""),
+            payload=arguments.get("payload") if isinstance(arguments.get("payload"), dict) else {},
+            actor_authority=actor_message_authority,
+        )
+
+    if name == "onecolleague_group_bridge_remote_delivery_status":
+        allowed_fields = {"group_id", "actor_id", "registration_id", "idempotency_key"}
+        if set(arguments) - allowed_fields:
+            raise MCPError(code="invalid_request", message="Group Bridge remote status arguments are invalid")
+        require_local_runtime_binding()
+        gid = _resolve_group_id(arguments)
+        _resolve_self_actor_id(arguments)
+        return remote_delivery_status(
+            group_id=gid,
+            registration_id=str(arguments.get("registration_id") or ""),
+            idempotency_key=str(arguments.get("idempotency_key") or ""),
+        )
+
     if name == "onecolleague_message_send":
         gid = _resolve_group_id(arguments)
         aid = _resolve_self_actor_id(arguments)
@@ -896,10 +892,12 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             dst_group_id=arguments.get("dst_group_id"),
             actor_id=aid,
             text=str(arguments.get("text") or ""),
+            insight=arguments.get("insight"),
             to=to_val,
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val,
+            actor_authority=actor_message_authority,
         )
 
     if name == "onecolleague_tracked_send":
@@ -916,6 +914,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             actor_id=aid,
             title=str(arguments.get("title") or ""),
             text=str(arguments.get("text") or ""),
+            insight=arguments.get("insight"),
             to=to_val,
             outcome=str(arguments.get("outcome") or ""),
             checklist=checklist_val,
@@ -927,6 +926,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             reply_required=coerce_bool(arguments.get("reply_required"), default=True),
             idempotency_key=str(arguments.get("idempotency_key") or ""),
             refs=refs_val,
+            actor_authority=actor_message_authority,
         )
 
     if name == "onecolleague_message_reply":
@@ -942,32 +942,17 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             actor_id=aid,
             reply_to=reply_to,
             text=str(arguments.get("text") or ""),
+            insight=arguments.get("insight"),
             to=to_val_reply,
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val_reply,
+            completion_receipt=(
+                arguments.get("completion_receipt") if isinstance(arguments.get("completion_receipt"), dict) else None
+            ),
+            client_id=str(arguments.get("client_id") or ""),
+            actor_authority=actor_message_authority,
         )
-
-    if name == "onecolleague_pet_decisions":
-        gid = _resolve_group_id(arguments)
-        aid = _resolve_self_actor_id(arguments)
-        action = str(arguments.get("action") or "get").strip().lower()
-        if action == "get":
-            return _call_daemon_or_raise({"op": "pet_decisions_get", "args": {"group_id": gid, "actor_id": aid}})
-        if action == "replace":
-            return _call_daemon_or_raise(
-                {
-                    "op": "pet_decisions_replace",
-                    "args": {
-                        "group_id": gid,
-                        "actor_id": aid,
-                        "decisions": list(arguments.get("decisions") or []) if isinstance(arguments.get("decisions"), list) else [],
-                    },
-                }
-            )
-        if action == "clear":
-            return _call_daemon_or_raise({"op": "pet_decisions_clear", "args": {"group_id": gid, "actor_id": aid}})
-        raise MCPError(code="invalid_request", message="onecolleague_pet_decisions action must be get|replace|clear")
 
     if name == "onecolleague_voice_secretary_document":
         gid = _resolve_group_id(arguments)
@@ -1133,9 +1118,11 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                 actor_id=aid,
                 path=str(arguments.get("path") or ""),
                 text=str(arguments.get("text") or ""),
+                insight=arguments.get("insight"),
                 to=to_val_file,
                 priority=str(arguments.get("priority") or "normal"),
                 reply_required=coerce_bool(arguments.get("reply_required"), default=False),
+                actor_authority=actor_message_authority,
             )
         raise MCPError(code="invalid_request", message="onecolleague_file action must be send|blob_path|info|read")
 
@@ -1393,6 +1380,11 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                     "latest_event_id": str(arguments.get("latest_event_id") or ""),
                     "status": str(arguments.get("status") or "done"),
                     "summary": str(arguments.get("summary") or ""),
+                    "completion_receipt": (
+                        arguments.get("completion_receipt")
+                        if isinstance(arguments.get("completion_receipt"), dict)
+                        else None
+                    ),
                 },
             },
             timeout_s=120.0,
@@ -1498,6 +1490,10 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         gid = _resolve_group_id(arguments)
         by = _resolve_caller_actor_id(arguments)
         actor_id = str(arguments.get("actor_id") or by).strip()
+        nested_tool_name = canonical_mcp_tool_name(str(arguments.get("tool_name") or ""))
+        nested_owner = resolve_mcp_tool_owner(nested_tool_name) if nested_tool_name else None
+        if nested_tool_name and (nested_owner is None or nested_owner.kind in {"core", "pack"}):
+            _authorize_web_model_builtin_tool_call(nested_tool_name)
         raw_tool_args = arguments.get("tool_arguments")
         tool_args = dict(raw_tool_args) if isinstance(raw_tool_args, dict) else {}
         return capability_use(
@@ -1505,7 +1501,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             by=by,
             actor_id=actor_id,
             capability_id=str(arguments.get("capability_id") or ""),
-            tool_name=str(arguments.get("tool_name") or ""),
+            tool_name=nested_tool_name,
             tool_arguments=tool_args,
             scope=str(arguments.get("scope") or "session"),
             ttl_seconds=min(max(int(arguments.get("ttl_seconds") or 3600), 60), 24 * 3600),
@@ -1560,14 +1556,20 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             )
         if action == "sources":
             by = _resolve_caller_from_by(arguments)
+            source_action = str(arguments.get("source_action") or arguments.get("sub_action") or "list")
             return space_sources(
                 group_id=gid,
                 by=by,
                 provider=provider,
                 lane=(lane or "work"),
-                action=str(arguments.get("source_action") or arguments.get("sub_action") or "list"),
+                action=source_action,
                 source_id=str(arguments.get("source_id") or ""),
                 new_title=str(arguments.get("new_title") or ""),
+                fresh=(
+                    coerce_bool(arguments.get("fresh"), default=False)
+                    if source_action.strip().lower() == "list"
+                    else False
+                ),
             )
         if action == "artifact":
             by = _resolve_caller_from_by(arguments)
@@ -1586,6 +1588,11 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                 action=parsed["action"],
                 kind=str(arguments.get("kind") or ""),
                 options=parsed["options"],
+                fresh=(
+                    coerce_bool(arguments.get("fresh"), default=False)
+                    if str(parsed["action"] or "").strip().lower() == "list"
+                    else False
+                ),
                 wait=coerce_bool(arguments.get("wait"), default=False),
                 save_to_space=coerce_bool(arguments.get("save_to_space"), default=True),
                 output_path=str(arguments.get("output_path") or ""),
@@ -1812,13 +1819,34 @@ def _handle_debug_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Di
 # =============================================================================
 
 
-def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle MCP tool call."""
-    requested_name = str(name or "").strip()
-    name = canonical_mcp_tool_name(requested_name)
-    _authorize_web_model_builtin_tool_call(name)
+def _route_tool_call(certificate: _ToolCallCertificate, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Route one call that already carries a dispatcher-issued certificate."""
+    _validate_tool_call_certificate(certificate, arguments)
+    requested_name = certificate.requested_name
+    name = certificate.canonical_name
+    actor_message_authority: Optional[ActorMessageAuthority] = None
+    if name in {
+        "onecolleague_message_send",
+        "onecolleague_tracked_send",
+        "onecolleague_message_reply",
+        "onecolleague_group_bridge_session_send",
+        "onecolleague_group_bridge_remote_send",
+    } or (name == "onecolleague_file" and str(arguments.get("action") or "send").strip() == "send"):
+        actor_message_authority = _issue_actor_message_authority(
+            group_id=certificate.group_id,
+            actor_id=certificate.actor_id,
+            source=certificate.source,
+            tool_name=name,
+            nonce=certificate.nonce,
+        )
+    out = _handle_onecolleague_namespace(
+        name,
+        arguments,
+        actor_message_authority=actor_message_authority,
+    )
+    if out is not None:
+        return out
     for handler in (
-        _handle_onecolleague_namespace,
         _handle_context_namespace,
         _handle_memory_namespace,
         _handle_experience_namespace,
@@ -1855,13 +1883,42 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     raise MCPError(code="unknown_tool", message=f"unknown tool: {name}")
 
 
+def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Authorize and dispatch one MCP tool call."""
+    requested_name = str(name or "").strip()
+    canonical_name = canonical_mcp_tool_name(requested_name)
+    normalized_arguments = arguments if isinstance(arguments, dict) else {}
+    certificate = _issue_tool_call_certificate(requested_name, canonical_name, normalized_arguments)
+    return _route_tool_call(certificate, normalized_arguments)
+
+
+def _product_tool_is_listable(
+    owner: MCPToolOwner,
+    *,
+    runtime_source: str,
+    actor_is_voice_secretary: bool,
+    actor_is_web_model: bool,
+    local_computer_control_allowed: bool,
+) -> bool:
+    policy = owner.list_policy
+    if policy == "local_group_bridge":
+        return runtime_source == "local_mcp"
+    if policy == "local_computer_control":
+        return local_computer_control_allowed
+    if policy in {"web_model_actor", "runtime_turn"}:
+        return actor_is_web_model
+    if policy == "voice_secretary":
+        return actor_is_voice_secretary
+    return False
+
+
 def list_tools_for_caller() -> List[Dict[str, Any]]:
     """Resolve visible tool specs for current caller scope.
 
     Behavior:
     1) full profile opt-out via CCCC_MCP_TOOL_PROFILE=full
     2) default: core + enabled capability packs from daemon capability_state
-    3) daemon failure fallback: best-effort built-in actor surface
+    3) daemon failure fallback: core surface only
     """
     runtime_ctx = _runtime_context()
     gid = runtime_ctx.group_id
@@ -1882,26 +1939,17 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
 
     # Determine actor role for admin tool gating.
     actor_role = ""
-    actor_is_pet = False
-    actor_is_voice_secretary = False
+    actor_is_voice_secretary = aid == VOICE_SECRETARY_ACTOR_ID
     actor_is_web_model = False
-    builtin_enabled_fallback: List[str] = []
+    local_computer_control_allowed = False
     if gid and aid and aid != "user":
-        actor_is_voice_secretary = aid == VOICE_SECRETARY_ACTOR_ID
         try:
             group = load_group(gid)
             actor_role = str(get_effective_role(group, aid) or "").strip().lower()
             actor = find_actor(group, aid)
             if isinstance(actor, dict):
-                actor_is_pet = is_pet_actor(actor)
-                actor_is_voice_secretary = actor_is_voice_secretary or is_voice_secretary_actor(actor)
                 actor_is_web_model = str(actor.get("runtime") or "").strip().lower() == "web_model"
-                autoload = actor.get("capability_autoload") if isinstance(actor.get("capability_autoload"), list) else []
-                builtin_enabled_fallback = [
-                    str(cap_id or "").strip()
-                    for cap_id in autoload
-                    if str(cap_id or "").strip() in BUILTIN_CAPABILITY_PACKS
-                ]
+                local_computer_control_allowed = _local_computer_control_actor_allowed(runtime_ctx, actor)
         except Exception:
             pass
     admin_excluded = (set(CORE_ADMIN_TOOLS) | set(CAPABILITY_ADMIN_TOOLS)) if actor_role == "peer" else set()
@@ -1914,30 +1962,69 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
         )
         if not code_mode_enabled():
             names -= CODE_MODE_TOOL_ALIAS_NAMES
+        names = {
+            name
+            for name in names
+            if (
+                (owner := resolve_mcp_tool_owner(name)) is not None
+                and owner.kind != "disabled"
+                and (
+                    owner.kind == "core"
+                    or (
+                        owner.kind == "product"
+                        and _product_tool_is_listable(
+                            owner,
+                            runtime_source=str(runtime_ctx.source or "").strip().lower(),
+                            actor_is_voice_secretary=actor_is_voice_secretary,
+                            actor_is_web_model=actor_is_web_model,
+                            local_computer_control_allowed=local_computer_control_allowed,
+                        )
+                    )
+                )
+            )
+        }
         out: List[Dict[str, Any]] = []
         for spec in CANONICAL_MCP_TOOLS:
             if str(spec.get("name") or "") in names:
                 out.append(_display_tool_spec(spec))
         return out
 
+    tools_raw = state.get("visible_tools") if isinstance(state, dict) else []
+    if not isinstance(tools_raw, list):
+        tools_raw = []
+    admitted_visible = {str(x).strip() for x in tools_raw if str(x).strip()}
     if profile == "full":
-        visible = {str(spec.get("name") or "").strip() for spec in CANONICAL_MCP_TOOLS if isinstance(spec, dict)}
-        visible -= admin_excluded
+        candidates = set(_BUILTIN_MCP_TOOL_NAMES)
     else:
-        tools_raw = state.get("visible_tools") if isinstance(state, dict) else []
-        if not isinstance(tools_raw, list):
-            tools_raw = []
-        visible = {str(x).strip() for x in tools_raw if str(x).strip()}
-        if not visible:
-            visible = set(
+        candidates = set(admitted_visible)
+        if not candidates:
+            candidates = set(
                 resolve_visible_tool_names(
-                    builtin_enabled_fallback,
+                    [],
                     actor_role=actor_role,
-                    is_pet=actor_is_pet,
                     is_voice_secretary=actor_is_voice_secretary,
                     is_web_model=actor_is_web_model,
                 )
             ) - admin_excluded
+    candidates.update(name for name, owner in MCP_TOOL_PRIMARY_OWNERS.items() if owner.kind == "product")
+    runtime_source = str(runtime_ctx.source or "").strip().lower()
+    visible: set[str] = set()
+    for name in candidates:
+        owner = resolve_mcp_tool_owner(name)
+        if owner is None or owner.kind == "disabled" or name in admin_excluded:
+            continue
+        if owner.kind == "core":
+            visible.add(name)
+        elif owner.kind == "pack" and name in admitted_visible:
+            visible.add(name)
+        elif owner.kind == "product" and _product_tool_is_listable(
+            owner,
+            runtime_source=runtime_source,
+            actor_is_voice_secretary=actor_is_voice_secretary,
+            actor_is_web_model=actor_is_web_model,
+            local_computer_control_allowed=local_computer_control_allowed,
+        ):
+            visible.add(name)
 
     dynamic_raw = state.get("dynamic_tools") if isinstance(state, dict) else []
     dynamic_specs: List[Dict[str, Any]] = []
@@ -1947,6 +2034,8 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                 continue
             dname = str(item.get("name") or "").strip()
             if not dname:
+                continue
+            if resolve_mcp_tool_owner(dname) is not None:
                 continue
             schema = item.get("inputSchema")
             if not isinstance(schema, dict):

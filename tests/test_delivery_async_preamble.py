@@ -17,15 +17,25 @@ class TestAsyncFirstDelivery(unittest.TestCase):
         prompt_started = threading.Event()
         message_sent = threading.Event()
 
-        def fake_submit(_group, *, actor_id: str, text: str, file_fallback: bool = False, wait_for_submit: bool = False) -> bool:
+        def fake_submit(
+            _group,
+            *,
+            actor_id: str,
+            text: str,
+            file_fallback: bool = False,
+            wait_for_submit: bool = False,
+            detailed_result: bool = False,
+        ):
             self.assertEqual(actor_id, "peer1")
-            if wait_for_submit:
+            self.assertTrue(wait_for_submit)
+            self.assertTrue(detailed_result)
+            if text == "SYSTEM PROMPT":
                 prompt_started.set()
                 time.sleep(0.2)
-                return True
-            self.assertIn("hello first", text)
-            message_sent.set()
-            return True
+            else:
+                self.assertIn("hello first", text)
+                message_sent.set()
+            return delivery.PtySubmitOutcome(True, False, "accepted")
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
             "no1.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
@@ -41,6 +51,8 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
             "no1.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
+        ), patch(
+            "no1.daemon.messaging.delivery.commit_experience_reminder", return_value=None
         ), patch.object(
             delivery, "PREAMBLE_TO_MESSAGE_DELAY_SECONDS", 0.0
         ):
@@ -73,16 +85,26 @@ class TestAsyncFirstDelivery(unittest.TestCase):
         second_sent = threading.Event()
         sent_messages: list[str] = []
 
-        def fake_submit(_group, *, actor_id: str, text: str, file_fallback: bool = False, wait_for_submit: bool = False) -> bool:
+        def fake_submit(
+            _group,
+            *,
+            actor_id: str,
+            text: str,
+            file_fallback: bool = False,
+            wait_for_submit: bool = False,
+            detailed_result: bool = False,
+        ):
             self.assertEqual(actor_id, "peer1")
-            if wait_for_submit:
+            self.assertTrue(wait_for_submit)
+            self.assertTrue(detailed_result)
+            if text == "SYSTEM PROMPT":
                 prompt_started.set()
                 self.assertTrue(release_prompt.wait(1.0))
-                return True
-            sent_messages.append(text)
-            if "hello second" in text:
-                second_sent.set()
-            return True
+            else:
+                sent_messages.append(text)
+                if "hello second" in text:
+                    second_sent.set()
+            return delivery.PtySubmitOutcome(True, False, "accepted")
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
             "no1.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
@@ -98,6 +120,8 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
             "no1.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
+        ), patch(
+            "no1.daemon.messaging.delivery.commit_experience_reminder", return_value=None
         ), patch.object(
             delivery, "PREAMBLE_TO_MESSAGE_DELAY_SECONDS", 0.0
         ):
@@ -138,11 +162,21 @@ class TestAsyncFirstDelivery(unittest.TestCase):
         preamble_state = {"sent": False}
         prompt_started = threading.Event()
 
-        def fake_submit(_group, *, actor_id: str, text: str, file_fallback: bool = False, wait_for_submit: bool = False) -> bool:
+        def fake_submit(
+            _group,
+            *,
+            actor_id: str,
+            text: str,
+            file_fallback: bool = False,
+            wait_for_submit: bool = False,
+            detailed_result: bool = False,
+        ):
             self.assertEqual(actor_id, "peer1")
-            if wait_for_submit:
+            self.assertTrue(wait_for_submit)
+            self.assertTrue(detailed_result)
+            if text == "SYSTEM PROMPT":
                 prompt_started.set()
-            return True
+            return delivery.PtySubmitOutcome(True, False, "accepted")
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
             "no1.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}

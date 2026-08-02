@@ -9,6 +9,7 @@ from ...kernel.events import publish_event
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
 from ...util.conv import coerce_bool
+from ..messaging.turn_provenance import invalidate_turn_grant
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ def persist_actor_process_exit_stopped(*, group_id: str, actor_id: str, runner: 
     actor = find_actor(group, aid)
     if not isinstance(actor, dict) or is_internal_actor(actor):
         return False
+    invalidate_turn_grant(group, aid, reason="actor_process_exit")
     if not coerce_bool(actor.get("enabled"), default=True):
         return False
 

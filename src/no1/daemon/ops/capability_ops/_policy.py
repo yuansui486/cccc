@@ -18,6 +18,7 @@ from ._common import (
     BUILTIN_SOURCE_ID,
     _LEVEL_INDEXED,
     _LEVEL_MOUNTED,
+    _LEVEL_PINNED,
     _LEVELS,
     _POLICY_LOCK,
     _POLICY_CACHE,
@@ -45,7 +46,7 @@ def _policy_level_visible(level: str) -> bool:
 def _external_capability_safety_mode_from_source_levels(source_levels: Any) -> str:
     levels = source_levels if isinstance(source_levels, dict) else {}
     for source_id in _SOURCE_IDS:
-        if _is_builtin_source_id(source_id):
+        if _is_builtin_source_id(source_id) or source_id in {"github_import", "url_import", "local_import"}:
             continue
         level = _normalize_policy_level(levels.get(source_id), default=_LEVEL_MOUNTED)
         if level != _LEVEL_INDEXED:
@@ -69,13 +70,65 @@ def _policy_default_compiled() -> Dict[str, Any]:
         "source_levels": {
             BUILTIN_SOURCE_ID: _LEVEL_MOUNTED,
             "onecolleague_skill_library": _LEVEL_MOUNTED,
+            "manual_import": _LEVEL_MOUNTED,
+            "agent_self_proposed": _LEVEL_INDEXED,
+            "github_import": _LEVEL_MOUNTED,
+            "url_import": _LEVEL_MOUNTED,
+            "local_import": _LEVEL_MOUNTED,
+            "anthropic_skills": _LEVEL_MOUNTED,
+            "github_skills_curated": _LEVEL_MOUNTED,
+            "skillsmp_remote": _LEVEL_INDEXED,
+            "clawhub_remote": _LEVEL_INDEXED,
+            "openclaw_skills_remote": _LEVEL_INDEXED,
+            "clawskills_remote": _LEVEL_INDEXED,
+            "mcp_registry_official": _LEVEL_INDEXED,
         },
         "capability_levels": {},
-        "skill_source_levels": {},
+        "source_enabled": {sid: True for sid in _SOURCE_IDS},
+        "skill_source_levels": {
+            "agent_self_proposed": _LEVEL_MOUNTED,
+        },
         "role_pinned": {},
         "curated_mcp_entries": [],
         "curated_skill_entries": [],
     }
+
+
+def _effective_policy_level(
+    policy: Dict[str, Any],
+    *,
+    capability_id: str,
+    kind: str,
+    source_id: str,
+    actor_role: str = "",
+) -> str:
+    cid = str(capability_id or "").strip()
+    source = _normalize_source_id(source_id)
+    kind_norm = str(kind or "").strip().lower()
+    role = str(actor_role or "").strip().lower()
+    source_levels = policy.get("source_levels") if isinstance(policy.get("source_levels"), dict) else {}
+    source_enabled = policy.get("source_enabled") if isinstance(policy.get("source_enabled"), dict) else {}
+    capability_levels = policy.get("capability_levels") if isinstance(policy.get("capability_levels"), dict) else {}
+    skill_source_levels = (
+        policy.get("skill_source_levels") if isinstance(policy.get("skill_source_levels"), dict) else {}
+    )
+    role_pinned = policy.get("role_pinned") if isinstance(policy.get("role_pinned"), dict) else {}
+    if source and source_enabled.get(source) is False:
+        return _LEVEL_INDEXED
+    level = _normalize_policy_level(
+        source_levels.get(source),
+        default=_LEVEL_MOUNTED if not source else _LEVEL_INDEXED,
+    )
+    if kind_norm == "skill":
+        level = _normalize_policy_level(skill_source_levels.get(source, level), default=level)
+    if cid and cid in capability_levels:
+        level = _normalize_policy_level(capability_levels.get(cid), default=level)
+    role_caps = role_pinned.get(role) if role else None
+    if isinstance(role_caps, set) and cid in role_caps:
+        return _LEVEL_PINNED
+    if isinstance(role_caps, list) and cid in {str(item or "").strip() for item in role_caps}:
+        return _LEVEL_PINNED
+    return level
 
 
 def _allowlist_default_source_label() -> str:
@@ -95,17 +148,22 @@ def _safe_load_yaml_mapping(text: str) -> Dict[str, Any]:
     raise ValueError("allowlist YAML root must be a mapping")
 
 
-def _load_allowlist_default_doc() -> Tuple[Dict[str, Any], str]:
+def _load_allowlist_default_doc_with_error() -> Tuple[Dict[str, Any], str, str]:
     try:
         text = pkg_resources.files("no1.resources").joinpath("capability-allowlist.default.yaml").read_text(
             encoding="utf-8"
         )
-    except Exception:
-        text = ""
+    except Exception as e:
+        return {}, "", f"failed_to_read_default:{e}"
     try:
         doc = _safe_load_yaml_mapping(text)
-    except Exception:
-        doc = {}
+    except Exception as e:
+        return {}, text, f"invalid_default_yaml:{e}"
+    return doc, text, ""
+
+
+def _load_allowlist_default_doc() -> Tuple[Dict[str, Any], str]:
+    doc, text, _ = _load_allowlist_default_doc_with_error()
     return doc, text
 
 
@@ -144,11 +202,16 @@ def _merge_allowlist_docs(base: Any, overlay: Any) -> Dict[str, Any]:
 
 
 def _allowlist_effective_snapshot() -> Dict[str, Any]:
-    default_doc, default_text = _load_allowlist_default_doc()
+    default_doc, default_text, default_error = _load_allowlist_default_doc_with_error()
     overlay_doc, overlay_text, overlay_error = _load_allowlist_overlay_doc()
     effective_doc = _merge_allowlist_docs(default_doc, overlay_doc)
     key_payload = json.dumps(
-        {"default": default_doc, "overlay": overlay_doc},
+        {
+            "default_text": default_text,
+            "default_error": default_error,
+            "overlay_text": overlay_text,
+            "overlay_error": overlay_error,
+        },
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -159,19 +222,31 @@ def _allowlist_effective_snapshot() -> Dict[str, Any]:
         "overlay": overlay_doc,
         "effective": effective_doc,
         "default_source": _allowlist_default_source_label(),
-        "overlay_source": str(_allowlist_user_overlay_path()) if overlay_text else "",
+        "overlay_source": str(_allowlist_user_overlay_path()) if _allowlist_user_overlay_path().exists() else "",
+        "default_error": default_error,
         "overlay_error": overlay_error,
         "default_text": default_text,
         "overlay_text": overlay_text,
     }
 
 
+def _serialize_allowlist_overlay_doc(overlay_doc: Dict[str, Any]) -> str:
+    doc = overlay_doc if isinstance(overlay_doc, dict) else {}
+    if not doc:
+        return ""
+    return yaml.safe_dump(
+        doc,
+        allow_unicode=False,
+        sort_keys=True,
+    )
+
+
 def _write_allowlist_overlay_doc(overlay_doc: Dict[str, Any]) -> None:
     path = _allowlist_user_overlay_path()
     root = path.parent
     root.mkdir(parents=True, exist_ok=True)
-    doc = overlay_doc if isinstance(overlay_doc, dict) else {}
-    if not doc:
+    text = _serialize_allowlist_overlay_doc(overlay_doc)
+    if not text:
         try:
             path.unlink()
         except FileNotFoundError:
@@ -179,11 +254,6 @@ def _write_allowlist_overlay_doc(overlay_doc: Dict[str, Any]) -> None:
         except Exception:
             pass
         return
-    text = yaml.safe_dump(
-        doc,
-        allow_unicode=False,
-        sort_keys=True,
-    )
     atomic_write_text(path, text, encoding="utf-8")
 
 
@@ -205,6 +275,14 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
         if not sid or sid not in _SOURCE_IDS:
             continue
         compiled["source_levels"][sid] = _normalize_policy_level(level, default=_LEVEL_INDEXED)
+
+    source_enabled: Dict[str, bool] = {sid: True for sid in _SOURCE_IDS}
+    for item in doc.get("sources") if isinstance(doc.get("sources"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        sid = _normalize_source_id(item.get("source_id"))
+        if sid in _SOURCE_IDS:
+            source_enabled[sid] = bool(item.get("enabled", True))
 
     capability_levels: Dict[str, str] = {}
     curated_mcp_entries: List[Dict[str, Any]] = []
@@ -301,6 +379,14 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
         if isinstance(item, dict):
             _append_skill_entry(item, default_source_id="onecolleague_skill_library")
 
+    for item in skills.get("official_anthropic") if isinstance(skills.get("official_anthropic"), list) else []:
+        if isinstance(item, dict):
+            _append_skill_entry(item, default_source_id="anthropic_skills")
+
+    for item in skills.get("curated") if isinstance(skills.get("curated"), list) else []:
+        if isinstance(item, dict):
+            _append_skill_entry(item, default_source_id="github_skills_curated")
+
     curated_skill_entries = [
         item
         for item in curated_skill_entries
@@ -319,10 +405,23 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
                 role_pinned.setdefault(role, set()).add(cid)
 
     compiled["capability_levels"] = capability_levels
+    compiled["source_enabled"] = source_enabled
     compiled["skill_source_levels"] = skill_source_levels
     compiled["role_pinned"] = role_pinned
     compiled["curated_mcp_entries"] = curated_mcp_entries
     compiled["curated_skill_entries"] = curated_skill_entries
+    return compiled
+
+
+def _policy_fail_closed_compiled() -> Dict[str, Any]:
+    compiled = _policy_default_compiled()
+    compiled["source_levels"] = {sid: _LEVEL_INDEXED for sid in _SOURCE_IDS}
+    compiled["source_enabled"] = {sid: False for sid in _SOURCE_IDS}
+    compiled["capability_levels"] = {}
+    compiled["skill_source_levels"] = {}
+    compiled["role_pinned"] = {}
+    compiled["curated_mcp_entries"] = []
+    compiled["curated_skill_entries"] = []
     return compiled
 
 
@@ -334,16 +433,16 @@ def _allowlist_policy() -> Dict[str, Any]:
         if _POLICY_CACHE.get("key") == key and isinstance(cached, dict):
             return cached
 
-        error = ""
-        compiled = _policy_default_compiled()
+        error = str(snapshot.get("default_error") or "").strip()
         overlay_error = str(snapshot.get("overlay_error") or "").strip()
-        if overlay_error:
+        if overlay_error and not error:
             error = overlay_error
-        try:
-            compiled = _compile_allowlist_policy(snapshot.get("effective"))
-        except Exception as e:
-            error = str(e)
-            compiled = _policy_default_compiled()
+        compiled = _policy_fail_closed_compiled()
+        if not error:
+            try:
+                compiled = _compile_allowlist_policy(snapshot.get("effective"))
+            except Exception as e:
+                error = f"allowlist_compile_failed:{e}"
 
         _POLICY_CACHE["key"] = key
         _POLICY_CACHE["compiled"] = compiled
@@ -355,14 +454,22 @@ def _allowlist_policy() -> Dict[str, Any]:
 
 
 def _allowlist_validate_overlay_doc(overlay_doc: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any], Dict[str, Any], str]:
-    default_doc, _ = _load_allowlist_default_doc()
+    default_doc, default_text, default_error = _load_allowlist_default_doc_with_error()
+    if default_error:
+        return False, default_error, default_doc, {}, ""
     effective_doc = _merge_allowlist_docs(default_doc, overlay_doc)
     try:
         _compile_allowlist_policy(effective_doc)
     except Exception as e:
         return False, str(e), default_doc, effective_doc, ""
+    overlay_text = _serialize_allowlist_overlay_doc(overlay_doc)
     revision_payload = json.dumps(
-        {"default": default_doc, "overlay": overlay_doc},
+        {
+            "default_text": default_text,
+            "default_error": "",
+            "overlay_text": overlay_text,
+            "overlay_error": "",
+        },
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -385,6 +492,7 @@ def handle_capability_allowlist_get(args: Dict[str, Any]) -> DaemonResponse:
                 "revision": str(snapshot.get("revision") or ""),
                 "default_source": str(snapshot.get("default_source") or ""),
                 "overlay_source": str(snapshot.get("overlay_source") or ""),
+                "default_error": str(snapshot.get("default_error") or ""),
                 "overlay_error": str(snapshot.get("overlay_error") or ""),
                 "policy_source": str(_POLICY_CACHE.get("source") or ""),
                 "policy_error": str(_POLICY_CACHE.get("error") or ""),

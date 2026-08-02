@@ -294,7 +294,10 @@ export function AddActorModal({
     const primeKey = `${newActorRuntime}:${commandToPrime}`;
     if (primedCommandRef.current === primeKey) return;
     primedCommandRef.current = primeKey;
+    // The modal defaults are derived from the selected runtime preset.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNewActorCommand(commandToPrime);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (defaultPreset) setSelectedRuntimePresetId(defaultPreset.id);
   }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, setNewActorCommand]);
 

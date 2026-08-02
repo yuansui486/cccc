@@ -2,6 +2,10 @@ from pathlib import Path
 import tarfile
 import zipfile
 
+from packaging.markers import Marker
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
 import pytest
 
 
@@ -13,10 +17,55 @@ def _project_version() -> str:
 
 
 def _metadata_requires_pywinpty(metadata: str) -> bool:
-    return any(
-        line.startswith("Requires-Dist: pywinpty>=2.0;") and 'platform_system == "Windows"' in line
-        for line in metadata.splitlines()
+    expected_specifier = SpecifierSet(">=2.0,<3.0.4")
+    expected_marker = Marker("platform_system == 'Windows'")
+    for line in metadata.splitlines():
+        if not line.startswith("Requires-Dist:"):
+            continue
+        try:
+            requirement = Requirement(line.partition(":")[2].strip())
+        except InvalidRequirement:
+            continue
+        if (
+            canonicalize_name(requirement.name) == "pywinpty"
+            and requirement.specifier == expected_specifier
+            and requirement.marker == expected_marker
+        ):
+            return True
+    return False
+
+
+def test_metadata_pywinpty_requirement_is_compared_semantically() -> None:
+    metadata = (
+        "Requires-Dist: example>=1\n"
+        'Requires-Dist: PyWinPTY <3.0.4, >=2.0 ; platform_system == "Windows"\n'
     )
+
+    assert _metadata_requires_pywinpty(metadata)
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "pywinpty>=2.0; platform_system == 'Windows'",
+        "pywinpty<3.0.4; platform_system == 'Windows'",
+        "pywinpty>=2.0,<3.0.4",
+    ],
+    ids=("missing-upper", "missing-lower", "missing-marker"),
+)
+def test_metadata_pywinpty_requirement_rejects_missing_constraints(requirement: str) -> None:
+    assert not _metadata_requires_pywinpty(f"Requires-Dist: {requirement}\n")
+
+
+def test_build_package_shell_bundles_web_before_building_python_artifacts() -> None:
+    script = Path("scripts/build_package.sh").read_text(encoding="utf-8")
+    web_script = Path("scripts/build_web.sh").read_text(encoding="utf-8")
+
+    web_build = '"$ROOT_DIR/scripts/build_web.sh"'
+    python_build = 'python3 -m build "$ROOT_DIR"'
+    assert script.index(web_build) < script.index(python_build)
+    assert 'test -f "$ROOT_DIR/src/no1/ports/web/dist/index.html"' in web_script
+    assert 'echo "OK: built dist/* with bundled Web UI"' in script
 
 
 def test_build_package_ps1_compiles_no1_package() -> None:

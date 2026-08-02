@@ -278,3 +278,56 @@ class TestGroupSpaceMemorySync(unittest.TestCase):
             self.assertNotIn(today, files)
         finally:
             cleanup()
+
+    def test_periodic_memory_sync_skips_deleted_group_bindings(self) -> None:
+        from unittest.mock import call, patch
+
+        from no1.daemon.space.group_space_memory_sync import process_due_memory_space_syncs
+
+        bindings = [
+            {"group_id": "g_deleted", "status": "bound"},
+            {"group_id": "g_queued", "status": "bound"},
+            {"group_id": "g_blocked", "status": "bound"},
+            {"group_id": "g_unbound", "status": "unbound"},
+            {"group_id": "  ", "status": "bound"},
+        ]
+
+        def load_group(group_id: str):
+            return None if group_id == "g_deleted" else object()
+
+        with (
+            patch(
+                "no1.daemon.space.group_space_memory_sync.list_space_bindings",
+                return_value=bindings,
+            ),
+            patch(
+                "no1.daemon.space.group_space_memory_sync.load_group",
+                side_effect=load_group,
+            ) as load_group_mock,
+            patch(
+                "no1.daemon.space.group_space_memory_sync.sync_memory_daily_files",
+                side_effect=[{"ok": True, "queued": 2}, {"ok": False}],
+            ) as sync_mock,
+        ):
+            result = process_due_memory_space_syncs(provider="notebooklm", limit=20)
+
+        self.assertEqual(
+            result,
+            {
+                "processed": 2,
+                "queued": 2,
+                "blocked": 1,
+                "missing_groups": 1,
+            },
+        )
+        self.assertEqual(
+            load_group_mock.call_args_list,
+            [call("g_deleted"), call("g_queued"), call("g_blocked")],
+        )
+        self.assertEqual(
+            sync_mock.call_args_list,
+            [
+                call("g_queued", provider="notebooklm", force=False),
+                call("g_blocked", provider="notebooklm", force=False),
+            ],
+        )

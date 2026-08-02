@@ -260,8 +260,10 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         cmd = daemon_server._normalize_runtime_command("codex", [r"C:\Tools\codex.cmd", "--search"])
 
         self.assertEqual(cmd[0], r"C:\Tools\codex.cmd")
-        self.assertEqual(cmd[1:3], ["-c", "shell_environment_policy.inherit=all"])
-        self.assertEqual(cmd[3:], ["--search"])
+        config_values = [cmd[index + 1] for index, value in enumerate(cmd[:-1]) if value in {"-c", "--config"}]
+        self.assertIn("mcp_servers.windows-mcp.enabled=false", config_values)
+        self.assertIn("shell_environment_policy.inherit=all", config_values)
+        self.assertEqual(cmd[-1], "--search")
 
 
 if __name__ == "__main__":

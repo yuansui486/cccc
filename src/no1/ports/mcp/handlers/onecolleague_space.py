@@ -113,22 +113,22 @@ def space_sources(
     action: str = "list",
     source_id: str = "",
     new_title: str = "",
+    fresh: bool = False,
 ) -> Dict[str, Any]:
     """List/refresh/rename/delete Group Space provider sources."""
-    return _call_daemon_or_raise(
-        {
-            "op": "group_space_sources",
-            "args": {
-                "group_id": group_id,
-                "provider": str(provider or "notebooklm"),
-                "lane": str(lane or "work"),
-                "action": str(action or "list"),
-                "source_id": str(source_id or ""),
-                "new_title": str(new_title or ""),
-                "by": str(by or "user"),
-            },
-        }
-    )
+    action_v = str(action or "list")
+    args = {
+        "group_id": group_id,
+        "provider": str(provider or "notebooklm"),
+        "lane": str(lane or "work"),
+        "action": action_v,
+        "source_id": str(source_id or ""),
+        "new_title": str(new_title or ""),
+        "by": str(by or "user"),
+    }
+    if action_v.strip().lower() == "list":
+        args["fresh"] = bool(fresh)
+    return _call_daemon_or_raise({"op": "group_space_sources", "args": args})
 
 
 def space_artifact(
@@ -140,6 +140,7 @@ def space_artifact(
     action: str = "list",
     kind: str = "",
     options: Optional[Dict[str, Any]] = None,
+    fresh: bool = False,
     wait: bool = False,
     save_to_space: bool = True,
     output_path: str = "",
@@ -176,6 +177,8 @@ def space_artifact(
             "by": str(by or "user"),
         },
     }
+    if action_v.strip().lower() == "list":
+        req["args"]["fresh"] = bool(fresh)
     daemon_timeout = 60.0
     if action_v == "generate":
         if wait_v:

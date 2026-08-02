@@ -60,7 +60,7 @@ class TestCliDaemonFallback(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_send_keeps_local_fallback_for_daemon_unavailable(self) -> None:
+    def test_send_does_not_fallback_for_daemon_unavailable(self) -> None:
         from no1 import cli
 
         _, cleanup = self._with_home()
@@ -79,17 +79,17 @@ class TestCliDaemonFallback(unittest.TestCase):
 
             with patch.object(cli, "_ensure_daemon_running", return_value=True), \
                  patch.object(cli, "call_daemon", return_value=resp), \
+                 patch.object(cli, "append_event", side_effect=AssertionError("local append should not run")) as append_event, \
                  patch.object(cli, "_print_json") as print_json:
                 code = cli.cmd_send(args)
 
-            self.assertEqual(code, 0)
-            printed = print_json.call_args.args[0]
-            self.assertTrue(bool(printed.get("ok")))
-            self.assertEqual(str(((printed.get("result") or {}).get("event") or {}).get("kind") or ""), "chat.message")
+            self.assertEqual(code, 2)
+            append_event.assert_not_called()
+            print_json.assert_called_once_with(resp)
         finally:
             cleanup()
 
-    def test_send_defaults_to_actor_env_inside_runtime(self) -> None:
+    def test_send_rejects_actor_env_inside_runtime(self) -> None:
         from no1 import cli
 
         _, cleanup = self._with_home()
@@ -106,6 +106,35 @@ class TestCliDaemonFallback(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {"CCCC_ACTOR_ID": "小抠"}, clear=False), \
+                 patch.object(cli, "_ensure_daemon_running") as ensure_daemon, \
+                 patch.object(cli, "call_daemon") as call_daemon, \
+                 patch.object(cli, "_print_json") as print_json:
+                code = cli.cmd_send(args)
+
+            self.assertEqual(code, 2)
+            ensure_daemon.assert_not_called()
+            call_daemon.assert_not_called()
+            self.assertEqual(print_json.call_args.args[0]["error"]["code"], "permission_denied")
+        finally:
+            cleanup()
+
+    def test_send_uses_closed_cli_user_operation(self) -> None:
+        from no1 import cli
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+            args = Namespace(
+                group=group_id,
+                text="local user request",
+                by="user",
+                path="",
+                to=[],
+                priority="normal",
+                reply_required=False,
+            )
+
+            with patch.dict(os.environ, {"CCCC_ACTOR_ID": "", "ONECOLLEAGUE_ACTOR_ID": ""}, clear=False), \
                  patch.object(cli, "_ensure_daemon_running", return_value=True), \
                  patch.object(cli, "call_daemon", return_value={"ok": True, "result": {}}) as call_daemon, \
                  patch.object(cli, "_print_json"):
@@ -113,12 +142,13 @@ class TestCliDaemonFallback(unittest.TestCase):
 
             self.assertEqual(code, 0)
             req = call_daemon.call_args.args[0]
-            self.assertEqual(req.get("op"), "send")
-            self.assertEqual((req.get("args") or {}).get("by"), "小抠")
+            self.assertEqual(req.get("op"), "cli_message_send")
+            self.assertEqual((req.get("args") or {}).get("by"), "user")
+            self.assertFalse(any(str(key).startswith("__") for key in (req.get("args") or {})))
         finally:
             cleanup()
 
-    def test_reply_defaults_to_actor_env_inside_runtime(self) -> None:
+    def test_reply_rejects_actor_env_inside_runtime(self) -> None:
         from no1 import cli
         from no1.contracts.v1 import ChatMessageData
         from no1.kernel.group import load_group
@@ -148,19 +178,19 @@ class TestCliDaemonFallback(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {"CCCC_ACTOR_ID": "小抠"}, clear=False), \
-                 patch.object(cli, "_ensure_daemon_running", return_value=True), \
-                 patch.object(cli, "call_daemon", return_value={"ok": True, "result": {}}) as call_daemon, \
-                 patch.object(cli, "_print_json"):
+                 patch.object(cli, "_ensure_daemon_running") as ensure_daemon, \
+                 patch.object(cli, "call_daemon") as call_daemon, \
+                 patch.object(cli, "_print_json") as print_json:
                 code = cli.cmd_reply(args)
 
-            self.assertEqual(code, 0)
-            req = call_daemon.call_args.args[0]
-            self.assertEqual(req.get("op"), "reply")
-            self.assertEqual((req.get("args") or {}).get("by"), "小抠")
+            self.assertEqual(code, 2)
+            ensure_daemon.assert_not_called()
+            call_daemon.assert_not_called()
+            self.assertEqual(print_json.call_args.args[0]["error"]["code"], "permission_denied")
         finally:
             cleanup()
 
-    def test_tracked_send_defaults_to_actor_env_inside_runtime(self) -> None:
+    def test_tracked_send_rejects_actor_env_inside_runtime(self) -> None:
         from no1 import cli
 
         _, cleanup = self._with_home()
@@ -184,15 +214,15 @@ class TestCliDaemonFallback(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {"CCCC_ACTOR_ID": "小抠"}, clear=False), \
-                 patch.object(cli, "_ensure_daemon_running", return_value=True), \
-                 patch.object(cli, "call_daemon", return_value={"ok": True, "result": {}}) as call_daemon, \
-                 patch.object(cli, "_print_json"):
+                 patch.object(cli, "_ensure_daemon_running") as ensure_daemon, \
+                 patch.object(cli, "call_daemon") as call_daemon, \
+                 patch.object(cli, "_print_json") as print_json:
                 code = cli.cmd_tracked_send(args)
 
-            self.assertEqual(code, 0)
-            req = call_daemon.call_args.args[0]
-            self.assertEqual(req.get("op"), "tracked_send")
-            self.assertEqual((req.get("args") or {}).get("by"), "小抠")
+            self.assertEqual(code, 2)
+            ensure_daemon.assert_not_called()
+            call_daemon.assert_not_called()
+            self.assertEqual(print_json.call_args.args[0]["error"]["code"], "permission_denied")
         finally:
             cleanup()
 

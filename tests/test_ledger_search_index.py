@@ -6,17 +6,20 @@ from unittest.mock import patch
 
 class TestLedgerSearchIndex(unittest.TestCase):
     def _with_home(self):
-        old_home = os.environ.get("CCCC_HOME")
+        home_vars = ("ONECOLLEAGUE_HOME", "CCCC_HOME")
+        old_homes = {name: os.environ.get(name) for name in home_vars}
         td_ctx = tempfile.TemporaryDirectory()
         td = td_ctx.__enter__()
-        os.environ["CCCC_HOME"] = td
+        for name in home_vars:
+            os.environ[name] = td
 
         def cleanup() -> None:
+            for name, old_home in old_homes.items():
+                if old_home is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = old_home
             td_ctx.__exit__(None, None, None)
-            if old_home is None:
-                os.environ.pop("CCCC_HOME", None)
-            else:
-                os.environ["CCCC_HOME"] = old_home
 
         return td, cleanup
 
@@ -94,6 +97,38 @@ class TestLedgerSearchIndex(unittest.TestCase):
             self.assertEqual(len(events), 2)
             texts = [str((ev.get("data") if isinstance(ev.get("data"), dict) else {}).get("text") or "") for ev in events]
             self.assertTrue(all("hello" in text.lower() for text in texts))
+        finally:
+            cleanup()
+
+    def test_search_messages_finds_insight_in_index_and_ledger_fallback(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import search_messages
+
+            create, _ = self._call("group_create", {"title": "search-insight", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            sent, _ = self._call(
+                "send",
+                {
+                    "group_id": group_id,
+                    "text": "ordinary body",
+                    "insight": "The quasar boundary is the durable message fact.",
+                    "by": "user",
+                    "to": ["user"],
+                },
+            )
+            self.assertTrue(sent.ok, getattr(sent, "error", None))
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+
+            indexed, _ = search_messages(group, query="quasar", kind_filter="chat", limit=10)
+            self.assertEqual(len(indexed), 1)
+            with patch("no1.kernel.inbox.search_event_ids_indexed", return_value=([], False)):
+                fallback, _ = search_messages(group, query="quasar", kind_filter="chat", limit=10)
+            self.assertEqual([event.get("id") for event in fallback], [event.get("id") for event in indexed])
         finally:
             cleanup()
 

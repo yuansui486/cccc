@@ -33,6 +33,7 @@ class AttachRequest(BaseModel):
 
 class SendRequest(BaseModel):
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     to: list[str] = Field(default_factory=list)
     path: str = Field(default="")
@@ -49,6 +50,7 @@ class SendRequest(BaseModel):
 
 class SendCrossGroupRequest(BaseModel):
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     dst_group_id: str
     to: list[str] = Field(default_factory=list)
@@ -60,6 +62,7 @@ class SendCrossGroupRequest(BaseModel):
 class TrackedSendRequest(BaseModel):
     title: str
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     to: list[str] = Field(default_factory=list)
     outcome: str = Field(default="")
@@ -76,6 +79,7 @@ class TrackedSendRequest(BaseModel):
 
 class ReplyRequest(BaseModel):
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     to: list[str] = Field(default_factory=list)
     reply_to: str
@@ -248,7 +252,6 @@ class GroupSettingsRequest(BaseModel):
 
     # Features
     panorama_enabled: Optional[bool] = None
-    desktop_pet_enabled: Optional[bool] = None
     capability_defaults: Optional[Dict[str, Any]] = None
 
     by: str = Field(default="user")
@@ -372,16 +375,6 @@ class AssistantVoiceAskRequestsClearRequest(BaseModel):
     by: str = Field(default="user")
 
 
-class PetDecisionOutcomeRequest(BaseModel):
-    fingerprint: str
-    outcome: Literal["executed", "dismissed"]
-    decision_id: str = Field(default="")
-    action_type: str = Field(default="")
-    cooldown_ms: int = Field(default=0)
-    source_event_id: str = Field(default="")
-    by: str = Field(default="user")
-
-
 class GroupAutomationRequest(BaseModel):
     rules: list[AutomationRule] = Field(default_factory=list)
     snippets: Dict[str, str] = Field(default_factory=dict)
@@ -491,7 +484,7 @@ class ObservabilityUpdateRequest(BaseModel):
     terminal_transcript_per_actor_bytes: Optional[int] = None
     terminal_ui_scrollback_lines: Optional[int] = None
     peer_runtime_visibility: Optional[Literal["hidden", "visible"]] = None
-    pet_runtime_visibility: Optional[Literal["hidden", "visible"]] = None
+    assistant_runtime_visibility: Optional[Literal["hidden", "visible"]] = None
 
 
 class RegistryReconcileRequest(BaseModel):

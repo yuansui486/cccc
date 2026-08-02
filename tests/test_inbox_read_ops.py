@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 
 class TestInboxReadOps(unittest.TestCase):
@@ -26,14 +27,16 @@ class TestInboxReadOps(unittest.TestCase):
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_inbox_mark_read_emits_chat_ack_for_attention(self) -> None:
-        _, cleanup = self._with_home()
+        home, cleanup = self._with_home()
         try:
             create, _ = self._call("group_create", {"title": "inbox-read", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
             group_id = str((create.result or {}).get("group_id") or "").strip()
             self.assertTrue(group_id)
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             add, _ = self._call(
@@ -86,14 +89,16 @@ class TestInboxReadOps(unittest.TestCase):
             cleanup()
 
     def test_chat_ack_idempotent_and_mark_all_read(self) -> None:
-        _, cleanup = self._with_home()
+        home, cleanup = self._with_home()
         try:
             create, _ = self._call("group_create", {"title": "inbox-ack", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
             group_id = str((create.result or {}).get("group_id") or "").strip()
             self.assertTrue(group_id)
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             add, _ = self._call(
@@ -162,7 +167,7 @@ class TestInboxReadOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_internal_pet_does_not_match_peer_or_broadcast_chat_targets(self) -> None:
+    def test_unsupported_internal_actor_does_not_match_peer_or_broadcast_chat_targets(self) -> None:
         from no1.kernel.actors import add_actor
         from no1.kernel.group import create_group, load_group
         from no1.kernel.inbox import is_message_for_actor
@@ -171,25 +176,36 @@ class TestInboxReadOps(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             registry = load_registry()
-            group_id = create_group(registry, title="pet-routing", topic="").group_id
+            group_id = create_group(registry, title="legacy-internal-routing", topic="").group_id
             group = load_group(group_id)
             self.assertIsNotNone(group)
             assert group is not None
 
             add_actor(group, actor_id="lead", title="Lead", runtime="codex", runner="headless")  # type: ignore[arg-type]
             add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="headless")  # type: ignore[arg-type]
-            add_actor(group, actor_id="pet-peer", title="Pet Peer", internal_kind="pet")  # type: ignore[arg-type]
+            actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+            actors.append(
+                {
+                    "id": "legacy-internal",
+                    "title": "Legacy Internal",
+                    "internal_kind": "legacy",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "enabled": True,
+                }
+            )
+            group.save()
 
             peers_event = {"kind": "chat.message", "by": "lead", "data": {"to": ["@peers"], "text": "peer ping"}}
             all_event = {"kind": "chat.message", "by": "lead", "data": {"to": ["@all"], "text": "all ping"}}
             broadcast_event = {"kind": "chat.message", "by": "lead", "data": {"text": "broadcast ping"}}
-            direct_event = {"kind": "chat.message", "by": "lead", "data": {"to": ["pet-peer"], "text": "direct ping"}}
+            direct_event = {"kind": "chat.message", "by": "lead", "data": {"to": ["legacy-internal"], "text": "direct ping"}}
 
             self.assertTrue(is_message_for_actor(group, actor_id="peer1", event=peers_event))
-            self.assertFalse(is_message_for_actor(group, actor_id="pet-peer", event=peers_event))
-            self.assertFalse(is_message_for_actor(group, actor_id="pet-peer", event=all_event))
-            self.assertFalse(is_message_for_actor(group, actor_id="pet-peer", event=broadcast_event))
-            self.assertTrue(is_message_for_actor(group, actor_id="pet-peer", event=direct_event))
+            self.assertFalse(is_message_for_actor(group, actor_id="legacy-internal", event=peers_event))
+            self.assertFalse(is_message_for_actor(group, actor_id="legacy-internal", event=all_event))
+            self.assertFalse(is_message_for_actor(group, actor_id="legacy-internal", event=broadcast_event))
+            self.assertTrue(is_message_for_actor(group, actor_id="legacy-internal", event=direct_event))
         finally:
             cleanup()
 

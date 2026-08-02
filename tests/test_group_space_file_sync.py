@@ -531,9 +531,9 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                  patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
                  patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
                  patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
+                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext) as get_fulltext, \
                  patch("no1.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts), \
-                 patch("no1.daemon.space.group_space_sync.provider_download_artifact", side_effect=_download_artifact):
+                 patch("no1.daemon.space.group_space_sync.provider_download_artifact", side_effect=_download_artifact) as download_artifact:
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -541,6 +541,8 @@ class TestGroupSpaceFileSync(unittest.TestCase):
             self.assertGreaterEqual(int(result.get("materialized_sources") or 0), 1)
             self.assertEqual(int(result.get("remote_artifacts") or 0), 1)
             self.assertEqual(int(result.get("downloaded_artifacts") or 0), 1)
+            get_fulltext.assert_called_once()
+            download_artifact.assert_called_once()
 
             remote_source_snapshot = space_dir / ".sync" / "remote-sources" / "src_remote_1.json"
             self.assertTrue(remote_source_snapshot.exists())
@@ -552,6 +554,7 @@ class TestGroupSpaceFileSync(unittest.TestCase):
             self.assertEqual(str(desc.get("source_id") or ""), "src_remote_1")
             self.assertEqual(str(desc.get("type") or ""), "web_page")
             self.assertEqual(str(desc.get("url") or ""), "https://example.com/a")
+            self.assertEqual(str(desc.get("content_status") or ""), "ready")
             remote_source_preview = self._find_preview_by_descriptor(space_dir, remote_source_descriptor)
             self.assertIsNotNone(remote_source_preview)
             remote_source_preview = remote_source_preview or (space_dir / ".sync" / "source-text" / "missing.txt")
@@ -567,6 +570,403 @@ class TestGroupSpaceFileSync(unittest.TestCase):
 
             artifact_path = space_dir / "artifacts" / "notebooklm" / "infographic" / "art_remote_1.png"
             self.assertTrue(artifact_path.exists())
+
+            ready_preview_text = remote_source_preview.read_text(encoding="utf-8")
+            with patch(
+                "no1.daemon.space.group_space_sync.provider_list_sources",
+                side_effect=_list_sources,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                side_effect=AssertionError("background sync must preserve cached fulltext"),
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                side_effect=_list_artifacts,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_download_artifact",
+                side_effect=AssertionError("background sync must preserve local artifact without downloading"),
+            ) as background_download, patch(
+                "no1.daemon.space.group_space_sync._reconcile_stale_seconds",
+                return_value=0,
+            ):
+                background = sync_group_space_files(gid, provider="notebooklm", force=False)
+
+            self.assertTrue(bool(background.get("ok")))
+            background_download.assert_not_called()
+            self.assertTrue(artifact_path.exists())
+            artifact_manifest = json.loads(
+                (space_dir / ".sync" / "remote-artifacts.json").read_text(encoding="utf-8")
+            )
+            artifact_entry = (artifact_manifest.get("entries") or {}).get("infographic:art_remote_1") or {}
+            self.assertTrue(bool(artifact_entry.get("downloaded")))
+
+            artifact_manifest_path = space_dir / ".sync" / "remote-artifacts.json"
+            remote_artifacts.clear()
+            with patch(
+                "no1.daemon.space.group_space_sync.provider_list_sources",
+                side_effect=_list_sources,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                side_effect=AssertionError("background sync must not fetch fulltext while pruning metadata"),
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                side_effect=_list_artifacts,
+            ), patch(
+                "no1.daemon.space.group_space_sync._reconcile_stale_seconds",
+                return_value=0,
+            ):
+                background_prune = sync_group_space_files(gid, provider="notebooklm", force=False)
+            self.assertTrue(bool(background_prune.get("ok")))
+            self.assertEqual(int(background_prune.get("pruned_artifacts") or 0), 0)
+            self.assertTrue(artifact_path.exists())
+            background_manifest = json.loads(artifact_manifest_path.read_text(encoding="utf-8"))
+            self.assertNotIn("infographic:art_remote_1", background_manifest.get("entries") or {})
+
+            artifact_manifest_path.write_text(json.dumps(artifact_manifest), encoding="utf-8")
+            with patch(
+                "no1.daemon.space.group_space_sync.provider_list_sources",
+                side_effect=_list_sources,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                side_effect=_get_source_fulltext,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                side_effect=_list_artifacts,
+            ):
+                forced_prune = sync_group_space_files(gid, provider="notebooklm", force=True)
+            self.assertTrue(bool(forced_prune.get("ok")))
+            self.assertEqual(int(forced_prune.get("pruned_artifacts") or 0), 1)
+            self.assertFalse(artifact_path.exists())
+
+            preserved_desc = self._find_descriptor_by_source_id(space_dir, "src_remote_1")
+            self.assertIsNotNone(preserved_desc)
+            preserved_doc = json.loads((preserved_desc or Path("missing")).read_text(encoding="utf-8"))
+            self.assertEqual(str(preserved_doc.get("content_status") or ""), "ready")
+            preserved_preview = self._find_preview_by_descriptor(space_dir, preserved_desc or Path("missing"))
+            self.assertIsNotNone(preserved_preview)
+            self.assertEqual((preserved_preview or Path("missing")).read_text(encoding="utf-8"), ready_preview_text)
+
+            ready_descriptor_doc = dict(preserved_doc)
+            for field, value in (
+                ("provider", "other_provider"),
+                ("remote_space_id", "nb_other"),
+                ("source_id", "src_other"),
+            ):
+                with self.subTest(identity_field=field):
+                    mismatched_doc = dict(ready_descriptor_doc)
+                    mismatched_doc[field] = value
+                    (preserved_desc or Path("missing")).write_text(json.dumps(mismatched_doc), encoding="utf-8")
+                    (preserved_preview or Path("missing")).write_text(ready_preview_text, encoding="utf-8")
+                    with patch(
+                        "no1.daemon.space.group_space_sync.provider_list_sources",
+                        side_effect=_list_sources,
+                    ), patch(
+                        "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                        side_effect=AssertionError("background sync must not fetch mismatched fulltext"),
+                    ), patch(
+                        "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                        side_effect=_list_artifacts,
+                    ), patch(
+                        "no1.daemon.space.group_space_sync._reconcile_stale_seconds",
+                        return_value=0,
+                    ):
+                        mismatch_result = sync_group_space_files(gid, provider="notebooklm", force=False)
+                    self.assertTrue(bool(mismatch_result.get("ok")))
+                    mismatch_doc = json.loads((preserved_desc or Path("missing")).read_text(encoding="utf-8"))
+                    self.assertEqual(str(mismatch_doc.get("content_status") or ""), "deferred")
+                    self.assertNotEqual(
+                        (preserved_preview or Path("missing")).read_text(encoding="utf-8"),
+                        ready_preview_text,
+                    )
+
+            (preserved_desc or Path("missing")).write_text(json.dumps(ready_descriptor_doc), encoding="utf-8")
+            (preserved_preview or Path("missing")).unlink()
+            with patch(
+                "no1.daemon.space.group_space_sync.provider_list_sources",
+                side_effect=_list_sources,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                side_effect=AssertionError("background sync must not fetch missing cached preview"),
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                side_effect=_list_artifacts,
+            ), patch(
+                "no1.daemon.space.group_space_sync._reconcile_stale_seconds",
+                return_value=0,
+            ):
+                missing_preview_result = sync_group_space_files(gid, provider="notebooklm", force=False)
+            self.assertTrue(bool(missing_preview_result.get("ok")))
+            missing_preview_doc = json.loads((preserved_desc or Path("missing")).read_text(encoding="utf-8"))
+            self.assertEqual(str(missing_preview_doc.get("content_status") or ""), "deferred")
+            self.assertIn(
+                "Remote source text not fetched during background sync",
+                (preserved_preview or Path("missing")).read_text(encoding="utf-8"),
+            )
+
+            (preserved_desc or Path("missing")).write_text(json.dumps(ready_descriptor_doc), encoding="utf-8")
+            (preserved_preview or Path("missing")).write_text(
+                "[Source still processing]\nsource_id=src_remote_1\n",
+                encoding="utf-8",
+            )
+            with patch(
+                "no1.daemon.space.group_space_sync.provider_list_sources",
+                side_effect=_list_sources,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                side_effect=AssertionError("background sync must not fetch placeholder content"),
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                side_effect=_list_artifacts,
+            ), patch(
+                "no1.daemon.space.group_space_sync._reconcile_stale_seconds",
+                return_value=0,
+            ):
+                placeholder_result = sync_group_space_files(gid, provider="notebooklm", force=False)
+            self.assertTrue(bool(placeholder_result.get("ok")))
+            placeholder_doc = json.loads((preserved_desc or Path("missing")).read_text(encoding="utf-8"))
+            self.assertEqual(str(placeholder_doc.get("content_status") or ""), "deferred")
+
+            (preserved_desc or Path("missing")).write_text(json.dumps(ready_descriptor_doc), encoding="utf-8")
+            (preserved_preview or Path("missing")).write_text(ready_preview_text, encoding="utf-8")
+            remote_sources[0]["status"] = 1
+            with patch(
+                "no1.daemon.space.group_space_sync.provider_list_sources",
+                side_effect=_list_sources,
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                side_effect=AssertionError("processing source must not fetch fulltext"),
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                side_effect=_list_artifacts,
+            ), patch(
+                "no1.daemon.space.group_space_sync._reconcile_stale_seconds",
+                return_value=0,
+            ):
+                processing_result = sync_group_space_files(gid, provider="notebooklm", force=False)
+            self.assertTrue(bool(processing_result.get("ok")))
+            current_processing_doc = json.loads(
+                (preserved_desc or Path("missing")).read_text(encoding="utf-8")
+            )
+            self.assertEqual(str(current_processing_doc.get("content_status") or ""), "processing")
+            self.assertIn(
+                "Source still processing",
+                (preserved_preview or Path("missing")).read_text(encoding="utf-8"),
+            )
+        finally:
+            project_ctx.__exit__(None, None, None)
+            cleanup()
+
+    def test_background_sync_caches_metadata_and_lists_fall_back_when_required(self) -> None:
+        _, cleanup = self._with_home()
+        project_ctx = tempfile.TemporaryDirectory()
+        project_dir = Path(project_ctx.__enter__()).resolve()
+        try:
+            gid = self._create_group("space-sync-cache-lists")
+            self._attach(gid, project_dir)
+            self._bind(gid, "nb_sync_cache_lists")
+
+            space_dir = project_dir / "space"
+            space_dir.mkdir(parents=True, exist_ok=True)
+            remote_sources = [
+                {
+                    "source_id": "src_cached_ready",
+                    "title": "Cached Ready Source",
+                    "kind": "web_page",
+                    "status": 2,
+                    "url": "https://example.com/cached",
+                },
+                {
+                    "source_id": "src_cached_processing",
+                    "title": "Cached Processing Source",
+                    "kind": "pdf",
+                    "status": 1,
+                    "url": "",
+                },
+            ]
+            remote_artifacts = [
+                {
+                    "artifact_id": "art_cached_1",
+                    "title": "Cached Artifact",
+                    "kind": "ArtifactType.INFOGRAPHIC",
+                    "status": "completed",
+                    "created_at": "2026-02-23T00:00:00Z",
+                    "url": "https://example.com/artifact",
+                }
+            ]
+
+            with patch(
+                "no1.daemon.space.group_space_sync.provider_list_sources",
+                return_value={"sources": remote_sources},
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_get_source_fulltext",
+                side_effect=AssertionError("background sync must defer fulltext"),
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_list_artifacts",
+                return_value={"artifacts": remote_artifacts},
+            ), patch(
+                "no1.daemon.space.group_space_sync.provider_download_artifact",
+                side_effect=AssertionError("background sync must defer artifact payload"),
+            ) as background_download:
+                from no1.daemon.space.group_space_sync import sync_group_space_files
+
+                result = sync_group_space_files(gid, provider="notebooklm", force=False)
+
+            self.assertTrue(bool(result.get("ok")))
+            background_download.assert_not_called()
+            self.assertEqual(int(result.get("remote_sources") or 0), 2)
+            self.assertEqual(int(result.get("remote_artifacts") or 0), 1)
+            self.assertEqual(int(result.get("downloaded_artifacts") or 0), 0)
+            artifact_manifest = json.loads(
+                (space_dir / ".sync" / "remote-artifacts.json").read_text(encoding="utf-8")
+            )
+            artifact_entry = (artifact_manifest.get("entries") or {}).get("infographic:art_cached_1") or {}
+            self.assertFalse(bool(artifact_entry.get("downloaded")))
+            ready_desc = self._find_descriptor_by_source_id(space_dir, "src_cached_ready")
+            processing_desc = self._find_descriptor_by_source_id(space_dir, "src_cached_processing")
+            self.assertIsNotNone(ready_desc)
+            self.assertIsNotNone(processing_desc)
+            ready_doc = json.loads((ready_desc or Path("missing")).read_text(encoding="utf-8"))
+            processing_doc = json.loads((processing_desc or Path("missing")).read_text(encoding="utf-8"))
+            self.assertEqual(str(ready_doc.get("content_status") or ""), "deferred")
+            self.assertEqual(str(processing_doc.get("content_status") or ""), "processing")
+            ready_preview = self._find_preview_by_descriptor(space_dir, ready_desc or Path("missing"))
+            self.assertIsNotNone(ready_preview)
+            self.assertIn(
+                "Remote source text not fetched during background sync",
+                (ready_preview or Path("missing")).read_text(encoding="utf-8"),
+            )
+
+            with patch(
+                "no1.daemon.space.group_space_ops.provider_list_sources",
+                side_effect=AssertionError("sources should use cache"),
+            ), patch(
+                "no1.daemon.space.group_space_ops.provider_list_artifacts",
+                side_effect=AssertionError("artifacts should use cache"),
+            ):
+                sources_resp, _ = self._call(
+                    "group_space_sources",
+                    {"group_id": gid, "provider": "notebooklm", "lane": "work", "action": "list"},
+                )
+                artifacts_resp, _ = self._call(
+                    "group_space_artifact",
+                    {"group_id": gid, "provider": "notebooklm", "lane": "work", "action": "list"},
+                )
+            self.assertTrue(sources_resp.ok, getattr(sources_resp, "error", None))
+            self.assertTrue(artifacts_resp.ok, getattr(artifacts_resp, "error", None))
+            sources_result = sources_resp.result if isinstance(sources_resp.result, dict) else {}
+            artifacts_result = artifacts_resp.result if isinstance(artifacts_resp.result, dict) else {}
+            self.assertTrue(bool((sources_result.get("list_result") or {}).get("cached")))
+            self.assertTrue(bool((artifacts_result.get("list_result") or {}).get("cached")))
+            self.assertEqual(len(sources_result.get("sources") or []), 2)
+            self.assertEqual(str(((artifacts_result.get("artifacts") or [{}])[0]).get("artifact_id") or ""), "art_cached_1")
+
+            from no1.daemon.space.group_space_sync import (
+                read_cached_remote_artifacts,
+                read_cached_remote_source_snapshots,
+            )
+
+            self.assertFalse(
+                bool(
+                    read_cached_remote_source_snapshots(
+                        space_dir,
+                        provider="notebooklm",
+                        remote_space_id="nb_wrong",
+                    ).get("available")
+                )
+            )
+            self.assertFalse(
+                bool(
+                    read_cached_remote_artifacts(
+                        space_dir,
+                        provider="wrong_provider",
+                        remote_space_id="nb_sync_cache_lists",
+                    ).get("available")
+                )
+            )
+
+            fresh_sources = [{"source_id": "src_fresh", "title": "Fresh", "kind": "web_page", "status": 2}]
+            fresh_artifacts = [{"artifact_id": "art_fresh", "title": "Fresh", "kind": "report", "status": "completed"}]
+            with patch(
+                "no1.daemon.space.group_space_ops.provider_list_sources",
+                return_value={"sources": fresh_sources},
+            ) as list_sources, patch(
+                "no1.daemon.space.group_space_ops.provider_list_artifacts",
+                return_value={"artifacts": fresh_artifacts},
+            ) as list_artifacts:
+                fresh_sources_resp, _ = self._call(
+                    "group_space_sources",
+                    {
+                        "group_id": gid,
+                        "provider": "notebooklm",
+                        "lane": "work",
+                        "action": "list",
+                        "fresh": True,
+                    },
+                )
+                fresh_artifacts_resp, _ = self._call(
+                    "group_space_artifact",
+                    {
+                        "group_id": gid,
+                        "provider": "notebooklm",
+                        "lane": "work",
+                        "action": "list",
+                        "fresh": True,
+                    },
+                )
+            list_sources.assert_called_once()
+            list_artifacts.assert_called_once()
+            self.assertEqual(str(((fresh_sources_resp.result or {}).get("sources") or [{}])[0].get("source_id") or ""), "src_fresh")
+            self.assertEqual(
+                str(((fresh_artifacts_resp.result or {}).get("artifacts") or [{}])[0].get("artifact_id") or ""),
+                "art_fresh",
+            )
+
+            state_path = space_dir / ".space-sync-state.json"
+            state_doc = json.loads(state_path.read_text(encoding="utf-8"))
+            state_doc["provider"] = "wrong_provider"
+            state_path.write_text(json.dumps(state_doc), encoding="utf-8")
+            artifact_manifest = space_dir / ".sync" / "remote-artifacts.json"
+            artifact_doc = json.loads(artifact_manifest.read_text(encoding="utf-8"))
+            artifact_doc["remote_space_id"] = "nb_wrong"
+            artifact_manifest.write_text(json.dumps(artifact_doc), encoding="utf-8")
+            with patch(
+                "no1.daemon.space.group_space_ops.provider_list_sources",
+                return_value={"sources": fresh_sources},
+            ) as mismatch_sources, patch(
+                "no1.daemon.space.group_space_ops.provider_list_artifacts",
+                return_value={"artifacts": fresh_artifacts},
+            ) as mismatch_artifacts:
+                self._call(
+                    "group_space_sources",
+                    {"group_id": gid, "provider": "notebooklm", "lane": "work", "action": "list"},
+                )
+                self._call(
+                    "group_space_artifact",
+                    {"group_id": gid, "provider": "notebooklm", "lane": "work", "action": "list"},
+                )
+            mismatch_sources.assert_called_once()
+            mismatch_artifacts.assert_called_once()
+
+            state_doc["provider"] = "notebooklm"
+            state_path.write_text(json.dumps(state_doc), encoding="utf-8")
+            shutil.rmtree(space_dir / ".sync" / "remote-sources")
+            artifact_manifest.unlink()
+            with patch(
+                "no1.daemon.space.group_space_ops.provider_list_sources",
+                return_value={"sources": fresh_sources},
+            ) as missing_sources, patch(
+                "no1.daemon.space.group_space_ops.provider_list_artifacts",
+                return_value={"artifacts": fresh_artifacts},
+            ) as missing_artifacts:
+                self._call(
+                    "group_space_sources",
+                    {"group_id": gid, "provider": "notebooklm", "lane": "work", "action": "list"},
+                )
+                self._call(
+                    "group_space_artifact",
+                    {"group_id": gid, "provider": "notebooklm", "lane": "work", "action": "list"},
+                )
+            missing_sources.assert_called_once()
+            missing_artifacts.assert_called_once()
         finally:
             project_ctx.__exit__(None, None, None)
             cleanup()

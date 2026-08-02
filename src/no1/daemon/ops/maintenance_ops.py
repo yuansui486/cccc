@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.actors import resolve_recipient_tokens
+from ...kernel.actors import list_actors, resolve_recipient_tokens
 from ...kernel.group import load_group
 from ...kernel.ledger_retention import compact as compact_ledger
 from ...kernel.ledger_retention import snapshot as snapshot_ledger
 from ...kernel.permissions import require_group_permission
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
+from ..messaging.turn_provenance import INGRESS_CROSS_GROUP, TRUSTED_INGRESS_ARG
+from ..messaging.message_admission import (
+    ADMISSION_CLAIM_ARG,
+    INGRESS_CLAIM_ARG,
+    CommittedMessageAdmission,
+    MessageAdmissionError,
+    issue_admission_claim,
+    issue_message_admission,
+)
+from ...kernel.messaging import get_default_send_to, recipient_actor_ids
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -23,6 +34,7 @@ def handle_term_resize(args: Dict[str, Any]) -> DaemonResponse:
     actor_id = str(args.get("actor_id") or "").strip()
     cols_raw = args.get("cols")
     rows_raw = args.get("rows")
+    writer_lease = str(args.get("writer_lease") or "").strip()
     try:
         cols = int(cols_raw) if isinstance(cols_raw, int) else int(str(cols_raw or "0"))
     except Exception:
@@ -40,7 +52,17 @@ def handle_term_resize(args: Dict[str, Any]) -> DaemonResponse:
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
-    pty_runner.SUPERVISOR.resize(group_id=group_id, actor_id=actor_id, cols=cols, rows=rows)
+    if not writer_lease:
+        return _error("terminal_writer_lease_required", "terminal writer lease is required")
+    resized = pty_runner.SUPERVISOR.resize_if_writer(
+        group_id=group_id,
+        actor_id=actor_id,
+        writer_lease=writer_lease,
+        cols=cols,
+        rows=rows,
+    )
+    if not resized:
+        return _error("terminal_not_writable", "terminal writer lease is no longer active")
     return DaemonResponse(ok=True, result={"group_id": group_id, "actor_id": actor_id, "cols": cols, "rows": rows})
 
 
@@ -91,6 +113,7 @@ def handle_send_cross_group(
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"), default=False)
     collaboration_required = coerce_bool(args.get("collaboration_required"), default=False)
+    source_ingress = str(args.get(TRUSTED_INGRESS_ARG) or "").strip()
     to_raw = args.get("to")
     dst_to_tokens: list[str] = []
     if isinstance(to_raw, list):
@@ -118,12 +141,70 @@ def handle_send_cross_group(
     if dst_group is None:
         return _error("group_not_found", f"group not found: {dst_group_id}")
 
+    dst_input_tokens = list(dst_to_tokens)
     dst_to_canon: list[str] = []
     if dst_to_tokens:
         try:
             dst_to_canon = resolve_recipient_tokens(dst_group, dst_to_tokens)
         except Exception as e:
             return _error("invalid_recipient", str(e))
+    if not dst_to_canon and not dst_to_tokens:
+        mentions = re.findall(r"@(\w[\w-]*)", text)
+        actor_ids = {
+            str(actor.get("id") or "").strip()
+            for actor in list_actors(dst_group)
+            if isinstance(actor, dict)
+        }
+        mention_tokens = [
+            f"@{item}" if item in {"all", "peers", "foreman"} else item
+            for item in mentions
+            if item in actor_ids or item in {"all", "peers", "foreman"}
+        ]
+        if mention_tokens:
+            dst_input_tokens = mention_tokens
+            try:
+                dst_to_canon = resolve_recipient_tokens(dst_group, mention_tokens)
+            except Exception as e:
+                return _error("invalid_recipient", str(e))
+    if not dst_to_canon and not dst_to_tokens and get_default_send_to(dst_group.doc) == "foreman":
+        dst_to_canon = ["@foreman"]
+
+    source_admission_claim = None
+    destination_admission_claim = None
+    insight = args.get("insight")
+    if INGRESS_CLAIM_ARG in args:
+        try:
+            peers = [actor_id for actor_id in recipient_actor_ids(dst_group, dst_to_canon) if actor_id != by]
+            pending = issue_message_admission(
+                args,
+                expected_op="send_cross_group",
+                destination_group=dst_group,
+                input_tokens=dst_input_tokens,
+                to=dst_to_canon,
+                peer_actor_ids=peers,
+            )
+            destination_admission = pending.consume_current(lambda value: value)
+            source_admission = CommittedMessageAdmission(
+                group_id=src_group_id,
+                sender_id=by,
+                to=("user",),
+                insight=destination_admission.insight,
+                authority_kind=destination_admission.authority_kind,
+                ingress=destination_admission.ingress,
+            )
+            destination_admission = CommittedMessageAdmission(
+                group_id=destination_admission.group_id,
+                sender_id=destination_admission.sender_id,
+                to=destination_admission.to,
+                insight=destination_admission.insight,
+                authority_kind=destination_admission.authority_kind,
+                ingress=INGRESS_CROSS_GROUP,
+            )
+            source_admission_claim = issue_admission_claim(source_admission)
+            destination_admission_claim = issue_admission_claim(destination_admission)
+            insight = destination_admission.insight
+        except MessageAdmissionError as exc:
+            return _error(exc.code, exc.message, details=exc.details)
 
     src_resp, _ = dispatch_send(
         "send",
@@ -137,6 +218,8 @@ def handle_send_cross_group(
             "collaboration_required": collaboration_required,
             "dst_group_id": dst_group_id,
             "dst_to": dst_to_canon,
+            "insight": insight,
+            **({ADMISSION_CLAIM_ARG: source_admission_claim} if source_admission_claim is not None else {TRUSTED_INGRESS_ARG: source_ingress}),
         },
     )
     if not src_resp.ok:
@@ -159,6 +242,9 @@ def handle_send_cross_group(
             "collaboration_required": collaboration_required,
             "src_group_id": src_group_id,
             "src_event_id": src_event_id,
+            "src_by": by,
+            "insight": insight,
+            **({ADMISSION_CLAIM_ARG: destination_admission_claim} if destination_admission_claim is not None else {TRUSTED_INGRESS_ARG: INGRESS_CROSS_GROUP}),
         },
     )
     if not dst_resp.ok:

@@ -118,6 +118,13 @@ def _web_mode() -> Literal["normal", "exhibit"]:
 
 
 _PUBLIC_API_PATHS = frozenset({"/api/v1/health", "/api/v1/branding"})
+_GROUP_BRIDGE_SESSION_RECEIVE_PATH = "/api/group-bridge/session/receive"
+_GROUP_BRIDGE_PAIRING_PUBLIC_PATHS = frozenset(
+    {
+        "/api/group-bridge/pairing/remote/requests",
+        "/api/group-bridge/pairing/remote/status",
+    }
+)
 
 
 def _is_public_ui_path(request: Request) -> bool:
@@ -136,6 +143,8 @@ def _is_public_path(request: Request) -> bool:
     return (
         _is_public_ui_path(request)
         or path in _PUBLIC_API_PATHS
+        or path == _GROUP_BRIDGE_SESSION_RECEIVE_PATH
+        or path in _GROUP_BRIDGE_PAIRING_PUBLIC_PATHS
         or path.startswith("/api/v1/branding/assets/")
         or path.startswith("/mcp/web-model/")
         or path.startswith("/nomcp/s/")
@@ -249,11 +258,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
-        from ...computer_control.services import get_services as get_computer_control_services
-
         _configure_web_logging()
-        computer_control_services = get_computer_control_services(home)
-        await computer_control_services.scheduler.start()
         restart_supported = str(os.environ.get("CCCC_WEB_SUPERVISED") or "").strip().lower() in ("1", "true", "yes", "on")
         runtime_host_raw = str(os.environ.get("CCCC_WEB_EFFECTIVE_HOST") or "").strip()
         runtime_port_raw = str(os.environ.get("CCCC_WEB_EFFECTIVE_PORT") or "").strip()
@@ -322,7 +327,6 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
-            await computer_control_services.scheduler.stop()
             supervisor_watchdog_stop.set()
             if supervisor_watchdog_thread is not None:
                 try:
@@ -516,6 +520,7 @@ def create_app() -> FastAPI:
     from .routes.nomcp import create_routers as create_nomcp_routers
     from .routes.studio import create_routers as create_studio_routers
     from .routes.computer_control import create_routers as create_computer_control_routers
+    from .routes.group_bridge import create_routers as create_group_bridge_routers
 
     route_ctx = RouteContext(
         home=home,
@@ -545,6 +550,8 @@ def create_app() -> FastAPI:
     for router in create_studio_routers(route_ctx):
         app.include_router(router)
     for router in create_computer_control_routers(route_ctx):
+        app.include_router(router)
+    for router in create_group_bridge_routers(route_ctx):
         app.include_router(router)
     register_im_routes(app, ctx=route_ctx)
     for router in create_access_token_routers(route_ctx):

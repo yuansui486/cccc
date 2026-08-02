@@ -322,8 +322,6 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
     # Group feature toggles
     if "panorama_enabled" in settings:
         patch["panorama_enabled"] = coerce_bool(settings.get("panorama_enabled"), default=False)
-    if "desktop_pet_enabled" in settings:
-        patch["desktop_pet_enabled"] = coerce_bool(settings.get("desktop_pet_enabled"), default=False)
 
     delivery_keys = {"min_interval_seconds", "auto_mark_on_delivery"}
     automation_keys = {
@@ -346,7 +344,7 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
         "task_planned_unassigned_milestones_seconds",
     }
     messaging_keys = {"default_send_to"}
-    feature_keys = {"panorama_enabled", "desktop_pet_enabled"}
+    feature_keys = {"panorama_enabled"}
 
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}

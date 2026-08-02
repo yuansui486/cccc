@@ -65,7 +65,7 @@ class TestDaemonCoreOps(unittest.TestCase):
                         },
                         "runtime_visibility": {
                             "peer_runtime": "hidden",
-                            "pet_runtime": "visible",
+                            "assistant_runtime": "hidden",
                         },
                     },
                 },
@@ -87,7 +87,47 @@ class TestDaemonCoreOps(unittest.TestCase):
             )
             runtime_visibility = obs.get("runtime_visibility") if isinstance(obs.get("runtime_visibility"), dict) else {}
             self.assertEqual(str(runtime_visibility.get("peer_runtime") or ""), "hidden")
-            self.assertEqual(str(runtime_visibility.get("pet_runtime") or ""), "visible")
+            self.assertEqual(str(runtime_visibility.get("assistant_runtime") or ""), "hidden")
+        finally:
+            cleanup()
+
+    def test_observability_legacy_pet_runtime_is_read_once_but_never_exposed_or_written(self) -> None:
+        from no1.kernel.settings import (
+            get_observability_settings,
+            load_settings,
+            save_settings,
+            update_observability_settings,
+        )
+
+        _, cleanup = self._with_home()
+        try:
+            save_settings(
+                {
+                    "observability": {
+                        "runtime_visibility": {
+                            "peer_runtime": "visible",
+                            "pet_runtime": "visible",
+                        }
+                    }
+                }
+            )
+
+            migrated = get_observability_settings()
+            runtime_visibility = migrated.get("runtime_visibility") or {}
+            self.assertEqual(runtime_visibility.get("assistant_runtime"), "visible")
+            self.assertNotIn("pet_runtime", runtime_visibility)
+
+            updated = update_observability_settings(
+                {"runtime_visibility": {"pet_runtime": "hidden"}}
+            )
+            updated_visibility = updated.get("runtime_visibility") or {}
+            self.assertEqual(updated_visibility.get("assistant_runtime"), "visible")
+            self.assertNotIn("pet_runtime", updated_visibility)
+
+            stored = load_settings().get("observability") or {}
+            stored_visibility = stored.get("runtime_visibility") or {}
+            self.assertEqual(stored_visibility.get("assistant_runtime"), "visible")
+            self.assertNotIn("pet_runtime", stored_visibility)
         finally:
             cleanup()
 

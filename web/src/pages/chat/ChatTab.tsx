@@ -163,7 +163,15 @@ export function ChatTab({
     setComputerControlActorId,
     destGroupId,
     composerGroupSettled,
+    remoteTargets,
+    remoteTargetsBusy,
+    remoteTargetId,
+    setRemoteTargetId,
+    remoteReceipt,
+    remoteStatusUnavailable,
     mentionSuggestions,
+    composerHistoryEntries,
+    suggestedUserMessage,
     slashSkillScope,
     setSlashSkillScope,
 
@@ -191,6 +199,7 @@ export function ChatTab({
     selectedGroupRunning,
     actors,
     recipientActors,
+    groupLabelById,
     composerRef,
     fileInputRef,
     chatAtBottomRef,
@@ -837,6 +846,12 @@ export function ChatTab({
             recipientActors={recipientActors}
             recipientActorsBusy={recipientActorsBusy}
             destGroupId={destGroupId}
+            remoteTargets={remoteTargets}
+            remoteTargetsBusy={remoteTargetsBusy}
+            remoteTargetId={remoteTargetId}
+            onRemoteTargetChange={setRemoteTargetId}
+            remoteReceipt={remoteReceipt}
+            remoteStatusUnavailable={remoteStatusUnavailable}
             busy={busy}
             replyTarget={replyTarget}
             onCancelReply={cancelReply}
@@ -875,6 +890,8 @@ export function ChatTab({
             showMentionMenu={showMentionMenu}
             setShowMentionMenu={setShowMentionMenu}
             mentionSuggestions={mentionSuggestions}
+            composerHistoryEntries={composerHistoryEntries}
+            suggestedUserMessage={suggestedUserMessage}
             mentionSelectedIndex={mentionSelectedIndex}
             setMentionSelectedIndex={setMentionSelectedIndex}
             setMentionFilter={setMentionFilter}

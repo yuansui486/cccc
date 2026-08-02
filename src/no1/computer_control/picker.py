@@ -530,14 +530,19 @@ class DesktopHighlightOverlay:
             user32.SetWindowPos(hwnd, ctypes.wintypes.HWND(-1), left, top, width, height, 0x0010 | 0x0040)
             user32.InvalidateRect(hwnd, None, True)
 
-    def stop(self) -> None:
+    def stop(self, *, timeout: float = 2.0) -> bool:
         thread = self._thread
         hwnd = self._hwnd
         if thread and thread.is_alive() and hwnd:
             ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)
-            thread.join(timeout=2.0)
-        self._thread = None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, float(timeout or 0.0)))
+        if thread is not None and thread.is_alive():
+            return False
+        if self._thread is thread:
+            self._thread = None
         self.available = False
+        return True
 
 
 def diagnose_native_picker() -> Dict[str, Any]:
@@ -665,6 +670,94 @@ class ElementPickerManager:
         self._requests: "queue.Queue[PickerThreadRequest]" = queue.Queue()
         self._thread: Optional[threading.Thread] = None
         self._gesture_down = False
+        self._daemon_stopping = False
+        self._daemon_owner: Optional[tuple[int, str, int]] = None
+        self._daemon_generation_claim: Any = None
+
+    def _start_daemon(self, owner: Any) -> None:
+        from .services import (
+            _claim_daemon_generation,
+            _release_daemon_generation,
+        )
+
+        generation_claim = _claim_daemon_generation(
+            owner,
+            home=self.home,
+            subject="picker",
+        )
+        owner_key = generation_claim.owner_key
+        with self._lock:
+            if self._daemon_generation_claim is not None:
+                if not self._daemon_stopping and self._daemon_owner == owner_key:
+                    _release_daemon_generation(generation_claim)
+                    return
+                _release_daemon_generation(generation_claim)
+                raise RuntimeError("computer-control picker from the prior daemon is still active")
+            live_heartbeats = any(
+                session.heartbeat_thread is not None
+                and session.heartbeat_thread.is_alive()
+                for session in self._sessions.values()
+            )
+            if (
+                self._thread is not None and self._thread.is_alive()
+            ) or live_heartbeats:
+                if not self._daemon_stopping and self._daemon_owner == owner_key:
+                    _release_daemon_generation(generation_claim)
+                    return
+                _release_daemon_generation(generation_claim)
+                raise RuntimeError("computer-control picker from the prior daemon is still active")
+            self._daemon_owner = owner_key
+            self._daemon_generation_claim = generation_claim
+            self._daemon_stopping = False
+
+    def _request_daemon_stop(self) -> None:
+        with self._lock:
+            self._daemon_stopping = True
+            for session in self._sessions.values():
+                if session.status == "active":
+                    session.status = "cancelled"
+                    session.emit("ended", reason="daemon_stopping")
+                session.heartbeat_stop.set()
+        self._wake.set()
+
+    def _drain_daemon(self, *, timeout: float) -> bool:
+        from .services import _release_daemon_generation
+
+        self._request_daemon_stop()
+        deadline = time.monotonic() + max(0.0, float(timeout or 0.0))
+        with self._lock:
+            sessions = list(self._sessions.values())
+        for session in sessions:
+            thread = session.heartbeat_thread
+            held_lease = thread is not None
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if thread is not None and thread.is_alive():
+                return False
+            if session.heartbeat_thread is thread:
+                session.heartbeat_thread = None
+            if held_lease:
+                try:
+                    self.lease.release(run_id=session.session_id, force=False)
+                except (OSError, PermissionError):
+                    pass
+        self._wake.set()
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        if thread is not None and thread.is_alive():
+            return False
+        if not self.overlay.stop(timeout=max(0.0, deadline - time.monotonic())):
+            return False
+        with self._lock:
+            if self._thread is thread:
+                self._thread = None
+            self._daemon_owner = None
+            generation_claim = self._daemon_generation_claim
+            self._daemon_generation_claim = None
+        _release_daemon_generation(generation_claim)
+        return True
 
     def _session(self, session_id: str) -> PickerSession:
         session = self._sessions.get(session_id)
@@ -674,6 +767,11 @@ class ElementPickerManager:
 
     def start(self, group_id: str, actor_id: str, *, hotkey: str = "Ctrl+Shift+LeftClick", session_id: str = "") -> Dict[str, Any]:
         with self._lock:
+            if self._daemon_stopping:
+                raise PickerError(
+                    "computer-control picker is stopping",
+                    code="computer_control_not_ready",
+                )
             # Completed sessions are retained long enough for an SSE reconnect
             # but do not accumulate forever.  Active sessions are never
             # reaped by this housekeeping pass.

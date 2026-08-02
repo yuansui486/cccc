@@ -106,6 +106,156 @@ class TestBootstrapActorOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_autostart_skips_unsupported_internal_actors_before_launch_resolution(self) -> None:
+        home, cleanup = self._with_home()
+        try:
+            from no1.kernel.actors import is_supported_internal_actor
+            from no1.kernel.group import load_group
+
+            create, _ = self._call("group_create", {"title": "legacy-internal-autostart", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            scope = home / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+            actors.extend(
+                [
+                    {
+                        "id": "legacy-pet",
+                        "title": "Legacy PET",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "command": [],
+                        "env": {},
+                        "enabled": True,
+                        "internal_kind": "pet",
+                    },
+                    {
+                        "id": "unknown-internal",
+                        "title": "Unknown Internal",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "command": [],
+                        "env": {},
+                        "enabled": False,
+                        "internal_kind": "future_unknown",
+                    },
+                ]
+            )
+            group.doc["actors"] = actors
+            group.doc["running"] = True
+            group.save()
+
+            with (
+                patch(
+                    "no1.daemon.group.bootstrap_actor_ops.is_supported_internal_actor",
+                    side_effect=is_supported_internal_actor,
+                ) as supported_check,
+                patch("no1.daemon.group.bootstrap_actor_ops.resolve_actor_launch_spec") as resolve_launch,
+                patch("no1.daemon.group.bootstrap_actor_ops.codex_app_supervisor.start_actor") as codex_start,
+                patch("no1.daemon.group.bootstrap_actor_ops.headless_runner.SUPERVISOR.start_actor") as headless_start,
+            ):
+                autostart_running_groups(
+                    home,
+                    effective_runner_kind=lambda runner: runner,
+                    find_scope_url=lambda _group, _scope_key: str(scope),
+                    supported_runtimes=("codex",),
+                    ensure_mcp_installed=lambda _runtime, _cwd, **_kwargs: True,
+                    auto_mcp_runtimes=("codex",),
+                    pty_supported=lambda: True,
+                    merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+                    inject_actor_context_env=lambda env, _gid, _aid: dict(env),
+                    prepare_pty_env=lambda env: dict(env),
+                    normalize_runtime_command=lambda _runtime, command: list(command),
+                    pty_backlog_bytes=lambda: 1024,
+                    write_headless_state=lambda _gid, _aid: None,
+                    write_pty_state=lambda _gid, _aid, _pid: None,
+                    clear_preamble_sent=lambda _group, _aid: None,
+                    throttle_reset_actor=lambda _gid, _aid: None,
+                    automation_on_resume=lambda _group: None,
+                    get_group_state=lambda _group: "idle",
+                    load_actor_private_env=lambda _gid, _aid: {},
+                    update_actor_private_env=lambda *_args, **_kwargs: {},
+                    delete_actor_private_env=lambda _gid, _aid: None,
+                )
+
+            self.assertEqual(supported_check.call_count, 2)
+            resolve_launch.assert_not_called()
+            codex_start.assert_not_called()
+            headless_start.assert_not_called()
+        finally:
+            cleanup()
+
+    def test_autostart_still_launches_supported_voice_secretary_actor(self) -> None:
+        home, cleanup = self._with_home()
+        try:
+            from no1.kernel.group import load_group
+            from no1.kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID
+
+            create, _ = self._call("group_create", {"title": "voice-autostart", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            scope = home / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "lead",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "enabled": False,
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            group.doc["assistants"] = {"voice_secretary": {"enabled": True}}
+            group.doc["running"] = True
+            group.save()
+
+            with patch("no1.daemon.group.bootstrap_actor_ops.codex_app_supervisor.start_actor") as codex_start:
+                autostart_running_groups(
+                    home,
+                    effective_runner_kind=lambda runner: runner,
+                    find_scope_url=lambda _group, _scope_key: str(scope),
+                    supported_runtimes=("codex",),
+                    ensure_mcp_installed=lambda _runtime, _cwd, **_kwargs: True,
+                    auto_mcp_runtimes=("codex",),
+                    pty_supported=lambda: True,
+                    merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+                    inject_actor_context_env=lambda env, _gid, _aid: dict(env),
+                    prepare_pty_env=lambda env: dict(env),
+                    normalize_runtime_command=lambda _runtime, command: list(command),
+                    pty_backlog_bytes=lambda: 1024,
+                    write_headless_state=lambda _gid, _aid: None,
+                    write_pty_state=lambda _gid, _aid, _pid: None,
+                    clear_preamble_sent=lambda _group, _aid: None,
+                    throttle_reset_actor=lambda _gid, _aid: None,
+                    automation_on_resume=lambda _group: None,
+                    get_group_state=lambda _group: "idle",
+                    load_actor_private_env=lambda _gid, _aid: {},
+                    update_actor_private_env=lambda *_args, **_kwargs: {},
+                    delete_actor_private_env=lambda _gid, _aid: None,
+                )
+
+            self.assertEqual(codex_start.call_count, 1)
+            self.assertEqual(codex_start.call_args.kwargs.get("group_id"), group_id)
+            self.assertEqual(codex_start.call_args.kwargs.get("actor_id"), VOICE_SECRETARY_ACTOR_ID)
+        finally:
+            cleanup()
+
     def test_autostart_restores_explicit_user_scope_profile_secrets(self) -> None:
         home, cleanup = self._with_home()
         try:
@@ -154,7 +304,9 @@ class TestBootstrapActorOps(unittest.TestCase):
             )
             self.assertTrue(secret_update.ok, getattr(secret_update, "error", None))
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             add, _ = self._call(
@@ -257,158 +409,6 @@ class TestBootstrapActorOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_autostart_pet_inherits_foreman_profile_private_env(self) -> None:
-        home, cleanup = self._with_home()
-        try:
-            from no1.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
-            from no1.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
-            from no1.daemon.actors.private_env_ops import (
-                delete_actor_private_env,
-                load_actor_private_env,
-                merge_actor_env_with_private,
-                update_actor_private_env,
-            )
-            from no1.kernel.group import load_group
-            from no1.kernel.pet_actor import PET_ACTOR_ID
-
-            create, _ = self._call("group_create", {"title": "autostart-pet-profile", "topic": "", "by": "user"})
-            self.assertTrue(create.ok, getattr(create, "error", None))
-            group_id = str((create.result or {}).get("group_id") or "").strip()
-            self.assertTrue(group_id)
-
-            profile_upsert, _ = self._call(
-                "actor_profile_upsert",
-                {
-                    "by": "user",
-                    "caller_id": "user-a",
-                    "is_admin": False,
-                    "profile": {
-                        "id": "pet-profile",
-                        "name": "Pet Profile",
-                        "scope": "user",
-                        "owner_id": "user-a",
-                        "runtime": "custom",
-                        "runner": "headless",
-                        "command": [],
-                        "submit": "newline",
-                    },
-                },
-            )
-            self.assertTrue(profile_upsert.ok, getattr(profile_upsert, "error", None))
-
-            secret_update, _ = self._call(
-                "actor_profile_secret_update",
-                {
-                    "by": "user",
-                    "profile_id": "pet-profile",
-                    "profile_scope": "user",
-                    "profile_owner": "user-a",
-                    "caller_id": "user-a",
-                    "is_admin": False,
-                    "set": {"API_KEY": "pet-secret"},
-                },
-            )
-            self.assertTrue(secret_update.ok, getattr(secret_update, "error", None))
-
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
-            self.assertTrue(attach.ok, getattr(attach, "error", None))
-
-            add_foreman, _ = self._call(
-                "actor_add",
-                {
-                    "group_id": group_id,
-                    "actor_id": "lead",
-                    "runtime": "codex",
-                    "runner": "headless",
-                    "profile_id": "pet-profile",
-                    "profile_scope": "user",
-                    "profile_owner": "user-a",
-                    "caller_id": "user-a",
-                    "is_admin": False,
-                    "by": "user",
-                },
-            )
-            self.assertTrue(add_foreman.ok, getattr(add_foreman, "error", None))
-
-            enable_pet, _ = self._call(
-                "group_settings_update",
-                {"group_id": group_id, "by": "user", "patch": {"desktop_pet_enabled": True}},
-            )
-            self.assertTrue(enable_pet.ok, getattr(enable_pet, "error", None))
-
-            group = load_group(group_id)
-            self.assertIsNotNone(group)
-            assert group is not None
-            group.doc["running"] = True
-            group.save()
-
-            captured: list[dict[str, object]] = []
-
-            def _fake_headless_start_actor(*, group_id: str, actor_id: str, cwd: Path, env: dict[str, str]):
-                captured.append(
-                    {
-                        "group_id": group_id,
-                        "actor_id": actor_id,
-                        "cwd": cwd,
-                        "env": dict(env),
-                    }
-                )
-
-                class _Session:
-                    pass
-
-                return _Session()
-
-            with patch("no1.daemon.group.bootstrap_actor_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
-                autostart_running_groups(
-                    home,
-                    effective_runner_kind=lambda runner: runner,
-                    find_scope_url=lambda current_group, scope_key: (
-                        str(Path(".").resolve())
-                        if str(current_group.group_id or "").strip() == group_id and str(scope_key or "").strip()
-                        else ""
-                    ),
-                    supported_runtimes=("codex", "custom"),
-                    ensure_mcp_installed=lambda _runtime, _cwd, **_kwargs: True,
-                    auto_mcp_runtimes=("codex",),
-                    pty_supported=lambda: True,
-                    merge_actor_env_with_private=merge_actor_env_with_private,
-                    inject_actor_context_env=lambda env, _gid, _aid: dict(env),
-                    prepare_pty_env=lambda env: dict(env),
-                    normalize_runtime_command=lambda _runtime, command: list(command),
-                    pty_backlog_bytes=lambda: 1024,
-                    write_headless_state=lambda _gid, _aid: None,
-                    write_pty_state=lambda _gid, _aid, _pid: None,
-                    clear_preamble_sent=lambda _group, _aid: None,
-                    throttle_reset_actor=lambda _gid, _aid: None,
-                    automation_on_resume=lambda _group: None,
-                    get_group_state=lambda _group: "idle",
-                    load_actor_private_env=load_actor_private_env,
-                    update_actor_private_env=update_actor_private_env,
-                    delete_actor_private_env=delete_actor_private_env,
-                    resolve_linked_actor_before_start=lambda grp, aid, caller_id="", is_admin=False: resolve_linked_actor_before_start(
-                        grp,
-                        aid,
-                        get_actor_profile=get_actor_profile,
-                        load_actor_profile_secrets=load_actor_profile_secrets,
-                        update_actor_private_env=update_actor_private_env,
-                        caller_id=caller_id,
-                        is_admin=is_admin,
-                    ),
-                )
-
-            pet_launches = [item for item in captured if item.get("actor_id") == PET_ACTOR_ID]
-            self.assertEqual(len(pet_launches), 1)
-            pet_env = pet_launches[0].get("env")
-            self.assertIsInstance(pet_env, dict)
-            assert isinstance(pet_env, dict)
-            self.assertEqual(pet_env.get("API_KEY"), "pet-secret")
-
-            private_env = load_actor_private_env(group_id, PET_ACTOR_ID)
-            self.assertEqual(private_env.get("API_KEY"), "pet-secret")
-        finally:
-            cleanup()
-
     def test_autostart_running_headless_codex_group_uses_codex_supervisor(self) -> None:
         home, cleanup = self._with_home()
         try:
@@ -417,7 +417,9 @@ class TestBootstrapActorOps(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "").strip()
             self.assertTrue(group_id)
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             add, _ = self._call(
@@ -441,6 +443,7 @@ class TestBootstrapActorOps(unittest.TestCase):
             for actor in group.doc.get("actors", []):
                 if isinstance(actor, dict) and actor.get("id") == "peer1":
                     actor["command"] = ["codex", "-m", "gpt-5.3-codex-spark"]
+                    actor["enabled"] = True
             group.doc["running"] = True
             group.doc["state"] = "active"
             group.save()
@@ -513,7 +516,9 @@ class TestBootstrapActorOps(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "").strip()
             self.assertTrue(group_id)
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             add, _ = self._call(
@@ -655,7 +660,9 @@ class TestBootstrapActorOps(unittest.TestCase):
             )
             self.assertTrue(secret_update.ok, getattr(secret_update, "error", None))
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             # Attach profile WITHOUT explicit profile_scope — should still persist "global".
@@ -746,7 +753,9 @@ class TestBootstrapActorOps(unittest.TestCase):
             )
             self.assertTrue(secret_update.ok, getattr(secret_update, "error", None))
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             # Attach with explicit user-scope ref.
@@ -832,7 +841,9 @@ class TestBootstrapActorOps(unittest.TestCase):
             )
             self.assertTrue(profile_upsert.ok, getattr(profile_upsert, "error", None))
 
-            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            scope = Path(home) / "project"
+            scope.mkdir()
+            attach, _ = self._call("attach", {"group_id": group_id, "path": str(scope), "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             # Add actor normally (this will persist explicit scope).

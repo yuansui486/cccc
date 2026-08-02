@@ -204,7 +204,6 @@ class TestActorRuntimeOps(unittest.TestCase):
             with (
                 patch.object(actor_runtime_ops, "find_actor", return_value=actor),
                 patch.object(actor_runtime_ops, "runtime_start_preflight_error", return_value=""),
-                patch.object(actor_runtime_ops, "request_pet_review"),
                 patch(
                     "no1.daemon.actors.web_model_browser_delivery.web_model_browser_delivery_enabled",
                     return_value=True,

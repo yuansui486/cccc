@@ -14,6 +14,18 @@ from fastapi.testclient import TestClient
 
 
 class TestWebRemoteMcpEndpoint(unittest.TestCase):
+    WEB_MODEL_HARD_DENIED_TOOLS = {
+        "onecolleague_shell",
+        "onecolleague_exec_command",
+        "onecolleague_write_stdin",
+        "onecolleague_code_exec",
+        "onecolleague_code_wait",
+        "onecolleague_git",
+        "onecolleague_capability_enable",
+        "onecolleague_capability_install",
+        "onecolleague_capability_use",
+    }
+
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
         td_ctx = tempfile.TemporaryDirectory()
@@ -169,19 +181,12 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
             self.assertIn("onecolleague_runtime_wait_next_turn", names)
             self.assertIn("onecolleague_runtime_complete_turn", names)
-            self.assertIn("onecolleague_code_exec", names)
-            self.assertIn("onecolleague_code_wait", names)
             self.assertIn("onecolleague_repo", names)
             self.assertIn("onecolleague_repo_edit", names)
             self.assertIn("onecolleague_apply_patch", names)
-            self.assertIn("onecolleague_shell", names)
-            self.assertIn("onecolleague_exec_command", names)
-            self.assertIn("onecolleague_write_stdin", names)
-            self.assertIn("onecolleague_git", names)
             self.assertIn("onecolleague_capability_search", names)
             self.assertIn("onecolleague_capability_state", names)
-            self.assertIn("onecolleague_capability_enable", names)
-            self.assertIn("onecolleague_capability_use", names)
+            self.assertTrue(self.WEB_MODEL_HARD_DENIED_TOOLS.isdisjoint(names))
             self.assertNotIn("onecolleague_actor", names)
             self.assertNotIn("onecolleague_group", names)
             self.assertNotIn("onecolleague_context_sync", names)
@@ -268,11 +273,9 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual(list_resp.status_code, 200)
             tools = ((list_resp.json().get("result") or {}).get("tools") or [])
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-            self.assertIn("onecolleague_shell", names)
-            self.assertIn("onecolleague_exec_command", names)
-            self.assertIn("onecolleague_write_stdin", names)
-            self.assertIn("onecolleague_capability_enable", names)
-            self.assertIn("onecolleague_capability_use", names)
+            self.assertTrue(self.WEB_MODEL_HARD_DENIED_TOOLS.isdisjoint(names))
+            self.assertIn("onecolleague_capability_search", names)
+            self.assertIn("onecolleague_capability_state", names)
             self.assertNotIn("onecolleague_actor", names)
             self.assertNotIn("onecolleague_capability_import", names)
             self.assertNotIn("onecolleague_capability_block", names)
@@ -315,7 +318,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_web_model_foreman_uses_capability_use_for_pack_tools(self) -> None:
+    def test_web_model_foreman_cannot_use_capability_meta_tools(self) -> None:
         from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
@@ -333,8 +336,9 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual(list_resp.status_code, 200)
             tools = ((list_resp.json().get("result") or {}).get("tools") or [])
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-            self.assertIn("onecolleague_capability_use", names)
-            self.assertIn("onecolleague_capability_enable", names)
+            self.assertTrue(self.WEB_MODEL_HARD_DENIED_TOOLS.isdisjoint(names))
+            self.assertIn("onecolleague_capability_search", names)
+            self.assertIn("onecolleague_capability_state", names)
             self.assertNotIn("onecolleague_capability_import", names)
             self.assertNotIn("onecolleague_capability_block", names)
             self.assertNotIn("onecolleague_capability_uninstall", names)
@@ -373,12 +377,8 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     },
                 )
             self.assertEqual(actor_call.status_code, 200)
-            self.assertFalse(bool((actor_call.json().get("result") or {}).get("isError")))
-            payload = json.loads(
-                (((actor_call.json().get("result") or {}).get("content") or [{}])[0] or {}).get("text") or "{}"
-            )
-            result = payload.get("tool_result") or {}
-            self.assertEqual((result.get("actors") or [{}])[0].get("id"), "peer1")
+            self.assertTrue(bool((actor_call.json().get("result") or {}).get("isError")))
+            self.assertIn("permission_denied", actor_call.text)
 
             with patch("no1.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
                 cap_call = client.post(
@@ -395,8 +395,8 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     },
                 )
             self.assertEqual(cap_call.status_code, 200)
-            self.assertFalse(bool((cap_call.json().get("result") or {}).get("isError")))
-            self.assertIn("pack:diagnostics", cap_call.text)
+            self.assertTrue(bool((cap_call.json().get("result") or {}).get("isError")))
+            self.assertIn("permission_denied", cap_call.text)
         finally:
             cleanup()
 
@@ -540,7 +540,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_web_model_connector_local_power_tools_are_active_scope_bound(self) -> None:
+    def test_web_model_connector_repo_tools_are_scope_bound_and_execution_is_denied(self) -> None:
         from no1.kernel.access_tokens import create_access_token
 
         home, cleanup = self._with_home()
@@ -552,6 +552,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             subprocess.run(["git", "config", "user.name", "CCCC Test"], cwd=str(workspace), check=True)
             (workspace / "src").mkdir()
             (workspace / "src" / "app.txt").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+            (workspace / "shell.txt").write_text("shell-ok", encoding="utf-8")
             group = self._create_group_with_actor(str(workspace))
             admin = str(create_access_token("admin", is_admin=True).get("token") or "")
             client = self._client()
@@ -625,63 +626,20 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual((workspace / "src" / "app.txt").read_text(encoding="utf-8"), "one\nTWO\nthree\nfour\n")
             self.assertEqual((workspace / "src" / "new.txt").read_text(encoding="utf-8"), "created\n")
 
-            shell_resp = client.post(
-                f"/mcp/web-model/{connector_id}",
-                headers={"Authorization": f"Bearer {secret}"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 20,
-                    "method": "tools/call",
-                    "params": {"name": "onecolleague_shell", "arguments": {"command": "printf shell-ok > shell.txt && cat shell.txt"}},
-                },
-            )
-            self.assertEqual(shell_resp.status_code, 200)
-            shell_payload = json.loads((((shell_resp.json().get("result") or {}).get("content") or [{}])[0] or {}).get("text") or "{}")
-            self.assertTrue(bool(shell_payload.get("ok")))
-            self.assertEqual(shell_payload.get("returncode"), 0)
-            self.assertIn("shell-ok", str(shell_payload.get("stdout") or ""))
-            self.assertEqual((workspace / "shell.txt").read_text(encoding="utf-8"), "shell-ok")
-
-            exec_resp = client.post(
-                f"/mcp/web-model/{connector_id}",
-                headers={"Authorization": f"Bearer {secret}"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 200,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "onecolleague_exec_command",
-                        "arguments": {
-                            "command": "printf exec-start; sleep 0.2; printf exec-done",
-                            "yield_time_ms": 10,
-                        },
+            for denied_tool in sorted(self.WEB_MODEL_HARD_DENIED_TOOLS):
+                denied_resp = client.post(
+                    f"/mcp/web-model/{connector_id}",
+                    headers={"Authorization": f"Bearer {secret}"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": f"deny-{denied_tool}",
+                        "method": "tools/call",
+                        "params": {"name": denied_tool, "arguments": {}},
                     },
-                },
-            )
-            self.assertEqual(exec_resp.status_code, 200)
-            exec_payload = json.loads((((exec_resp.json().get("result") or {}).get("content") or [{}])[0] or {}).get("text") or "{}")
-            self.assertTrue(bool(exec_payload.get("running")))
-            exec_session_id = str(exec_payload.get("session_id") or "")
-            self.assertTrue(exec_session_id)
-
-            exec_poll = client.post(
-                f"/mcp/web-model/{connector_id}",
-                headers={"Authorization": f"Bearer {secret}"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2001,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "onecolleague_write_stdin",
-                        "arguments": {"session_id": exec_session_id, "yield_time_ms": 300},
-                    },
-                },
-            )
-            self.assertEqual(exec_poll.status_code, 200)
-            poll_payload = json.loads((((exec_poll.json().get("result") or {}).get("content") or [{}])[0] or {}).get("text") or "{}")
-            self.assertFalse(bool(poll_payload.get("running")))
-            self.assertEqual(poll_payload.get("returncode"), 0)
-            self.assertIn("exec-done", str(poll_payload.get("output") or ""))
+                )
+                self.assertEqual(denied_resp.status_code, 200)
+                self.assertTrue(bool((denied_resp.json().get("result") or {}).get("isError")))
+                self.assertIn("permission_denied", denied_resp.text)
 
             read_resp = client.post(
                 f"/mcp/web-model/{connector_id}",
@@ -804,48 +762,6 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertTrue((workspace / "notes" / "shell.txt").exists())
             self.assertEqual((workspace / "notes" / "shell.txt").read_text(encoding="utf-8"), "mcp-better-again")
 
-            git_status = client.post(
-                f"/mcp/web-model/{connector_id}",
-                headers={"Authorization": f"Bearer {secret}"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 23,
-                    "method": "tools/call",
-                    "params": {"name": "onecolleague_git", "arguments": {"action": "status"}},
-                },
-            )
-            self.assertEqual(git_status.status_code, 200)
-            status_payload = json.loads((((git_status.json().get("result") or {}).get("content") or [{}])[0] or {}).get("text") or "{}")
-            self.assertIn("notes/", str(status_payload.get("stdout") or ""))
-
-            git_add = client.post(
-                f"/mcp/web-model/{connector_id}",
-                headers={"Authorization": f"Bearer {secret}"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 24,
-                    "method": "tools/call",
-                    "params": {"name": "onecolleague_git", "arguments": {"action": "add", "all_changes": True}},
-                },
-            )
-            self.assertEqual(git_add.status_code, 200)
-            git_add_payload = json.loads((((git_add.json().get("result") or {}).get("content") or [{}])[0] or {}).get("text") or "{}")
-            self.assertTrue(bool(git_add_payload.get("ok")))
-            self.assertEqual(git_add_payload.get("returncode"), 0)
-
-            git_commit = client.post(
-                f"/mcp/web-model/{connector_id}",
-                headers={"Authorization": f"Bearer {secret}"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 25,
-                    "method": "tools/call",
-                    "params": {"name": "onecolleague_git", "arguments": {"action": "commit", "message": "Add shell output"}},
-                },
-            )
-            self.assertEqual(git_commit.status_code, 200)
-            self.assertEqual(json.loads((((git_commit.json().get("result") or {}).get("content") or [{}])[0] or {}).get("text") or "{}").get("returncode"), 0)
-
             delete_resp = client.post(
                 f"/mcp/web-model/{connector_id}",
                 headers={"Authorization": f"Bearer {secret}"},
@@ -870,7 +786,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                 },
             )
             self.assertEqual(blocked.status_code, 200)
-            self.assertIn("invalid_path", json.dumps(blocked.json(), ensure_ascii=False))
+            self.assertIn("permission_denied", json.dumps(blocked.json(), ensure_ascii=False))
         finally:
             cleanup()
 

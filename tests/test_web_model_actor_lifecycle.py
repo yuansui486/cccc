@@ -7,17 +7,20 @@ from unittest.mock import patch
 
 class TestWebModelActorLifecycle(unittest.TestCase):
     def _with_home(self):
-        old_home = os.environ.get("CCCC_HOME")
+        home_vars = ("ONECOLLEAGUE_HOME", "CCCC_HOME")
+        old_homes = {name: os.environ.get(name) for name in home_vars}
         td_ctx = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         td = td_ctx.__enter__()
-        os.environ["CCCC_HOME"] = td
+        for name in home_vars:
+            os.environ[name] = td
 
         def cleanup() -> None:
+            for name, old_home in old_homes.items():
+                if old_home is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = old_home
             td_ctx.__exit__(None, None, None)
-            if old_home is None:
-                os.environ.pop("CCCC_HOME", None)
-            else:
-                os.environ["CCCC_HOME"] = old_home
 
         return td, cleanup
 
@@ -287,36 +290,6 @@ class TestWebModelActorLifecycle(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_pet_seed_does_not_inherit_web_model_runtime(self) -> None:
-        home, cleanup = self._with_home()
-        try:
-            from no1.kernel.group import load_group
-            from no1.kernel.pet_actor import build_pet_actor_seed
-
-            root = Path(home) / "repo"
-            root.mkdir(parents=True, exist_ok=True)
-            group_id = self._create_attached_group(root)
-            group = load_group(group_id)
-            self.assertIsNotNone(group)
-            assert group is not None
-
-            seed = build_pet_actor_seed(
-                group,
-                runtime="web_model",
-                runner="headless",
-                command=[],
-                env={},
-                default_scope_key="",
-                submit="enter",
-            )
-
-            self.assertEqual(seed.get("runtime"), "codex")
-            self.assertEqual(seed.get("runner"), "headless")
-            self.assertTrue(seed.get("command"))
-            self.assertEqual(seed.get("internal_kind"), "pet")
-        finally:
-            cleanup()
-
     def test_actor_update_to_chatgpt_web_model_is_singleton_guarded(self) -> None:
         home, cleanup = self._with_home()
         try:
@@ -431,6 +404,28 @@ class TestWebModelActorLifecycle(unittest.TestCase):
             write_headless_state(group_id, "webpeer")
 
             self.assertTrue(is_group_running(group_id))
+        finally:
+            cleanup()
+
+    def test_runner_actor_running_uses_web_model_marker(self) -> None:
+        from no1.daemon.actors.runner_ops import is_actor_running
+        from no1.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            group = create_group(load_registry(), title="web-model-runner-marker", topic="")
+            add_actor(group, actor_id="webpeer", runtime="web_model", runner="headless")
+            group.save()
+            write_headless_state(group.group_id, "webpeer")
+
+            with patch(
+                "no1.daemon.actors.runner_ops.headless_runner.SUPERVISOR.actor_running",
+                side_effect=AssertionError("web model must use persisted marker"),
+            ):
+                self.assertTrue(is_actor_running(group.group_id, "webpeer", "headless"))
         finally:
             cleanup()
 

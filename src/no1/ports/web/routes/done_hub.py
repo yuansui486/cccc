@@ -7,9 +7,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from starlette.concurrency import run_in_threadpool
 
-from ..codex_client_config import sync_codex_custom_provider_config
 from ..schemas import DoneHubLoginRequest, DoneHubSelfRequest, DoneHubTeamPresetRequest, RouteContext
 
 _DONE_HUB_TIMEOUT = 15.0
@@ -294,12 +292,6 @@ def _normalize_model_list(payload: Any) -> list[str]:
     return out
 
 
-async def _sync_codex_config_for_client_config(client_config: Dict[str, Any]) -> None:
-    if not str(client_config.get("codex_api_key") or "").strip():
-        return
-    await run_in_threadpool(sync_codex_custom_provider_config)
-
-
 async def _configure_local_clients(client: httpx.AsyncClient, *, base_url: str, session: Dict[str, Any]) -> Dict[str, Any]:
     group = str(session.get("group") or "").strip().lower()
     if group == "pro":
@@ -369,7 +361,6 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     return {"ok": False, "error": {"code": "done_hub_self_failed", "message": self_error}}
                 session = _normalize_profile(base_url, self_payload)
                 client_config = await _configure_local_clients(client, base_url=base_url, session=session) or {}
-                await _sync_codex_config_for_client_config(client_config)
                 session.update(client_config)
         except _DoneHubClientConfigError:
             return {
@@ -405,7 +396,6 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     return {"ok": False, "error": {"code": "done_hub_self_failed", "message": self_error}}
                 session = _normalize_profile(base_url, self_payload)
                 client_config = await _configure_local_clients(client, base_url=base_url, session=session) or {}
-                await _sync_codex_config_for_client_config(client_config)
                 session.update(client_config)
         except _DoneHubClientConfigError:
             return {

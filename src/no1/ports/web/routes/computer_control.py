@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import inspect
+import ipaddress
 import json
 import time
 import uuid
@@ -30,7 +30,7 @@ from ....computer_control.mcp import validate_workflow_tools
 from ....computer_control.compiler import compile_workflow, compile_or_raise
 from ....computer_control.elements import normalize_snapshot, resolve_locator
 from ....computer_control.triggers import next_cron_time, next_schedule_time, parse_at_timestamp, validate_trigger
-from ..schemas import RouteContext, require_admin, require_group, require_user
+from ..schemas import RouteContext, require_admin
 
 
 def _error(code: str, message: str, status: int = 400, details: Any = None) -> HTTPException:
@@ -50,15 +50,32 @@ def _emit(kind: str, **data: Any) -> None:
         pass
 
 
+def _require_local_computer_control_admin(ctx: RouteContext, request: Request) -> Any:
+    if ctx.read_only:
+        raise _error("permission_denied", "computer control is disabled in read-only mode", 403)
+    host = str(getattr(request.client, "host", "") or "").strip()
+    try:
+        is_local = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        is_local = host.lower() in {"localhost", "testclient"}
+    if not is_local:
+        raise _error("permission_denied", "computer control is restricted to loopback clients", 403)
+    return require_admin(request)
+
+
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     service = _service(ctx)
-    global_router = APIRouter(prefix="/api/v1/computer-control", dependencies=[Depends(require_user)])
-    group_router = APIRouter(prefix="/api/v1/groups/{group_id}/computer-control", dependencies=[Depends(require_group)])
+
+    def require_local_admin(request: Request) -> Any:
+        return _require_local_computer_control_admin(ctx, request)
+
+    global_router = APIRouter(prefix="/api/v1/computer-control", dependencies=[Depends(require_local_admin)])
+    group_router = APIRouter(prefix="/api/v1/groups/{group_id}/computer-control", dependencies=[Depends(require_local_admin)])
 
     async def daemon_control(command: str, **payload: Any) -> Any:
         response = await asyncio.to_thread(
             call_daemon,
-            {"op": "computer_control", "args": {"command": command, **payload}},
+            {"op": "computer_control", "args": {"command": command, **payload, "caller_surface": "local_web"}},
             paths=DaemonPaths(ctx.home),
             # Computer operations and recordings are user-cancellable rather
             # than wall-clock limited; the MCP call itself owns cancellation.
@@ -72,8 +89,20 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "computer_control_lease_required",
                 "computer_control_write_lease_required",
                 "computer_control_setup_in_progress",
+                "revision_conflict",
+                "windows_mcp_not_ready",
+                "workflow_invalid",
+                "proposal_conflict",
+                "settings_invalid",
             }:
                 status = 409
+            elif code in {
+                "workflow_not_found",
+                "trigger_not_found",
+                "proposal_not_found",
+                "request_not_found",
+            }:
+                status = 404
             elif code == "permission_denied":
                 status = 403
             elif code in {"invalid_request", "invalid_argument_shape"}:
@@ -97,6 +126,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     def with_effective_version(manifest: Dict[str, Any]) -> Dict[str, Any]:
         return {**manifest, "effective_version": service.store.effective_version(manifest, current_fingerprint())}
 
+    def with_effective_value(value: Dict[str, Any]) -> Dict[str, Any]:
+        manifest = value.get("manifest") if isinstance(value, dict) else None
+        if not isinstance(manifest, dict):
+            return value
+        return {**value, "manifest": with_effective_version(manifest)}
+
     def trigger_setup_status() -> Dict[str, Any]:
         value = service.setup.status()
         phase = str(value.get("phase") or value.get("setup_phase") or "")
@@ -109,41 +144,18 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         }
 
     async def scheduler_trigger_status(group_id: str, workflow_id: str) -> Dict[str, Any]:
-        status_method = getattr(service.scheduler, "status", None)
-        if callable(status_method):
-            try:
-                try:
-                    value = status_method(group_id=group_id, workflow_id=workflow_id)
-                except TypeError:
-                    value = status_method(group_id, workflow_id)
-                if inspect.isawaitable(value):
-                    value = await value
-                if isinstance(value, dict):
-                    return value
-            except Exception as exc:
-                return {"available": False, "code": "scheduler_status_unavailable", "message": str(exc)}
-        task = getattr(service.scheduler, "_task", None)
-        return {
-            "available": False,
-            "code": "scheduler_status_not_supported",
-            "running": bool(task is not None and not task.done()),
-            "supported_types": ["interval"],
-        }
+        try:
+            return await daemon_control("scheduler", group_id=group_id, workflow_id=workflow_id, action="status")
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            return {"available": False, "code": detail.get("code") or "scheduler_status_unavailable", "message": detail.get("message") or str(exc)}
 
     async def scheduler_test_trigger(group_id: str, workflow_id: str, trigger: Dict[str, Any]) -> Dict[str, Any]:
-        test_method = getattr(service.scheduler, "test_trigger", None)
-        if not callable(test_method):
-            return {"available": False, "code": "scheduler_trigger_test_not_supported"}
         try:
-            try:
-                value = test_method(group_id=group_id, workflow_id=workflow_id, trigger=trigger)
-            except TypeError:
-                value = test_method(group_id, workflow_id, trigger)
-            if inspect.isawaitable(value):
-                value = await value
-            return value if isinstance(value, dict) else {"available": True, "result": value}
-        except Exception as exc:
-            return {"available": False, "code": "scheduler_trigger_test_failed", "message": str(exc)}
+            return await daemon_control("scheduler", group_id=group_id, workflow_id=workflow_id, action="test", trigger=trigger)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            return {"available": False, "code": detail.get("code") or "scheduler_trigger_test_failed", "message": detail.get("message") or str(exc)}
 
     def scheduler_trigger_entry(scheduler: Dict[str, Any], trigger_id: str) -> Dict[str, Any]:
         raw = scheduler.get("triggers")
@@ -283,55 +295,6 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             )
         return setup
 
-    def finalize_trigger_version(group_id: str, value: Dict[str, Any], *, allow_unready_disable: bool) -> tuple[Dict[str, Any], Dict[str, Any]]:
-        workflow_id = str(value["manifest"].get("workflow_id") or "")
-        version = int(value["version"])
-        definition = WorkflowDefinition.model_validate(
-            {key: child for key, child in value["definition"].items() if key != "change_note"}
-        )
-        enabled = [trigger for trigger in definition.triggers if trigger.enabled]
-        setup = trigger_setup_status()
-        if enabled and not setup["ready"] and not allow_unready_disable:
-            require_trigger_setup()
-        if not setup["ready"] and allow_unready_disable:
-            current = service.store.get(group_id, workflow_id, version=version)
-            return current, {
-                "auto_published": False,
-                "auto_trusted": False,
-                "runtime_activation_opened": False,
-                "setup_ready": False,
-                "draft_reason": "setup_not_ready_runtime_gate_closed",
-            }
-        service.store.publish(group_id, workflow_id, version)
-        trusted = False
-        if setup["ready"]:
-            service.store.trust(
-                group_id,
-                workflow_id,
-                version,
-                fingerprint=setup["fingerprint"],
-                permissions=["all_windows_mcp_tools"],
-            )
-            trusted = True
-        current = service.store.get(group_id, workflow_id, version=version)
-        for trigger in definition.triggers:
-            service.store.set_trigger_activation(
-                group_id,
-                workflow_id,
-                trigger.id,
-                enabled=bool(trigger.enabled and trusted),
-                version=version,
-                fingerprint=setup["fingerprint"] if trigger.enabled and trusted else "",
-                reason="active" if trigger.enabled and trusted else "setup_not_ready" if trigger.enabled else "disabled",
-            )
-        current = service.store.get(group_id, workflow_id, version=version)
-        return current, {
-            "auto_published": True,
-            "auto_trusted": trusted,
-            "runtime_activation_opened": bool(enabled and trusted),
-            "setup_ready": setup["ready"],
-        }
-
     def enrich_lease(value: Any) -> Dict[str, Any]:
         raw = value if isinstance(value, dict) else {}
         lease = raw.get("lease") if isinstance(raw.get("lease"), dict) else raw
@@ -372,18 +335,6 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def validate_definition(definition: WorkflowDefinition) -> None:
         catalog_result = await daemon_control("catalog", group_id="_global", include_schema=True)
         compile_or_raise(definition, catalog_result.get("tools") if isinstance(catalog_result, dict) else [])
-
-    async def validate_and_finalize(group_id: str, value: Dict[str, Any]) -> Dict[str, Any]:
-        definition = WorkflowDefinition.model_validate({key: child for key, child in value["definition"].items() if key != "change_note"})
-        await validate_definition(definition)
-        finalized = service.store.auto_finalize(
-            group_id,
-            str(value["manifest"]["workflow_id"]),
-            int(value["version"]),
-            fingerprint=current_fingerprint(),
-        )
-        finalized["manifest"] = with_effective_version(finalized["manifest"])
-        return finalized
 
     @global_router.post("/setup/ensure")
     async def setup_ensure(force: bool = False) -> Dict[str, Any]:
@@ -543,33 +494,43 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.get("/settings")
     async def computer_control_settings(group_id: str) -> Dict[str, Any]:
-        return {"ok": True, "result": service.store.settings(group_id, current_fingerprint=current_fingerprint())}
+        result = await daemon_control(
+            "admin_workflow",
+            group_id=group_id,
+            action="settings_get",
+        )
+        return {"ok": True, "result": result}
 
     @group_router.put("/settings")
     async def update_computer_control_settings(group_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         try:
-            value = service.store.update_settings(
-                group_id,
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="settings_update",
                 auto_publish_and_trust=payload.get("auto_publish_and_trust") is not False,
-                current_fingerprint=current_fingerprint(),
                 authorize_current_fingerprint=bool(payload.get("authorize_current_fingerprint")),
             )
         except ValueError as exc:
             raise _error("settings_invalid", str(exc), 409) from exc
         audit(ctx.home, "computer_control.settings_updated", group_id=group_id, details={"auto_publish_and_trust": value.get("auto_publish_and_trust"), "fingerprint_authorized": bool(payload.get("authorize_current_fingerprint"))})
-        return {"ok": True, "result": value}
+        return {"ok": True, "result": with_effective_value(value)}
 
     @group_router.post("/workflows")
     async def create_workflow(group_id: str, request: WorkflowCreateRequest) -> Dict[str, Any]:
         try:
             await validate_definition(request.definition)
-            value = service.store.create(group_id, request.definition)
-            value = await validate_and_finalize(group_id, value)
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="create",
+                definition=request.definition.model_dump(mode="json"),
+            )
         except WorkflowNotFound as exc:
             raise _error("group_not_found", str(exc), 404) from exc
         except ValueError as exc:
             raise _error("workflow_invalid", str(exc), 422) from exc
-        return {"ok": True, "result": value}
+        return {"ok": True, "result": with_effective_value(value)}
 
     @group_router.post("/workflows/compile")
     async def compile_workflow_route(group_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
@@ -584,7 +545,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         try:
             value = service.store.get(group_id, workflow_id, version=version)
             value["manifest"] = with_effective_version(value["manifest"])
-            return {"ok": True, "result": value}
+            return {"ok": True, "result": with_effective_value(value)}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
@@ -592,15 +553,22 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def update_workflow(group_id: str, workflow_id: str, request: WorkflowUpdateRequest) -> Dict[str, Any]:
         try:
             await validate_definition(request.definition)
-            value = service.store.update(group_id, workflow_id, request.definition, expected_revision=request.expected_revision, change_note=request.change_note)
-            value = await validate_and_finalize(group_id, value)
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="update",
+                workflow_id=workflow_id,
+                definition=request.definition.model_dump(mode="json"),
+                expected_revision=request.expected_revision,
+                change_note=request.change_note,
+            )
         except RevisionConflict as exc:
             raise _error("revision_conflict", str(exc), 409, {"current_revision": exc.current_revision}) from exc
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
         except ValueError as exc:
             raise _error("workflow_invalid", str(exc), 422) from exc
-        return {"ok": True, "result": value}
+        return {"ok": True, "result": with_effective_value(value)}
 
     @group_router.get("/workflows/{workflow_id}/versions")
     async def workflow_versions(group_id: str, workflow_id: str) -> Dict[str, Any]:
@@ -612,8 +580,14 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/workflows/{workflow_id}/publish")
     async def publish_workflow(group_id: str, workflow_id: str, version: int = Body(..., embed=True)) -> Dict[str, Any]:
         try:
-            value = service.store.publish(group_id, workflow_id, version)
-            return {"ok": True, "result": await validate_and_finalize(group_id, value)}
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="publish",
+                workflow_id=workflow_id,
+                version=version,
+            )
+            return {"ok": True, "result": with_effective_value(value)}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
         except ValueError as exc:
@@ -622,8 +596,14 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/workflows/{workflow_id}/versions/{version}/rollback")
     async def rollback_workflow(group_id: str, workflow_id: str, version: int) -> Dict[str, Any]:
         try:
-            value = service.store.rollback(group_id, workflow_id, version)
-            return {"ok": True, "result": await validate_and_finalize(group_id, value)}
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="rollback",
+                workflow_id=workflow_id,
+                version=version,
+            )
+            return {"ok": True, "result": with_effective_value(value)}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
@@ -667,17 +647,17 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             has_enabled_triggers = any(trigger.enabled for trigger in definition.triggers)
             if has_enabled_triggers:
                 require_trigger_setup()
-            value = service.store.update_triggers(
-                group_id,
-                workflow_id,
-                definition,
+            admin_result = await daemon_control(
+                "admin_trigger",
+                group_id=group_id,
+                workflow_id=workflow_id,
+                action="update",
+                definition=definition.model_dump(mode="json"),
                 expected_revision=expected,
-            )
-            value, finalization = finalize_trigger_version(
-                group_id,
-                value,
                 allow_unready_disable=not has_enabled_triggers,
             )
+            value = admin_result["value"]
+            finalization = admin_result["finalization"]
         except RevisionConflict as exc:
             raise _error("revision_conflict", str(exc), 409, {"current_revision": exc.current_revision}) from exc
         except WorkflowNotFound as exc:
@@ -724,17 +704,17 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             if desired_enabled:
                 compile_or_raise(definition)
                 require_trigger_setup()
-            value = service.store.update_triggers(
-                group_id,
-                workflow_id,
-                definition,
+            admin_result = await daemon_control(
+                "admin_trigger",
+                group_id=group_id,
+                workflow_id=workflow_id,
+                action="update",
+                definition=definition.model_dump(mode="json"),
                 expected_revision=expected,
-            )
-            value, finalization = finalize_trigger_version(
-                group_id,
-                value,
                 allow_unready_disable=not desired_enabled,
             )
+            value = admin_result["value"]
+            finalization = admin_result["finalization"]
         except RevisionConflict as exc:
             raise _error("revision_conflict", str(exc), 409, {"current_revision": exc.current_revision}) from exc
         except WorkflowNotFound as exc:
@@ -887,10 +867,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/workflows/{workflow_id}/optimization-proposals/{proposal_id}/accept")
     async def accept_optimization_proposal(group_id: str, workflow_id: str, proposal_id: str) -> Dict[str, Any]:
         try:
-            value = service.store.decide_proposal(group_id, workflow_id, proposal_id, accept=True)
-            if value.get("accepted_version"):
-                accepted = service.store.get(group_id, workflow_id, version=int(value["accepted_version"]))
-                await validate_and_finalize(group_id, accepted)
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="accept_proposal",
+                workflow_id=workflow_id,
+                proposal_id=proposal_id,
+            )
         except WorkflowNotFound as exc:
             raise _error("proposal_not_found", str(exc), 404) from exc
         except (RevisionConflict, ValueError) as exc:
@@ -902,7 +885,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/workflows/{workflow_id}/optimization-proposals/{proposal_id}/reject")
     async def reject_optimization_proposal(group_id: str, workflow_id: str, proposal_id: str) -> Dict[str, Any]:
         try:
-            value = service.store.decide_proposal(group_id, workflow_id, proposal_id, accept=False)
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="reject_proposal",
+                workflow_id=workflow_id,
+                proposal_id=proposal_id,
+            )
         except WorkflowNotFound as exc:
             raise _error("proposal_not_found", str(exc), 404) from exc
         except ValueError as exc:
@@ -916,29 +905,54 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if not fingerprint:
             raise _error("windows_mcp_not_ready", "install and verify Windows-MCP before trusting a workflow", 409)
         try:
-            return {"ok": True, "result": service.store.trust(group_id, workflow_id, request.version, fingerprint=fingerprint, permissions=request.permissions)}
+            result = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="trust",
+                workflow_id=workflow_id,
+                version=request.version,
+                permissions=request.permissions,
+            )
+            return {"ok": True, "result": result}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
     @group_router.post("/workflows/{workflow_id}/archive")
     async def archive_workflow(group_id: str, workflow_id: str, archived: bool = Body(True, embed=True)) -> Dict[str, Any]:
         try:
-            return {"ok": True, "result": service.store.archive(group_id, workflow_id, archived)}
+            result = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="archive",
+                workflow_id=workflow_id,
+                archived=archived,
+            )
+            return {"ok": True, "result": result}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
     @group_router.post("/workflows/{workflow_id}/duplicate")
     async def duplicate_workflow(group_id: str, workflow_id: str) -> Dict[str, Any]:
         try:
-            value = service.store.duplicate(group_id, workflow_id)
-            return {"ok": True, "result": await validate_and_finalize(group_id, value)}
+            value = await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="duplicate",
+                workflow_id=workflow_id,
+            )
+            return {"ok": True, "result": with_effective_value(value)}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
     @group_router.delete("/workflows/{workflow_id}")
     async def delete_workflow(group_id: str, workflow_id: str) -> Dict[str, Any]:
         try:
-            service.store.delete(group_id, workflow_id)
+            await daemon_control(
+                "admin_workflow",
+                group_id=group_id,
+                action="delete",
+                workflow_id=workflow_id,
+            )
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
         return {"ok": True, "result": {"deleted": True}}
@@ -1007,7 +1021,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             "created_ts": time.time(),
             "status": "accepted",
         }
-        service.requests.append(group_id, request)
+        await daemon_control(
+            "admin_request",
+            group_id=group_id,
+            action="append",
+            request=request,
+        )
         audit(ctx.home, "computer_control.request", group_id=group_id, actor_id=request["actor_id"], details={"request_id": request_id, "workflow_id": request["workflow_id"]})
         _emit("request.accepted", group_id=group_id, request_id=request_id)
         return {"ok": True, "result": {"request": request, "computer_control_request": True}}
@@ -1036,7 +1055,14 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/requests/{request_id}/approve")
     async def approve_computer_request(group_id: str, request_id: str) -> Dict[str, Any]:
         try:
-            value = service.requests.update(group_id, request_id, status="approved", approved_at=time.time(), approved_by="user")
+            result = await daemon_control(
+                "admin_request",
+                group_id=group_id,
+                action="approve",
+                request_id=request_id,
+                approved_at=time.time(),
+            )
+            value = result["request"]
         except KeyError as exc:
             raise _error("request_not_found", request_id, 404) from exc
         audit(ctx.home, "computer_control.request_approved", group_id=group_id, details={"request_id": request_id})
@@ -1046,7 +1072,14 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/requests/{request_id}/reject")
     async def reject_computer_request(group_id: str, request_id: str) -> Dict[str, Any]:
         try:
-            value = service.requests.update(group_id, request_id, status="rejected", rejected_at=time.time(), rejected_by="user")
+            result = await daemon_control(
+                "admin_request",
+                group_id=group_id,
+                action="reject",
+                request_id=request_id,
+                rejected_at=time.time(),
+            )
+            value = result["request"]
         except KeyError as exc:
             raise _error("request_not_found", request_id, 404) from exc
         audit(ctx.home, "computer_control.request_rejected", group_id=group_id, details={"request_id": request_id})
@@ -1075,14 +1108,15 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def verify_run(group_id: str, run_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         try:
             run = service.runner.get(group_id, run_id)
-            result = service.runner.verify(
-                group_id,
-                run_id,
+            result = await daemon_control(
+                "run",
+                group_id=group_id,
+                run_id=run_id,
                 actor_id=str(run.get("actor_id") or "foreman"),
+                action="verify",
                 passed=bool(payload.get("passed")),
                 summary=str(payload.get("summary") or ""),
                 evidence_ids=payload.get("evidence_ids") if isinstance(payload.get("evidence_ids"), list) else [],
-                fingerprint=str(service.setup.status().get("fingerprint") or ""),
             )
             audit(ctx.home, "computer_control.run_verified", group_id=group_id, details={"run_id": run_id, "passed": bool(payload.get("passed"))})
             return {"ok": True, "result": result}
@@ -1103,11 +1137,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         try:
             run = service.runner.get(group_id, run_id)
             actor_id = str(payload.get("actor_id") or run.get("actor_id") or "foreman")
-            result = service.runner.submit_recovery(
-                group_id,
-                run_id,
-                str(payload.get("recovery_id") or ""),
+            result = await daemon_control(
+                "run",
+                group_id=group_id,
+                run_id=run_id,
                 actor_id=actor_id,
+                action="recover",
+                recovery_id=str(payload.get("recovery_id") or ""),
                 tool=str(payload.get("tool") or ""),
                 arguments=payload.get("arguments") if isinstance(payload.get("arguments"), dict) else None,
                 resolution=str(payload.get("resolution") or "retry"),
@@ -1125,7 +1161,16 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/runs/{run_id}/approvals/{node_id}")
     async def decide_run_approval(group_id: str, run_id: str, node_id: str, approved: bool = Body(..., embed=True)) -> Dict[str, Any]:
         try:
-            result = service.runner.decide_approval(group_id, run_id, node_id, approved=approved)
+            run = service.runner.get(group_id, run_id)
+            result = await daemon_control(
+                "run",
+                group_id=group_id,
+                run_id=run_id,
+                actor_id=str(run.get("actor_id") or "foreman"),
+                action="approve",
+                node_id=node_id,
+                approved=approved,
+            )
         except KeyError as exc:
             raise _error("run_not_found", run_id, 404) from exc
         except ValueError as exc:

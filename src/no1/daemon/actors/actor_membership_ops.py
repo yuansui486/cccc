@@ -17,6 +17,7 @@ from ...util.conv import coerce_bool
 from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ..context.context_ops import _schedule_summary_snapshot_rebuild
+from ..messaging.turn_provenance import invalidate_turn_grant
 from ..runtime_session_ops import remove_runtime_session
 from .web_model_browser_session import clear_web_model_chatgpt_browser_actor_runtime
 
@@ -51,6 +52,7 @@ def handle_actor_remove(
         actor_doc = find_actor(group, actor_id)
         if isinstance(actor_doc, dict):
             avatar_rel_path = str(actor_doc.get("avatar_asset_path") or "").strip()
+        invalidate_turn_grant(group, actor_id, reason="actor_removed")
         remove_actor(group, actor_id)
         if isinstance(actor_doc, dict) and str(actor_doc.get("runtime") or "").strip() == "web_model":
             try:

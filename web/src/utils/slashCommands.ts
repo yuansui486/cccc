@@ -249,7 +249,9 @@ export function parseSlashCommandInput(text: string, commands: SlashCommandItem[
 }
 
 export function capsuleSkillDisplayLabel(item: SlashCommandItem): string {
-  return String(item.displayName || item.name || item.command || "").trim();
+  const name = String(item.name || item.command || "").trim();
+  if (!name) return "";
+  return `/${name}`;
 }
 
 export function resolveSlashCommandGuard(

@@ -290,8 +290,10 @@ class WindowsMCPSession:
         self.executable = executable
         self.version = ""
         self._process: Optional[asyncio.subprocess.Process] = None
-        self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._run_owner_loop, name="onecolleague-windows-mcp", daemon=True)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._owner_ready: Optional[threading.Event] = None
+        self._owner_state_lock = threading.RLock()
         self._request_id = 0
         self._lock: Optional[asyncio.Lock] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
@@ -299,21 +301,104 @@ class WindowsMCPSession:
         self._tools: List[Dict[str, Any]] = []
         self.started_at: Optional[float] = None
         self.transport_restarts = 0
-        self._thread.start()
+        self._daemon_bound = False
+        self._daemon_stopping = False
+        self._daemon_owner: Optional[tuple[int, str, int]] = None
+        self._daemon_generation_claim: Any = None
 
-    def _run_owner_loop(self) -> None:
-        asyncio.set_event_loop(self._loop)
+    def _run_owner_loop(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        ready: threading.Event,
+    ) -> None:
+        asyncio.set_event_loop(loop)
         self._lock = asyncio.Lock()
-        self._loop.run_forever()
+        ready.set()
+        loop.run_forever()
 
-    async def _on_owner(self, coroutine: Any) -> Any:
-        if asyncio.get_running_loop() is self._loop:
-            return await coroutine
-        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+    def _require_daemon_admission(self) -> None:
+        with self._owner_state_lock:
+            if not self._daemon_bound:
+                return
+            claim = self._daemon_generation_claim
+            stopping = self._daemon_stopping
+        if stopping or claim is None or not claim.admitted():
+            raise MCPUnavailable("Computer-control daemon service is stopping")
+
+    def _ensure_owner_loop(
+        self,
+        *,
+        allow_daemon_stopping: bool = False,
+    ) -> asyncio.AbstractEventLoop:
+        if not allow_daemon_stopping:
+            self._require_daemon_admission()
+        with self._owner_state_lock:
+            thread = self._thread
+            loop = self._loop
+            if thread is not None and thread.is_alive() and loop is not None:
+                return loop
+            if self._daemon_bound and self._daemon_stopping:
+                raise MCPUnavailable("Computer-control daemon service is stopping")
+            if loop is not None and not loop.is_closed():
+                loop.close()
+            loop = asyncio.new_event_loop()
+            ready = threading.Event()
+            thread = threading.Thread(
+                target=self._run_owner_loop,
+                args=(loop, ready),
+                name="onecolleague-windows-mcp",
+                daemon=True,
+            )
+            self._loop = loop
+            self._thread = thread
+            self._owner_ready = ready
+            thread.start()
+        if not ready.wait(5) or not thread.is_alive():
+            raise MCPUnavailable("Windows-MCP owner loop failed to start")
+        return loop
+
+    @staticmethod
+    def _close_rejected_coroutine(coroutine: Any) -> None:
+        close = getattr(coroutine, "close", None)
+        if callable(close):
+            close()
+
+    async def _on_owner(
+        self,
+        coroutine: Any,
+        *,
+        allow_daemon_stopping: bool = False,
+    ) -> Any:
+        try:
+            if not allow_daemon_stopping:
+                self._require_daemon_admission()
+            running_loop = asyncio.get_running_loop()
+            if running_loop is self._loop:
+                return await coroutine
+            loop = self._ensure_owner_loop(
+                allow_daemon_stopping=allow_daemon_stopping,
+            )
+        except BaseException:
+            self._close_rejected_coroutine(coroutine)
+            raise
+        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         return await asyncio.wrap_future(future)
 
-    def _on_owner_sync(self, coroutine: Any, *, timeout: Optional[float]) -> Any:
-        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+    def _on_owner_sync(
+        self,
+        coroutine: Any,
+        *,
+        timeout: Optional[float],
+        allow_daemon_stopping: bool = False,
+    ) -> Any:
+        try:
+            loop = self._ensure_owner_loop(
+                allow_daemon_stopping=allow_daemon_stopping,
+            )
+        except BaseException:
+            self._close_rejected_coroutine(coroutine)
+            raise
+        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         try:
             return future.result(timeout=None if timeout is None else max(0.0, float(timeout)))
         except concurrent.futures.TimeoutError:
@@ -322,6 +407,106 @@ class WindowsMCPSession:
 
     def run_sync(self, coroutine: Any, *, timeout: float = 120) -> Any:
         return self._on_owner_sync(coroutine, timeout=timeout)
+
+    def _run_sync_for_daemon_shutdown(
+        self,
+        coroutine: Any,
+        *,
+        timeout: float,
+    ) -> Any:
+        return self._on_owner_sync(
+            coroutine,
+            timeout=timeout,
+            allow_daemon_stopping=True,
+        )
+
+    def _start_daemon(self, owner: Any, *, home: Path) -> None:
+        from .services import _claim_daemon_generation, _release_daemon_generation
+
+        generation_claim = _claim_daemon_generation(
+            owner,
+            home=home,
+            subject="windows-mcp-session",
+        )
+        owner_key = generation_claim.owner_key
+        with self._owner_state_lock:
+            if self._daemon_generation_claim is not None:
+                if not self._daemon_stopping and self._daemon_owner == owner_key:
+                    _release_daemon_generation(generation_claim)
+                    return
+                _release_daemon_generation(generation_claim)
+                raise RuntimeError("Windows-MCP session from the prior daemon is still active")
+            if not self._daemon_bound and self._thread is not None and self._thread.is_alive():
+                _release_daemon_generation(generation_claim)
+                raise RuntimeError("Windows-MCP unbound owner loop is already active")
+            self._daemon_bound = True
+            self._daemon_stopping = False
+            self._daemon_owner = owner_key
+            self._daemon_generation_claim = generation_claim
+
+    def _request_daemon_stop(self) -> None:
+        with self._owner_state_lock:
+            if self._daemon_bound:
+                self._daemon_stopping = True
+
+    async def _daemon_owner_drained(self) -> bool:
+        current = asyncio.current_task()
+        pending = [
+            task
+            for task in asyncio.all_tasks()
+            if task is not current and not task.done()
+        ]
+        return bool(
+            self._process is None
+            and (self._stderr_task is None or self._stderr_task.done())
+            and not pending
+        )
+
+    def _drain_daemon_sync(self, *, timeout: float) -> bool:
+        from .services import _release_daemon_generation
+
+        self._request_daemon_stop()
+        deadline = time.monotonic() + max(0.0, float(timeout or 0.0))
+        with self._owner_state_lock:
+            thread = self._thread
+            loop = self._loop
+        if thread is not None and thread.is_alive():
+            try:
+                self._run_sync_for_daemon_shutdown(
+                    self._stop_owned(),
+                    timeout=max(0.0, deadline - time.monotonic()),
+                )
+                drained = self._run_sync_for_daemon_shutdown(
+                    self._daemon_owner_drained(),
+                    timeout=max(0.0, deadline - time.monotonic()),
+                )
+            except BaseException:
+                return False
+            if not drained:
+                return False
+            if loop is None or thread is threading.current_thread():
+                return False
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                return False
+        if self._process is not None or (
+            self._stderr_task is not None and not self._stderr_task.done()
+        ):
+            return False
+        with self._owner_state_lock:
+            if self._thread is thread:
+                self._thread = None
+                self._loop = None
+                self._lock = None
+                self._owner_ready = None
+            generation_claim = self._daemon_generation_claim
+            self._daemon_generation_claim = None
+            self._daemon_owner = None
+        if loop is not None and not loop.is_closed():
+            loop.close()
+        _release_daemon_generation(generation_claim)
+        return True
 
     def configure(self, executable: Path, version: str) -> None:
         self.executable = executable
@@ -336,9 +521,11 @@ class WindowsMCPSession:
         return list(self._logs)
 
     async def start(self) -> List[Dict[str, Any]]:
+        self._require_daemon_admission()
         return await self._on_owner(self._start_owned())
 
     async def _start_owned(self) -> List[Dict[str, Any]]:
+        self._require_daemon_admission()
         assert self._lock is not None
         async with self._lock:
             if self.running and self._tools:
@@ -359,6 +546,7 @@ class WindowsMCPSession:
             raise MCPUnavailable(detail) from last_error
 
     async def _start_unlocked(self) -> List[Dict[str, Any]]:
+        self._require_daemon_admission()
         if os.name != "nt":
             raise MCPUnavailable("Windows-MCP is only supported on Windows")
         executable = self.executable
@@ -474,9 +662,11 @@ class WindowsMCPSession:
             return result if isinstance(result, dict) else {"value": result}
 
     async def request(self, method: str, params: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        self._require_daemon_admission()
         return await self._on_owner(self._request_owned(method, params, timeout=timeout))
 
     async def _request_owned(self, method: str, params: Dict[str, Any], *, timeout: Optional[float]) -> Dict[str, Any]:
+        self._require_daemon_admission()
         if not self.running:
             await self._start_owned()
         assert self._lock is not None
@@ -484,9 +674,11 @@ class WindowsMCPSession:
             return await self._request_unlocked(method, params, timeout=timeout)
 
     async def call_tool(self, name: str, arguments: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        self._require_daemon_admission()
         return await self._on_owner(self._call_tool_owned(name, arguments, timeout=timeout))
 
     async def _call_tool_owned(self, name: str, arguments: Dict[str, Any], *, timeout: Optional[float]) -> Dict[str, Any]:
+        self._require_daemon_admission()
         try:
             return await self._request_owned("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
         except Exception as exc:
@@ -537,18 +729,22 @@ class WindowsMCPSession:
         )
 
     def call_tool_sync(self, name: str, arguments: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        self._require_daemon_admission()
         owner_timeout = None if timeout is None or float(timeout) <= 0 else float(timeout) + 10
         return self._on_owner_sync(self._call_tool_owned(name, arguments, timeout=timeout), timeout=owner_timeout)
 
     async def catalog(self) -> List[Dict[str, Any]]:
+        self._require_daemon_admission()
         if not self.running or not self._tools:
             return await self.start()
         return list(self._tools)
 
     def catalog_sync(self, *, timeout: float = 120) -> List[Dict[str, Any]]:
+        self._require_daemon_admission()
         return self._on_owner_sync(self._catalog_owned(), timeout=timeout)
 
     async def _catalog_owned(self) -> List[Dict[str, Any]]:
+        self._require_daemon_admission()
         if not self.running or not self._tools:
             return await self._start_owned()
         return list(self._tools)
@@ -559,12 +755,15 @@ class WindowsMCPSession:
         This method never installs, repairs, upgrades, or otherwise writes to
         the Windows-MCP tool environment.
         """
+        self._require_daemon_admission()
         return await self._on_owner(self._restart_owned())
 
     def restart_sync(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        self._require_daemon_admission()
         return self._on_owner_sync(self._restart_owned(), timeout=timeout)
 
     async def _restart_owned(self) -> Dict[str, Any]:
+        self._require_daemon_admission()
         assert self._lock is not None
         async with self._lock:
             previous_started_at = self.started_at
@@ -586,7 +785,6 @@ class WindowsMCPSession:
 
     async def _stop_unlocked(self) -> None:
         process = self._process
-        self._process = None
         self._tools = []
         self.started_at = None
         if process is not None and process.returncode is None:
@@ -596,16 +794,41 @@ class WindowsMCPSession:
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+        if process is None or process.returncode is not None:
+            self._process = None
         task = self._stderr_task
-        self._stderr_task = None
         if task is not None and not task.done():
             task.cancel()
+            if task is not asyncio.current_task():
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        if task is None or task.done():
+            self._stderr_task = None
 
     async def stop(self) -> None:
-        await self._on_owner(self._stop_owned())
+        with self._owner_state_lock:
+            if self._daemon_bound and self._daemon_stopping and self._thread is None:
+                if self._process is not None or self._stderr_task is not None:
+                    raise MCPUnavailable("Computer-control daemon transport did not drain")
+                return
+        await self._on_owner(
+            self._stop_owned(),
+            allow_daemon_stopping=True,
+        )
 
     def stop_sync(self, *, timeout: float = 10) -> None:
-        self._on_owner_sync(self._stop_owned(), timeout=timeout)
+        with self._owner_state_lock:
+            if self._daemon_bound and self._daemon_stopping and self._thread is None:
+                if self._process is not None or self._stderr_task is not None:
+                    raise MCPUnavailable("Computer-control daemon transport did not drain")
+                return
+        self._on_owner_sync(
+            self._stop_owned(),
+            timeout=timeout,
+            allow_daemon_stopping=True,
+        )
 
     async def _stop_owned(self) -> None:
         assert self._lock is not None
@@ -635,6 +858,9 @@ class WindowsMCPSetup:
         self._lock = asyncio.Lock()
         self._task: Optional[asyncio.Task[None]] = None
         self._active_process: Optional[asyncio.subprocess.Process] = None
+        self._daemon_stopping = threading.Event()
+        self._daemon_owner: Optional[tuple[int, str, int]] = None
+        self._daemon_generation_claim: Any = None
         self._attempt_package_index: Optional[str] = None
         self._attempt_fallback_allowed = False
         self._setup_logs: deque[str] = deque(maxlen=200)
@@ -659,6 +885,66 @@ class WindowsMCPSetup:
         executable = self._windows_mcp_executable()
         if executable.is_file():
             self.session.configure(executable, str(self._status.get("version") or self._installed_version()))
+
+    def _start_daemon(self, owner: Any) -> None:
+        from .services import (
+            _claim_daemon_generation,
+            _release_daemon_generation,
+        )
+
+        generation_claim = _claim_daemon_generation(
+            owner,
+            home=self.home,
+            subject="windows-mcp-setup",
+        )
+        owner_key = generation_claim.owner_key
+        if self._daemon_generation_claim is not None:
+            if not self._daemon_stopping.is_set() and self._daemon_owner == owner_key:
+                _release_daemon_generation(generation_claim)
+                return
+            _release_daemon_generation(generation_claim)
+            raise RuntimeError("Windows-MCP setup from the prior daemon is still active")
+        task = self._task
+        if task is not None and not task.done():
+            _release_daemon_generation(generation_claim)
+            raise RuntimeError("Windows-MCP setup from the prior daemon is still active")
+        self._daemon_owner = owner_key
+        self._daemon_generation_claim = generation_claim
+        self._daemon_stopping.clear()
+
+    def _request_daemon_stop(self) -> None:
+        self._daemon_stopping.set()
+
+    async def _drain_daemon(self) -> bool:
+        task = self._task
+        if task is not None and not task.done():
+            await self.cancel()
+        return task is None or task.done()
+
+    def _drain_daemon_sync(self, *, timeout: float) -> bool:
+        from .services import _release_daemon_generation
+
+        self._request_daemon_stop()
+        task = self._task
+        if task is None or task.done():
+            self._daemon_owner = None
+            generation_claim = self._daemon_generation_claim
+            self._daemon_generation_claim = None
+            _release_daemon_generation(generation_claim)
+            return True
+        try:
+            stopped = self.session._run_sync_for_daemon_shutdown(
+                self._drain_daemon(),
+                timeout=max(0.0, float(timeout or 0.0)),
+            )
+        except BaseException:
+            return False
+        if stopped:
+            self._daemon_owner = None
+            generation_claim = self._daemon_generation_claim
+            self._daemon_generation_claim = None
+            _release_daemon_generation(generation_claim)
+        return bool(stopped)
 
     def _load_setup_logs(self) -> None:
         try:
@@ -772,6 +1058,8 @@ class WindowsMCPSetup:
         return result
 
     async def ensure(self, *, force: bool = False, upgrade: bool = False) -> Dict[str, Any]:
+        if self._daemon_stopping.is_set():
+            raise MCPUnavailable("Computer-control daemon service is stopping")
         if self._task and not self._task.done():
             return self.status()
         if self.session.running and self._status.get("phase") == "ready" and not force and not upgrade:

@@ -77,6 +77,18 @@ def enabled_recipient_actor_ids(group: Group, to: List[str]) -> List[str]:
     return [aid for aid in enabled_ids if is_message_for_actor(group, actor_id=aid, event=ev)]
 
 
+def recipient_actor_ids(group: Group, to: List[str]) -> List[str]:
+    """Return all visible actor recipients, including actors eligible for auto-wake."""
+
+    actor_ids = [
+        str(actor.get("id") or "").strip()
+        for actor in list_visible_actors(group)
+        if isinstance(actor, dict) and str(actor.get("id") or "").strip()
+    ]
+    event = {"kind": "chat.message", "data": {"to": list(to)}}
+    return [actor_id for actor_id in actor_ids if is_message_for_actor(group, actor_id=actor_id, event=event)]
+
+
 def disabled_recipient_actor_ids(group: Group, to: List[str]) -> List[str]:
     """Return disabled actor ids that would receive a chat.message with the given to-list.
 

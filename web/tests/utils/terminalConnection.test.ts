@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildTerminalWebSocketUrl,
   buildTerminalConnectionKey,
+  decodeTerminalJsonFrame,
+  encodeTerminalInputFrame,
+  encodeTerminalResizeFrame,
   isTerminalAttachNonRetryableErrorCode,
   isTerminalAttachStartupRaceErrorCode,
+  parseTerminalBinaryFrame,
   shouldSuppressTerminalAttachErrorOutput,
 } from "../../src/utils/terminalConnection";
 
@@ -35,6 +40,7 @@ describe("buildTerminalConnectionKey", () => {
     expect(isTerminalAttachStartupRaceErrorCode("actor_not_running")).toBe(true);
     expect(isTerminalAttachStartupRaceErrorCode("actor_not_found")).toBe(false);
     expect(isTerminalAttachStartupRaceErrorCode("daemon_unavailable")).toBe(false);
+    expect(isTerminalAttachStartupRaceErrorCode("terminal_attach_busy")).toBe(true);
   });
 
   it("suppresses noisy terminal attach state-transition errors in the terminal buffer", () => {
@@ -42,5 +48,67 @@ describe("buildTerminalConnectionKey", () => {
     expect(shouldSuppressTerminalAttachErrorOutput("actor_not_running")).toBe(true);
     expect(shouldSuppressTerminalAttachErrorOutput("actor_not_found")).toBe(false);
     expect(shouldSuppressTerminalAttachErrorOutput("daemon_unavailable")).toBe(false);
+    expect(shouldSuppressTerminalAttachErrorOutput("terminal_attach_busy")).toBe(true);
+  });
+});
+
+describe("terminal binary protocol", () => {
+  const asArrayBuffer = (value: Uint8Array): ArrayBuffer =>
+    value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
+
+  it("builds viewer and resumed control URLs", () => {
+    expect(
+      buildTerminalWebSocketUrl({
+        protocol: "https:",
+        host: "example.test",
+        groupId: "group one",
+        actorId: "peer/1",
+        mode: "viewer",
+      }),
+    ).toBe("wss://example.test/api/v1/groups/group%20one/actors/peer%2F1/term?mode=viewer");
+    expect(
+      buildTerminalWebSocketUrl({
+        protocol: "http:",
+        host: "localhost:8848",
+        groupId: "g1",
+        actorId: "a1",
+        mode: "control",
+        takeover: true,
+        since: 42,
+      }),
+    ).toContain("?mode=control&takeover=true&since=42");
+  });
+
+  it("encodes input and resize frames", () => {
+    const input = parseTerminalBinaryFrame(asArrayBuffer(encodeTerminalInputFrame("hello")));
+    expect(input?.type).toBe("input");
+    expect(new TextDecoder().decode(input?.payload)).toBe("hello");
+
+    const resize = parseTerminalBinaryFrame(asArrayBuffer(encodeTerminalResizeFrame(120, 40)));
+    expect(resize?.type).toBe("resize");
+    expect(decodeTerminalJsonFrame(resize?.payload || new Uint8Array())).toEqual({ cols: 120, rows: 40 });
+  });
+
+  it("parses attach, output, and input acknowledgement frames", () => {
+    const encoder = new TextEncoder();
+    const frame = (opcode: number, payload: Uint8Array): ArrayBuffer => {
+      const value = new Uint8Array(payload.byteLength + 1);
+      value[0] = opcode;
+      value.set(payload, 1);
+      return asArrayBuffer(value);
+    };
+
+    expect(parseTerminalBinaryFrame(frame("1".charCodeAt(0), encoder.encode("out")))?.type).toBe("output");
+    const attach = parseTerminalBinaryFrame(
+      frame("3".charCodeAt(0), encoder.encode('{"terminal_writable":true,"replay_cursor":7}')),
+    );
+    expect(attach?.type).toBe("attach");
+    expect(decodeTerminalJsonFrame(attach?.payload || new Uint8Array())).toEqual({
+      terminal_writable: true,
+      replay_cursor: 7,
+    });
+    expect(parseTerminalBinaryFrame(frame("4".charCodeAt(0), encoder.encode('{"ok":false}')))?.type).toBe(
+      "input_ack",
+    );
   });
 });

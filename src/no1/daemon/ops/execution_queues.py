@@ -45,20 +45,40 @@ class DaemonRequestExecutionQueue:
         self._dump_response = dump_response
         self._logger = logger
         self._on_should_exit = on_should_exit
-        self._queue: Queue[_QueuedRequest] = Queue()
+        self._queue: Queue[Optional[_QueuedRequest]] = Queue()
+        self._admission_lock = threading.Lock()
+        self._accepting = True
 
     def submit(self, *, conn: Any, req: Any) -> bool:
-        if self._stop_event.is_set():
-            return False
-        self._queue.put(_QueuedRequest(conn=conn, req=req))
-        return True
+        with self._admission_lock:
+            if not self._accepting or self._stop_event.is_set():
+                return False
+            self._queue.put(_QueuedRequest(conn=conn, req=req))
+            return True
+
+    def close_admission(self, *, worker_count: int = 1) -> None:
+        """Reject new requests and stop workers after queued work drains."""
+
+        count = int(worker_count)
+        if count < 1:
+            raise ValueError("worker_count must be positive")
+        with self._admission_lock:
+            if not self._accepting:
+                return
+            self._accepting = False
+            for _ in range(count):
+                self._queue.put(None)
 
     def run_forever(self) -> None:
-        while not self._stop_event.is_set():
+        while True:
             try:
                 item = self._queue.get(timeout=0.2)
             except Empty:
                 continue
+
+            if item is None:
+                self._queue.task_done()
+                return
 
             should_exit = False
             try:

@@ -2,7 +2,6 @@ import React, { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
 import { DropOverlay } from "./components/DropOverlay";
 const AppModals = lazy(() => import("./components/AppModals").then((m) => ({ default: m.AppModals })));
 import { DoneHubLoginGate } from "./components/DoneHubLoginGate";
-const WebPet = lazy(() => import("./features/webPet/WebPet").then((m) => ({ default: m.WebPet })));
 import { AppBackground } from "./components/app/AppBackground";
 import { AppFeedback } from "./components/app/AppFeedback";
 import { AppShell } from "./components/app/AppShell";
@@ -122,7 +121,7 @@ export default function App() {
   const modalFlags = useModalStore((s) => s.modals);
   const editingActor = useModalStore((s) => s.editingActor);
   const peerRuntimeVisibility = useObservabilityStore((state) => state.peerRuntimeVisibility);
-  const petRuntimeVisibility = useObservabilityStore((state) => state.petRuntimeVisibility);
+  const assistantRuntimeVisibility = useObservabilityStore((state) => state.assistantRuntimeVisibility);
 
   const doneHubStatus = useDoneHubStore((state) => state.status);
   const doneHubSession = useDoneHubStore((state) => state.session);
@@ -189,10 +188,10 @@ export default function App() {
         ],
         {
           peerRuntimeVisibility,
-          petRuntimeVisibility,
+          assistantRuntimeVisibility,
         }
       ),
-    [actors, internalRuntimeActors, peerRuntimeVisibility, petRuntimeVisibility]
+    [actors, internalRuntimeActors, peerRuntimeVisibility, assistantRuntimeVisibility]
   );
 
   useEffect(() => {
@@ -245,7 +244,7 @@ export default function App() {
 
   React.useEffect(() => {
     const gid = String(selectedGroupId || "").trim();
-    if (!gid || petRuntimeVisibility !== "visible") {
+    if (!gid) {
       return undefined;
     }
     void refreshInternalRuntimeActors(gid);
@@ -253,7 +252,7 @@ export default function App() {
       void refreshInternalRuntimeActors(gid);
     }, 60000);
     return () => window.clearInterval(interval);
-  }, [selectedGroupId, petRuntimeVisibility, refreshInternalRuntimeActors]);
+  }, [selectedGroupId, refreshInternalRuntimeActors]);
 
   const { connectStream, fetchContext, cleanup: cleanupSSE } = useSSE({
     activeTabRef,
@@ -293,6 +292,8 @@ export default function App() {
   }, [selectedGroupId]);
 
   useEffect(() => {
+    // This effect synchronizes the capability projection after the group changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshEnabledSkillCount();
   }, [refreshEnabledSkillCount]);
 
@@ -586,12 +587,6 @@ export default function App() {
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       />
-
-      {selectedGroupId ? (
-        <Suspense fallback={null}>
-          <WebPet key={selectedGroupId} groupId={selectedGroupId} />
-        </Suspense>
-      ) : null}
 
       <AppFeedback
         isDark={isDark}

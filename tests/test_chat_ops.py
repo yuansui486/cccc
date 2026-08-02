@@ -451,98 +451,6 @@ class TestChatOps(unittest.TestCase):
             cleanup()
 
 
-    def test_send_pet_review_immediate_follows_reply_required(self) -> None:
-        group_id, cleanup = self._setup_group_with_actors()
-        try:
-            with patch("no1.daemon.messaging.chat_ops.request_pet_review") as review_mock:
-                resp, _ = self._call(
-                    "send",
-                    {
-                        "group_id": group_id,
-                        "by": "user",
-                        "to": ["peer1"],
-                        "text": "normal send",
-                    },
-                )
-                self.assertTrue(resp.ok, getattr(resp, "error", None))
-
-                review_mock.assert_called_once()
-                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_message")
-                self.assertFalse(bool(review_mock.call_args.kwargs.get("immediate")))
-
-                review_mock.reset_mock()
-                resp, _ = self._call(
-                    "send",
-                    {
-                        "group_id": group_id,
-                        "by": "user",
-                        "to": ["peer1"],
-                        "text": "urgent send",
-                        "reply_required": True,
-                    },
-                )
-                self.assertTrue(resp.ok, getattr(resp, "error", None))
-
-                review_mock.assert_called_once()
-                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_message")
-                self.assertTrue(bool(review_mock.call_args.kwargs.get("immediate")))
-        finally:
-            cleanup()
-
-    def test_reply_pet_review_immediate_follows_reply_required(self) -> None:
-        group_id, cleanup = self._setup_group_with_actors()
-        try:
-            send, _ = self._call(
-                "send",
-                {
-                    "group_id": group_id,
-                    "by": "user",
-                    "to": ["peer1"],
-                    "text": "original",
-                },
-            )
-            self.assertTrue(send.ok, getattr(send, "error", None))
-            original_event = (send.result or {}).get("event") if isinstance(send.result, dict) else {}
-            self.assertIsInstance(original_event, dict)
-            assert isinstance(original_event, dict)
-            original_event_id = str(original_event.get("id") or "").strip()
-            self.assertTrue(original_event_id)
-
-            with patch("no1.daemon.messaging.chat_ops.request_pet_review") as review_mock:
-                reply, _ = self._call(
-                    "reply",
-                    {
-                        "group_id": group_id,
-                        "by": "peer1",
-                        "reply_to": original_event_id,
-                        "text": "normal reply",
-                    },
-                )
-                self.assertTrue(reply.ok, getattr(reply, "error", None))
-
-                review_mock.assert_called_once()
-                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_reply")
-                self.assertFalse(bool(review_mock.call_args.kwargs.get("immediate")))
-
-                review_mock.reset_mock()
-                reply, _ = self._call(
-                    "reply",
-                    {
-                        "group_id": group_id,
-                        "by": "peer1",
-                        "reply_to": original_event_id,
-                        "text": "urgent reply",
-                        "reply_required": True,
-                    },
-                )
-                self.assertTrue(reply.ok, getattr(reply, "error", None))
-
-                review_mock.assert_called_once()
-                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_reply")
-                self.assertTrue(bool(review_mock.call_args.kwargs.get("immediate")))
-        finally:
-            cleanup()
-
     def test_user_message_wakes_idle_group_and_clears_pending_auto_idle_notifications(self) -> None:
         from no1.kernel.group import load_group
 
@@ -1164,10 +1072,12 @@ class TestChatOps(unittest.TestCase):
                 patch("no1.daemon.messaging.chat_ops.schedule_headless_post_wake_delivery", return_value=True) as schedule_post_wake,
                 patch("no1.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=["fm1"]),
                 patch("no1.daemon.messaging.chat_ops.emit_system_notify") as emit_notify,
+                patch("no1.daemon.messaging.chat_ops.commit_experience_reminder") as commit_experience,
             ):
                 resp = handle_send(
                     {
                         "group_id": group_id,
+                        "__turn_ingress": "web_user",
                         "by": "user",
                         "text": "default to stopped foreman",
                     },
@@ -1179,6 +1089,9 @@ class TestChatOps(unittest.TestCase):
                     automation_on_new_message=lambda _group: None,
                     clear_pending_system_notifies=lambda _group_id, _kinds: None,
                 )
+                callback = schedule_post_wake.call_args.kwargs.get("on_delivered")
+                self.assertTrue(callable(callback))
+                callback()
 
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             self.assertEqual(wake_calls, [["@foreman"]])
@@ -1194,6 +1107,11 @@ class TestChatOps(unittest.TestCase):
             self.assertEqual(schedule_kwargs.get("runtime"), "codex")
             self.assertEqual(schedule_kwargs.get("event_id"), event.get("id"))
             self.assertIn("default to stopped foreman", str(schedule_kwargs.get("text") or ""))
+            commit_experience.assert_called_once()
+            from no1.daemon.messaging.turn_provenance import get_current_turn_grant
+
+            grant = get_current_turn_grant(group, "fm1")
+            self.assertIsNone(grant)
             emit_notify.assert_not_called()
         finally:
             cleanup()

@@ -10,7 +10,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger("no1.daemon.server")
 
@@ -48,8 +48,7 @@ from .pty_app_server_exit import stop_codex_app_server_for_pty_actor_if_needed
 from .im.bootstrap_im_ops import autostart_enabled_im_bridges
 from .group.bootstrap_actor_ops import autostart_running_groups
 from .assistants.voice_idle_review_scheduler import recover_pending_voice_idle_reviews
-from .pet.review_scheduler import recover_pending_pet_reviews
-from .pet.profile_refresh import recover_due_pet_profile_refreshes
+from .group_bridge.remote_outbox_worker import RemoteOutboxWorker
 from .mcp_install import (
     is_mcp_installed as runtime_is_mcp_installed,
     ensure_mcp_installed as runtime_ensure_mcp_installed,
@@ -111,6 +110,7 @@ from .ops.socket_accept_ops import handle_incoming_connection
 from .actors.actor_runtime_ops import start_actor_process as runtime_start_actor_process
 from .actors.runner_ops import stop_actor as runner_stop_actor
 from .request_dispatch_ops import RequestDispatchDeps, dispatch_request
+from .computer_control_ops import start_daemon_computer_control
 from .serve_ops import (
     start_automation_thread,
     start_request_execution_thread,
@@ -141,6 +141,8 @@ _DAEMON_CLIENT_WARNING_WINDOW_S = 5.0
 _DAEMON_CLIENT_WARN_LOCK = threading.Lock()
 _DAEMON_CLIENT_WARN_SEEN: Dict[tuple[str, str, str], float] = {}
 _SPACE_SYNC_RUN_QUEUE: Optional[GroupSpaceSyncRunQueue] = None
+_REQUEST_EXECUTION_SHUTDOWN_TIMEOUT_S = 20.0
+_SHUTDOWN_DRAIN_RETRY_SECONDS = 0.1
 _REQUEST_FAST_QUEUE_OPS = {"send", "reply", "chat_ack"}
 _REQUEST_READ_QUEUE_OPS = {
     "branding_get",
@@ -483,6 +485,119 @@ class DaemonPaths:
 
 def default_paths() -> DaemonPaths:
     return DaemonPaths(home=ensure_home())
+
+
+def _start_daemon_computer_control_after_lock(home: Path, lock_handle: Any) -> Any:
+    try:
+        return start_daemon_computer_control(home, lock_handle=lock_handle)
+    except Exception:
+        logger.exception("Computer-control daemon service recovery is not ready")
+        return None
+
+
+def _stop_request_execution_before_lock_release(
+    queue_workers: list[tuple[DaemonRequestExecutionQueue, list[threading.Thread]]],
+    *,
+    stop_event: Optional[threading.Event] = None,
+    timeout: float = _REQUEST_EXECUTION_SHUTDOWN_TIMEOUT_S,
+) -> bool:
+    for request_queue, workers in queue_workers:
+        request_queue.close_admission(worker_count=len(workers))
+    if stop_event is not None:
+        stop_event.set()
+    deadline = time.monotonic() + max(0.0, float(timeout or 0.0))
+    for _request_queue, workers in queue_workers:
+        for worker in workers:
+            worker.join(timeout=max(0.0, deadline - time.monotonic()))
+    active = [
+        worker.name
+        for _queue, workers in queue_workers
+        for worker in workers
+        if worker.is_alive()
+    ]
+    if active:
+        logger.error(
+            "Daemon requests did not drain; retaining daemon ownership workers=%s",
+            ",".join(active),
+        )
+        return False
+    return True
+
+
+def _stop_daemon_computer_control_before_lock_release(service: Any) -> bool:
+    if service is None:
+        return True
+    try:
+        service.begin_daemon_shutdown()
+        if service.stop_daemon() and service.daemon_shutdown_complete():
+            return True
+        logger.error(
+            "Computer-control execution did not drain; retaining daemon ownership"
+        )
+    except Exception:
+        logger.exception(
+            "Computer-control execution did not stop; retaining daemon ownership"
+        )
+    return False
+
+
+def _begin_daemon_computer_control_shutdown(service: Any) -> bool:
+    if service is None:
+        return True
+    try:
+        service.begin_daemon_shutdown()
+        return True
+    except Exception:
+        logger.exception(
+            "Computer-control shutdown admission did not close; retaining daemon ownership"
+        )
+        return False
+
+
+def _daemon_computer_control_shutdown_complete(service: Any) -> bool:
+    if service is None:
+        return True
+    try:
+        return bool(service.daemon_shutdown_complete())
+    except Exception:
+        logger.exception(
+            "Computer-control shutdown state could not be verified; retaining daemon ownership"
+        )
+        return False
+
+
+def _wait_for_daemon_drains_before_lock_release(
+    *,
+    stop_requests: Callable[[], bool],
+    stop_remote_outbox: Callable[[], bool],
+    stop_computer_control: Callable[[], bool],
+    retry_seconds: float = _SHUTDOWN_DRAIN_RETRY_SECONDS,
+) -> None:
+    stages = (
+        ("request execution", stop_requests),
+        ("Group Bridge remote outbox", stop_remote_outbox),
+        ("computer-control execution", stop_computer_control),
+    )
+    attempts = {label: 0 for label, _stop in stages}
+    completed: set[str] = set()
+    while len(completed) < len(stages):
+        for label, stop in stages:
+            if label in completed:
+                continue
+            attempts[label] += 1
+            try:
+                if stop():
+                    completed.add(label)
+                    continue
+            except Exception:
+                logger.exception("%s shutdown drain failed; retaining daemon ownership", label)
+            if attempts[label] == 1 or attempts[label] % 10 == 0:
+                logger.error(
+                    "%s did not drain; retaining daemon ownership and retrying",
+                    label,
+                )
+        if len(completed) < len(stages):
+            time.sleep(max(0.0, float(retry_seconds or 0.0)))
 
 
 def _desired_daemon_transport() -> str:
@@ -966,6 +1081,8 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
     except Exception:
         pass
 
+    computer_control_service = _start_daemon_computer_control_after_lock(p.home, lock_handle)
+
     try:
         p.sock_path.unlink(missing_ok=True)
     except Exception:
@@ -976,6 +1093,7 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         pass
 
     stop_event = threading.Event()
+    remote_outbox_worker: Optional[RemoteOutboxWorker] = None
 
     try:
         pty_runner.SUPERVISOR.set_exit_hook(
@@ -1121,10 +1239,13 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             now_iso=utc_now_iso(),
         )
 
+        # Remote delivery is daemon-owned. Web lifespan and request handlers
+        # only enqueue receipts; this worker owns network attempts and retries.
+        remote_outbox_worker = RemoteOutboxWorker(home=p.home)
+        remote_outbox_worker.start()
+
         # Bootstrap background work only after the daemon socket is ready, but
         # don't block the accept loop (clients should see the daemon as responsive).
-        recover_pending_pet_reviews()
-        recover_due_pet_profile_refreshes()
         recover_pending_voice_idle_reviews()
         start_bootstrap_thread(
             maybe_autostart_running_groups=_maybe_autostart_running_groups,
@@ -1155,10 +1276,28 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             logger=logger,
             on_should_exit=stop_event.set,
         )
-        start_request_execution_thread(request_queue=request_queue, name="onecolleague-request-worker-slow")
-        start_request_execution_thread(request_queue=fast_request_queue, name="onecolleague-request-worker-fast")
-        start_request_execution_thread(request_queue=read_request_queue, name="onecolleague-request-worker-read-1")
-        start_request_execution_thread(request_queue=read_request_queue, name="onecolleague-request-worker-read-2")
+        request_workers = [
+            start_request_execution_thread(
+                request_queue=request_queue,
+                name="onecolleague-request-worker-slow",
+            )
+        ]
+        fast_request_workers = [
+            start_request_execution_thread(
+                request_queue=fast_request_queue,
+                name="onecolleague-request-worker-fast",
+            )
+        ]
+        read_request_workers = [
+            start_request_execution_thread(
+                request_queue=read_request_queue,
+                name="onecolleague-request-worker-read-1",
+            ),
+            start_request_execution_thread(
+                request_queue=read_request_queue,
+                name="onecolleague-request-worker-read-2",
+            ),
+        ]
 
         should_exit = False
         while not should_exit and not stop_event.is_set():
@@ -1188,10 +1327,13 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
                     dump_response=_dump_response,
                     error=lambda code, message, details=None: _error(code, message, details=details),
                     actor_running=pty_runner.SUPERVISOR.actor_running,
-                    attach_actor_socket=lambda group_id, actor_id, sock2: pty_runner.SUPERVISOR.attach(
+                    attach_actor_socket=lambda group_id, actor_id, sock2, since=None, mode="control", takeover=False: pty_runner.SUPERVISOR.reserve_attach(
                         group_id=group_id,
                         actor_id=actor_id,
                         sock=sock2,
+                        since=since,
+                        mode=mode,
+                        takeover=takeover,
                     ),
                     load_group=load_group,
                     find_actor=find_actor,
@@ -1218,6 +1360,29 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             if should_exit:
                 stop_event.set()
 
+    while not _begin_daemon_computer_control_shutdown(computer_control_service):
+        time.sleep(_SHUTDOWN_DRAIN_RETRY_SECONDS)
+    _wait_for_daemon_drains_before_lock_release(
+        stop_requests=lambda: _stop_request_execution_before_lock_release(
+            [
+                (request_queue, request_workers),
+                (fast_request_queue, fast_request_workers),
+                (read_request_queue, read_request_workers),
+            ],
+            stop_event=stop_event,
+        ),
+        stop_remote_outbox=lambda: (
+            remote_outbox_worker is None or remote_outbox_worker.stop(timeout=2.0)
+        ),
+        stop_computer_control=lambda: (
+            _stop_daemon_computer_control_before_lock_release(
+                computer_control_service
+            )
+        ),
+    )
+    while not _daemon_computer_control_shutdown_complete(computer_control_service):
+        _stop_daemon_computer_control_before_lock_release(computer_control_service)
+        time.sleep(_SHUTDOWN_DRAIN_RETRY_SECONDS)
     try:
         close_all_browser_surface_sessions()
     except Exception:

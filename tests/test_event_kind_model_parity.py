@@ -2,8 +2,38 @@ import re
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 
 class TestEventKindModelParity(unittest.TestCase):
+    def test_actor_delivery_failed_accepts_all_delivery_payload_shapes(self) -> None:
+        from no1.contracts.v1.event import normalize_event_data
+
+        common = {
+            "actor_id": "peer1",
+            "event_ids": ["evt1"],
+            "accepted": None,
+            "retryable": False,
+            "reason": "submit_write_unknown",
+            "error": "write was not confirmed",
+        }
+        accepted = {
+            **common,
+            "attempt_id": "attempt1",
+            "generation": 3,
+            "accepted": True,
+            "reason": "grant_finalize_uncertain",
+        }
+        with_attempt = {**common, "attempt_id": "attempt2", "generation": 4}
+        preamble = {key: value for key, value in common.items() if key not in {"accepted"}}
+
+        self.assertEqual(normalize_event_data("actor.delivery.failed", accepted)["generation"], 3)
+        self.assertEqual(normalize_event_data("actor.delivery.failed", with_attempt)["attempt_id"], "attempt2")
+        self.assertIsNone(normalize_event_data("actor.delivery.failed", preamble)["generation"])
+
+        with self.assertRaises(ValidationError):
+            normalize_event_data("actor.delivery.failed", {**common, "unexpected": True})
+
     def test_standard_append_event_kinds_are_modeled(self) -> None:
         from no1.contracts.v1.event import _KIND_TO_MODEL
 

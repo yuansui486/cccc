@@ -8,6 +8,45 @@ from unittest.mock import patch
 
 
 class TestNotebookLMProviderScaffold(unittest.TestCase):
+    def test_delete_source_treats_vendor_none_as_success(self) -> None:
+        import asyncio
+
+        from no1.providers.notebooklm.adapter import _delete_source_async
+
+        class _FakeSources:
+            async def delete(self, notebook_id: str, source_id: str):
+                self.called_with = (notebook_id, source_id)
+                return None
+
+        class _FakeClient:
+            def __init__(self) -> None:
+                self.sources = _FakeSources()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        fake_client = _FakeClient()
+
+        async def _fake_build_client(*, auth_payload, timeout_seconds):
+            _ = auth_payload, timeout_seconds
+            return fake_client
+
+        with patch("no1.providers.notebooklm.adapter._build_client", side_effect=_fake_build_client):
+            out = asyncio.run(
+                _delete_source_async(
+                    notebook_id="nb_1",
+                    source_id="src_1",
+                    auth_payload={},
+                    timeout_seconds=10.0,
+                )
+            )
+
+        self.assertEqual(fake_client.sources.called_with, ("nb_1", "src_1"))
+        self.assertTrue(out.get("deleted"))
+
     def test_health_check_accepts_explicit_auth_even_without_real_env_flag(self) -> None:
         from no1.providers.notebooklm.compat import NotebookLMCompatStatus
         from no1.providers.notebooklm.health import notebooklm_health_check
@@ -224,6 +263,159 @@ class TestNotebookLMProviderScaffold(unittest.TestCase):
         self.assertEqual(str(out.get("answer") or ""), "ok")
         refs = out.get("references") if isinstance(out.get("references"), list) else []
         self.assertEqual(len(refs), 1)
+
+    def test_query_reference_metadata_keeps_answer_range_and_score(self) -> None:
+        from no1.providers.notebooklm.adapter import _reference_to_dict
+
+        class _Ref:
+            source_id = "src_1"
+            citation_number = 3
+            cited_text = "quoted text"
+            answer_start_char = 12
+            answer_end_char = 28
+            score = 0.81
+
+        out = _reference_to_dict(_Ref())
+
+        self.assertEqual(str(out.get("source_id") or ""), "src_1")
+        self.assertEqual(out.get("citation_number"), 3)
+        self.assertEqual(out.get("answer_range"), {"start_char": 12, "end_char": 28})
+        self.assertEqual(out.get("score"), 0.81)
+
+    def test_query_reference_metadata_omits_invalid_ranges_and_scores(self) -> None:
+        from no1.providers.notebooklm.adapter import _reference_to_dict
+
+        invalid_values = (
+            (20, 10, float("nan")),
+            (True, 10, float("inf")),
+            ("not-an-int", 10, True),
+            (4, None, float("-inf")),
+        )
+        for answer_start, answer_end, score in invalid_values:
+            with self.subTest(answer_start=answer_start, answer_end=answer_end, score=score):
+                ref = type(
+                    "_Ref",
+                    (),
+                    {
+                        "source_id": "src_invalid",
+                        "answer_start_char": answer_start,
+                        "answer_end_char": answer_end,
+                        "score": score,
+                    },
+                )()
+
+                out = _reference_to_dict(ref)
+
+                self.assertNotIn("answer_range", out)
+                self.assertNotIn("score", out)
+
+    def test_generate_infographic_passes_style_option_to_vendor(self) -> None:
+        import asyncio
+
+        from no1.providers.notebooklm.adapter import _generate_artifact_async
+
+        captured: dict[str, object] = {}
+
+        class _FakeStatus:
+            task_id = "task_1"
+            status = "queued"
+            url = ""
+            error = ""
+            error_code = ""
+            metadata = {}
+
+        class _FakeArtifacts:
+            async def generate_infographic(self, *args, **kwargs):
+                captured["args"] = args
+                captured["kwargs"] = kwargs
+                return _FakeStatus()
+
+        class _FakeClient:
+            artifacts = _FakeArtifacts()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def _fake_build_client(*, auth_payload, timeout_seconds):
+            _ = auth_payload, timeout_seconds
+            return _FakeClient()
+
+        for options in (
+            {"infographic_style": "scientific"},
+            {"style": "scientific"},
+            {"infographic_style": None, "style": "scientific"},
+            {"infographic_style": "scientific", "style": "not-a-style"},
+        ):
+            captured.clear()
+            with self.subTest(options=options), patch(
+                "no1.providers.notebooklm.adapter._build_client",
+                side_effect=_fake_build_client,
+            ):
+                out = asyncio.run(
+                    _generate_artifact_async(
+                        notebook_id="nb_1",
+                        kind="infographic",
+                        options=options,
+                        auth_payload={},
+                        timeout_seconds=10.0,
+                    )
+                )
+
+            self.assertEqual(str(out.get("task_id") or ""), "task_1")
+            kwargs = captured.get("kwargs") if isinstance(captured.get("kwargs"), dict) else {}
+            self.assertEqual(str(getattr(kwargs.get("style"), "name", "") or ""), "SCIENTIFIC")
+
+    def test_generate_infographic_rejects_invalid_style(self) -> None:
+        import asyncio
+
+        from no1.providers.notebooklm.adapter import _generate_artifact_async
+        from no1.providers.notebooklm.errors import NotebookLMProviderError
+
+        class _FakeArtifacts:
+            async def generate_infographic(self, *args, **kwargs):
+                raise AssertionError("invalid style must fail before the vendor call")
+
+        class _FakeClient:
+            artifacts = _FakeArtifacts()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def _fake_build_client(*, auth_payload, timeout_seconds):
+            _ = auth_payload, timeout_seconds
+            return _FakeClient()
+
+        invalid_options = (
+            {"infographic_style": False},
+            {"style": 0},
+            {"infographic_style": [], "style": "scientific"},
+            {"style": {}},
+            {"infographic_style": "not-a-style", "style": "scientific"},
+        )
+        for options in invalid_options:
+            with self.subTest(options=options), patch(
+                "no1.providers.notebooklm.adapter._build_client",
+                side_effect=_fake_build_client,
+            ):
+                with self.assertRaises(NotebookLMProviderError) as ctx:
+                    asyncio.run(
+                        _generate_artifact_async(
+                            notebook_id="nb_1",
+                            kind="infographic",
+                            options=options,
+                            auth_payload={},
+                            timeout_seconds=10.0,
+                        )
+                    )
+
+            self.assertEqual(ctx.exception.code, "space_job_invalid")
+            self.assertIn("invalid infographic_style", str(ctx.exception))
 
     def test_create_space_works_from_saved_state_without_real_env_flag(self) -> None:
         from no1.daemon.space.group_space_provider import provider_create_space

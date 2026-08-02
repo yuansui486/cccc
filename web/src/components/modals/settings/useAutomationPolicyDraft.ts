@@ -40,6 +40,8 @@ export function useAutomationPolicyDraft({
 
   useEffect(() => {
     if (!active || !settings) return;
+    // Refresh the editable draft when the persisted policy changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNudgeSeconds(settings.nudge_after_seconds);
     setReplyRequiredNudgeSeconds(settings.reply_required_nudge_after_seconds ?? 300);
     setAttentionAckNudgeSeconds(settings.attention_ack_nudge_after_seconds ?? 600);

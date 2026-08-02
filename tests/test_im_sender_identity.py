@@ -379,6 +379,9 @@ class TestImSenderIdentity(unittest.TestCase):
             self.assertEqual(str(data.get("source_user_id") or ""), "staff_001")
             self.assertEqual(data.get("mention_user_ids"), ["staff_001"])
             self.assertEqual(str(event.get("by") or ""), "user")
+            provenance = data.get("turn_provenance") if isinstance(data.get("turn_provenance"), dict) else {}
+            self.assertEqual(provenance.get("origin"), "im")
+            self.assertFalse(bool(provenance.get("fresh_local_request")))
         finally:
             if bridge is not None:
                 bridge.stop()
@@ -683,6 +686,43 @@ class TestImSenderIdentity(unittest.TestCase):
 
             self.assertEqual(len(adapter.sent_messages), 1)
             self.assertIsNone(adapter.sent_messages[0]["mention_user_ids"])
+        finally:
+            if bridge is not None:
+                bridge.stop()
+            cleanup()
+
+    def test_completed_stream_projects_insight_once_without_repeating_body(self) -> None:
+        _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeDingTalkAdapter([])
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+            bridge.subscribers.subscribe("cid_g1", "ops", platform="dingtalk")
+            target = bridge._stream_target_key("cid_g1", 0)
+            bridge._completed_stream_targets["stream-insight"] = {target}
+
+            bridge._forward_event(
+                {
+                    "kind": "chat.message",
+                    "by": "claude-1",
+                    "data": {
+                        "text": "already streamed body",
+                        "insight": "The stream completion does not own the higher-order message fact.",
+                        "stream_id": "stream-insight",
+                        "to": ["user"],
+                        "attachments": [],
+                    },
+                }
+            )
+
+            self.assertEqual(len(adapter.sent_messages), 1)
+            projected = str(adapter.sent_messages[0]["text"])
+            self.assertNotIn("already streamed body", projected)
+            self.assertEqual(projected.count("Peer perspective (provisional"), 1)
+            self.assertIn("The stream completion does not own the higher-order message fact.", projected)
         finally:
             if bridge is not None:
                 bridge.stop()

@@ -846,6 +846,195 @@ class TestGroupSpaceOps(unittest.TestCase):
             cleanup_stub()
             cleanup()
 
+    def test_group_space_query_returns_safe_actionable_provider_failures(self) -> None:
+        from no1.daemon.space.group_space_provider import SpaceProviderError
+        from no1.daemon.space.group_space_store import get_space_provider_state, set_space_provider_state
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group("space-query-failure-diagnostics")
+            bind, _ = self._call(
+                "group_space_bind",
+                {
+                    "group_id": gid,
+                    "provider": "notebooklm",
+                    "lane": "work",
+                    "action": "bind",
+                    "remote_space_id": "nb_query_failure_diagnostics",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(bind.ok, getattr(bind, "error", None))
+
+            secret_text = "__Secure-1PSID=do-not-persist remote-answer-fragment"
+            cases = (
+                (
+                    "space_provider_auth_invalid",
+                    "space_provider_auth_invalid",
+                    False,
+                    True,
+                    "provider_authentication",
+                    "reauthenticate_provider",
+                    False,
+                ),
+                (
+                    "space_provider_not_configured",
+                    "space_provider_not_configured",
+                    False,
+                    True,
+                    "provider_configuration",
+                    "configure_provider",
+                    False,
+                ),
+                (
+                    "space_provider_compat_mismatch",
+                    "space_provider_compat_mismatch",
+                    False,
+                    True,
+                    "provider_compatibility",
+                    "update_provider",
+                    False,
+                ),
+                (
+                    "space_provider_rate_limited",
+                    "space_provider_rate_limited",
+                    True,
+                    False,
+                    "provider_upstream",
+                    "retry_query_later",
+                    True,
+                ),
+                (
+                    "space_provider_timeout",
+                    "space_provider_timeout",
+                    True,
+                    False,
+                    "provider_transport",
+                    "retry_query",
+                    True,
+                ),
+                (
+                    "space_provider_upstream_error",
+                    "space_provider_upstream_error",
+                    True,
+                    False,
+                    "provider_upstream",
+                    "retry_query",
+                    True,
+                ),
+                (
+                    f"space_provider_bad_{secret_text}",
+                    "space_provider_upstream_error",
+                    False,
+                    False,
+                    "provider_upstream",
+                    "inspect_provider",
+                    False,
+                ),
+            )
+            for raw_code, code, transient, degrade, layer, next_action, retryable in cases:
+                with self.subTest(code=raw_code):
+                    set_space_provider_state(
+                        "notebooklm",
+                        enabled=True,
+                        mode="active",
+                        last_error="",
+                        touch_health=True,
+                    )
+                    with patch(
+                        "no1.daemon.space.group_space_runtime.provider_query",
+                        side_effect=SpaceProviderError(
+                            raw_code,
+                            secret_text,
+                            transient=transient,
+                            degrade_provider=degrade,
+                        ),
+                    ):
+                        query, _ = self._call(
+                            "group_space_query",
+                            {
+                                "group_id": gid,
+                                "provider": "notebooklm",
+                                "lane": "work",
+                                "query": "What is the status?",
+                            },
+                        )
+                    self.assertTrue(query.ok, getattr(query, "error", None))
+                    result = query.result if isinstance(query.result, dict) else {}
+                    self.assertTrue(bool(result.get("degraded")))
+                    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+                    self.assertEqual(str(error.get("code") or ""), code)
+                    self.assertEqual(str(error.get("layer") or ""), layer)
+                    self.assertEqual(str(error.get("next_action") or ""), next_action)
+                    self.assertEqual(bool(error.get("retryable")), retryable)
+                    self.assertNotIn(secret_text, json.dumps(result, ensure_ascii=False))
+                    state = get_space_provider_state("notebooklm")
+                    self.assertNotIn(secret_text, str(state.get("last_error") or ""))
+                    if degrade:
+                        self.assertEqual(str(state.get("last_error") or ""), str(error.get("message") or ""))
+
+            set_space_provider_state(
+                "notebooklm",
+                enabled=True,
+                mode="active",
+                last_error="",
+                touch_health=True,
+            )
+            with patch(
+                "no1.daemon.space.group_space_runtime.provider_query",
+                side_effect=RuntimeError(secret_text),
+            ):
+                unknown, _ = self._call(
+                    "group_space_query",
+                    {
+                        "group_id": gid,
+                        "provider": "notebooklm",
+                        "lane": "work",
+                        "query": "What is the status?",
+                    },
+                )
+            self.assertTrue(unknown.ok, getattr(unknown, "error", None))
+            unknown_result = unknown.result if isinstance(unknown.result, dict) else {}
+            unknown_error = (
+                unknown_result.get("error") if isinstance(unknown_result.get("error"), dict) else {}
+            )
+            self.assertEqual(str(unknown_error.get("code") or ""), "space_provider_upstream_error")
+            self.assertEqual(str(unknown_error.get("layer") or ""), "provider_upstream")
+            self.assertEqual(str(unknown_error.get("next_action") or ""), "retry_query")
+            self.assertTrue(bool(unknown_error.get("retryable")))
+            self.assertNotIn(secret_text, json.dumps(unknown_result, ensure_ascii=False))
+            self.assertNotIn(
+                secret_text,
+                str(get_space_provider_state("notebooklm").get("last_error") or ""),
+            )
+
+            set_space_provider_state(
+                "notebooklm",
+                enabled=False,
+                mode="disabled",
+                last_error="",
+                touch_health=True,
+            )
+            disabled, _ = self._call(
+                "group_space_query",
+                {
+                    "group_id": gid,
+                    "provider": "notebooklm",
+                    "lane": "work",
+                    "query": "What is the status?",
+                },
+            )
+            self.assertTrue(disabled.ok, getattr(disabled, "error", None))
+            disabled_error = ((disabled.result or {}).get("error") or {}) if isinstance(disabled.result, dict) else {}
+            self.assertEqual(
+                str(disabled_error.get("layer") or ""),
+                "provider_configuration",
+            )
+            self.assertEqual(str(disabled_error.get("next_action") or ""), "enable_provider")
+            self.assertFalse(bool(disabled_error.get("retryable")))
+        finally:
+            cleanup()
+
     def test_group_space_query_rejects_unsupported_language_option(self) -> None:
         _, cleanup = self._with_home()
         cleanup_stub = self._with_env("CCCC_NOTEBOOKLM_STUB", "1")
@@ -881,7 +1070,7 @@ class TestGroupSpaceOps(unittest.TestCase):
             cleanup_stub()
             cleanup()
 
-    def test_space_sources_list_refresh_delete_with_stub(self) -> None:
+    def test_space_sources_list_refresh_and_real_delete(self) -> None:
         _, cleanup = self._with_home()
         cleanup_stub = self._with_env("CCCC_NOTEBOOKLM_STUB", "1")
         try:
@@ -928,20 +1117,41 @@ class TestGroupSpaceOps(unittest.TestCase):
             refreshed_result = refreshed.result if isinstance(refreshed.result, dict) else {}
             self.assertEqual(str(refreshed_result.get("action") or ""), "refresh")
 
-            deleted, _ = self._call(
-                "group_space_sources",
-                {
-                    "group_id": gid,
-                    "provider": "notebooklm",
-                    "lane": "work",
-                    "action": "delete",
-                    "source_id": "src_abc",
-                    "by": "user",
-                },
-            )
+            class _RealAdapter:
+                def delete_source(self, *, remote_space_id: str, source_id: str, auth_json_raw: str | None = None):
+                    _ = auth_json_raw
+                    return {
+                        "provider": "notebooklm",
+                        "remote_space_id": remote_space_id,
+                        "source_id": source_id,
+                        "deleted": True,
+                    }
+
+            with patch(
+                "no1.daemon.space.group_space_provider.notebooklm_real_enabled",
+                return_value=True,
+            ), patch(
+                "no1.daemon.space.group_space_provider.get_notebooklm_adapter",
+                return_value=_RealAdapter(),
+            ):
+                deleted, _ = self._call(
+                    "group_space_sources",
+                    {
+                        "group_id": gid,
+                        "provider": "notebooklm",
+                        "lane": "work",
+                        "action": "delete",
+                        "source_id": "src_abc",
+                        "by": "user",
+                    },
+                )
             self.assertTrue(deleted.ok, getattr(deleted, "error", None))
             deleted_result = deleted.result if isinstance(deleted.result, dict) else {}
             self.assertEqual(str(deleted_result.get("action") or ""), "delete")
+            provider_delete_result = (
+                deleted_result.get("delete_result") if isinstance(deleted_result.get("delete_result"), dict) else {}
+            )
+            self.assertTrue(provider_delete_result.get("deleted"))
         finally:
             cleanup_stub()
             cleanup()

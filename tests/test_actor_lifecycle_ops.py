@@ -7,6 +7,12 @@ from unittest.mock import patch
 
 
 class TestActorLifecycleOps(unittest.TestCase):
+    def _mock_runtime_start(self):
+        return patch(
+            "no1.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor",
+            return_value=None,
+        )
+
     def _with_home(self):
         old_home = os.environ.get("ONECOLLEAGUE_HOME")
         old_runtime_resume = os.environ.get("CCCC_RUNTIME_RESUME")
@@ -102,7 +108,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             assert isinstance(group_doc_after_stop, dict)
             self.assertFalse(bool(group_doc_after_stop.get("running")))
 
-            start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            with self._mock_runtime_start():
+                start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
             actor_after_start = (start.result or {}).get("actor") if isinstance(start.result, dict) else {}
             self.assertIsInstance(actor_after_start, dict)
@@ -142,6 +149,12 @@ class TestActorLifecycleOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
+            from no1.kernel.group import load_group
+            from no1.kernel.context import ContextStorage
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            ContextStorage(group).update_agent_state("peer1", "stale focus", active_task_id="T999")  # type: ignore[arg-type]
+
             disable, _ = self._call(
                 "actor_update",
                 {"group_id": group_id, "actor_id": "peer1", "by": "user", "patch": {"enabled": False}},
@@ -164,6 +177,15 @@ class TestActorLifecycleOps(unittest.TestCase):
             actors = group_doc.get("actors") if isinstance(group_doc.get("actors"), list) else []
             actor = next((item for item in actors if isinstance(item, dict) and item.get("id") == "peer1"), {})
             self.assertFalse(bool(actor.get("enabled", True)))
+
+            refreshed = load_group(group_id)
+            self.assertIsNotNone(refreshed)
+            refreshed_agents = ContextStorage(refreshed).load_agents().agents  # type: ignore[arg-type]
+            refreshed_actor = next((item for item in refreshed_agents if getattr(item, "id", "") == "peer1"), None)
+            self.assertIsNotNone(refreshed_actor)
+            hot = refreshed_actor.hot if refreshed_actor is not None else None
+            self.assertEqual(str(getattr(hot, "active_task_id", "") or ""), "")
+            self.assertEqual(str(getattr(hot, "focus", "") or ""), "")
         finally:
             cleanup()
 
@@ -378,7 +400,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             storage = ContextStorage(group)  # type: ignore[arg-type]
             storage.update_agent_state("peer1", "Old focus", active_task_id="T999")
 
-            start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            with self._mock_runtime_start():
+                start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
 
             refreshed = load_group(group_id)
@@ -761,10 +784,16 @@ class TestActorLifecycleOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            with self._mock_runtime_start():
+                start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
 
-            restart, _ = self._call("actor_restart", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            from types import SimpleNamespace
+            with self._mock_runtime_start(), patch(
+                "no1.daemon.actors.actor_lifecycle_ops.codex_app_supervisor.start_pty_app_actor",
+                return_value=SimpleNamespace(remote_tui_pid=lambda: 0),
+            ):
+                restart, _ = self._call("actor_restart", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
             self.assertTrue(restart.ok, getattr(restart, "error", None))
 
             stop, _ = self._call("actor_stop", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
@@ -807,7 +836,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             set_state, _ = self._call("group_set_state", {"group_id": group_id, "state": "paused", "by": "user"})
             self.assertTrue(set_state.ok, getattr(set_state, "error", None))
 
-            start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            with self._mock_runtime_start():
+                start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
 
             show, _ = self._call("group_show", {"group_id": group_id})
@@ -847,7 +877,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             stop, _ = self._call("group_stop", {"group_id": group_id, "by": "user"})
             self.assertTrue(stop.ok, getattr(stop, "error", None))
 
-            start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            with self._mock_runtime_start():
+                start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
 
             show, _ = self._call("group_show", {"group_id": group_id})

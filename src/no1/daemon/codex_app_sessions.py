@@ -23,10 +23,20 @@ from ..paths import ensure_home
 from ..runners import pty as pty_runner
 from .actors.actor_exit_ops import persist_actor_process_exit_stopped
 from .mcp_install import ensure_mcp_installed
-from .messaging.delivery import auto_mark_headless_delivery_started, render_headless_control_text
+from .messaging.delivery import append_turn_grant_receipt, auto_mark_headless_delivery_started, render_headless_control_text
+from .messaging.turn_provenance import (
+    TurnDeliveryBusyError,
+    begin_turn_delivery_attempt,
+    fail_turn_delivery_attempt,
+    finalize_turn_delivery_attempt,
+    invalidate_turn_grant,
+    invalidate_turn_grant_if_identity,
+    terminalize_uncertain_delivery_attempt,
+    turn_delivery_attempt_receipt,
+)
 from .runner_state_ops import headless_state_path, remove_headless_state
 from .codex_app_thread_ops import prepare_codex_app_tui_resume, start_codex_app_thread
-from .runtime_session_ops import record_codex_app_thread_runtime_session, runtime_resume_enabled
+from .runtime_session_ops import mark_runtime_session_auth_failed, record_codex_app_thread_runtime_session, runtime_resume_enabled
 from ..util.fs import atomic_write_json
 from ..util.node_env import with_node_deprecation_warnings_suppressed
 from ..util.process import pid_is_alive, resolve_subprocess_argv, terminate_pid, windowless_subprocess_popen_kwargs
@@ -241,6 +251,13 @@ def _is_closed_stream_logging_error(exc: BaseException) -> bool:
     return "i/o operation on closed file" in message or "closed stream" in message
 
 
+def _is_codex_app_server_auth_failure_line(line: str) -> bool:
+    lowered = str(line or "").strip().lower()
+    if not lowered or "401 unauthorized" not in lowered:
+        return False
+    return "responses" in lowered or "websocket" in lowered or "api.openai.com" in lowered
+
+
 def _is_codex_request_timeout(exc: BaseException, *, method: str = "") -> bool:
     message = str(exc or "").strip().lower()
     if "codex request timed out:" not in message:
@@ -318,7 +335,22 @@ class CodexSessionState:
             "current_task_id": self.current_task_id,
             "thread_id": self.thread_id,
             "updated_at": self.updated_at,
-        }
+    }
+
+
+class CodexRequestRejectedError(RuntimeError):
+    def __init__(self, *, method: str, code: int, message: str, data: Any = None) -> None:
+        super().__init__(message)
+        self.method = str(method or "")
+        self.code = int(code)
+        self.data = data
+
+
+def _is_preaccept_local_image_rejection(exc: BaseException) -> bool:
+    if not isinstance(exc, CodexRequestRejectedError) or exc.method != "turn/start" or exc.code != -32602:
+        return False
+    message = str(exc).strip().lower()
+    return "image" in message and any(token in message for token in ("unsupported", "not supported", "invalid"))
 
 
 class CodexAppSession:
@@ -361,6 +393,13 @@ class CodexAppSession:
         self._turn_done = threading.Event()
         self._active_turn_id = ""
         self._active_event_id = ""
+        self._turn_generation = 0
+        self._active_turn_generation = 0
+        self._active_delivery_attempt: Optional[dict[str, Any]] = None
+        self._active_grant_generation = 0
+        self._starting_delivery_attempt_id = ""
+        self._starting_runtime_turn_id = ""
+        self._pending_turn_terminals: Dict[str, Dict[str, Any]] = {}
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._ws_thread: Optional[threading.Thread] = None
@@ -438,6 +477,14 @@ class CodexAppSession:
                 thread_id,
                 exc_info=True,
             )
+
+    def _runtime_session_auth_failure_guard(self) -> tuple[list[str], str]:
+        with self._lock:
+            command = list(self._runtime_command)
+            provider_thread_id = str(self._session_state.thread_id or "").strip()
+        if not command:
+            command = ["codex", "app-server", "--listen", self.listen_url]
+        return command, provider_thread_id
 
     def _emit_activity(
         self,
@@ -764,6 +811,12 @@ class CodexAppSession:
             self._active_control_kind = ""
             self._active_event_id = ""
             self._active_turn_id = ""
+            self._active_turn_generation = 0
+            self._active_delivery_attempt = None
+            self._active_grant_generation = 0
+            self._starting_delivery_attempt_id = ""
+            self._starting_runtime_turn_id = ""
+            self._pending_turn_terminals.clear()
         self._persist_state()
         self._turn_done.set()
         try:
@@ -1059,7 +1112,17 @@ class CodexAppSession:
                 self._pending.pop(request_id, None)
             raise RuntimeError(f"codex request timed out: {method}") from exc
         if "error" in response:
-            raise RuntimeError(str((response.get("error") or {}).get("message") or f"codex request failed: {method}"))
+            error = response.get("error") if isinstance(response.get("error"), dict) else {}
+            try:
+                code = int(error.get("code"))
+            except (TypeError, ValueError):
+                code = 0
+            raise CodexRequestRejectedError(
+                method=method,
+                code=code,
+                message=str(error.get("message") or f"codex request failed: {method}"),
+                data=error.get("data"),
+            )
         result = response.get("result")
         return result if isinstance(result, dict) else {}
 
@@ -1144,6 +1207,20 @@ class CodexAppSession:
                 line = str(raw_line or "").rstrip()
                 if line:
                     _safe_logger_call("info", "[codex-app %s/%s] %s", self.group_id, self.actor_id, line)
+                    if _is_codex_app_server_auth_failure_line(line):
+                        with self._lock:
+                            stop_requested = bool(self._stop_requested)
+                        if stop_requested:
+                            continue
+                        expected_command, expected_provider_thread_id = self._runtime_session_auth_failure_guard()
+                        mark_runtime_session_auth_failed(
+                            group_id=self.group_id,
+                            actor_id=self.actor_id,
+                            error=line,
+                            expected_command=expected_command,
+                            expected_provider_thread_id=expected_provider_thread_id,
+                            require_provider_thread_id_match=True,
+                        )
         except Exception as exc:
             if _is_closed_stream_logging_error(exc):
                 return
@@ -1214,14 +1291,40 @@ class CodexAppSession:
             self._turn_done.clear()
             turn_id = ""
             with self._lock:
+                self._turn_generation += 1
+                turn_generation = self._turn_generation
+                self._active_turn_id = ""
+                self._active_turn_generation = turn_generation
                 self._active_control_kind = str(payload.control_kind or "").strip().lower()
                 self._active_payload = payload
+                self._active_event_id = payload.event_id
             turn_text = str(payload.text or "")
+            try:
+                delivery_attempt = begin_turn_delivery_attempt(
+                    self.group_id,
+                    actor_id=self.actor_id,
+                    event_ids=[payload.event_id],
+                    binding={"transport": "codex_app", "turn_generation": turn_generation},
+                )
+            except TurnDeliveryBusyError as exc:
+                self._emit(
+                    "headless.control.failed" if payload.control_kind else "headless.turn.failed",
+                    {"event_id": payload.event_id, "error": str(exc)},
+                )
+                continue
+            managed_delivery_attempt = delivery_attempt is not None
+            with self._lock:
+                self._active_delivery_attempt = delivery_attempt
+                self._starting_delivery_attempt_id = str((delivery_attempt or {}).get("attempt_id") or "")
+                self._starting_runtime_turn_id = ""
+                self._pending_turn_terminals.clear()
+            turn_text = append_turn_grant_receipt(turn_text, delivery_attempt)
 
-            def _handle_turn_start_failed(exc_obj: BaseException) -> None:
+            def _handle_turn_start_failed(exc_obj: BaseException, *, acceptance_uncertain: bool = False) -> None:
                 timed_out = _is_codex_request_timeout(exc_obj, method="turn/start")
+                must_stop = timed_out or acceptance_uncertain
                 logger.warning("codex turn start failed: group=%s actor=%s err=%s", self.group_id, self.actor_id, exc_obj)
-                if not timed_out:
+                if not must_stop:
                     with self._lock:
                         self._session_state.status = "idle"
                         self._active_event_id = ""
@@ -1229,7 +1332,25 @@ class CodexAppSession:
                         self._active_payload = None
                         self._session_state.current_task_id = None
                         self._session_state.updated_at = utc_now_iso()
+                        self._starting_delivery_attempt_id = ""
+                        self._starting_runtime_turn_id = ""
+                        self._pending_turn_terminals.clear()
                     self._persist_state()
+                if managed_delivery_attempt:
+                    if acceptance_uncertain:
+                        terminalize_uncertain_delivery_attempt(
+                            self.group_id,
+                            actor_id=self.actor_id,
+                            attempt=delivery_attempt,
+                            reason="codex_turn_start_uncertain",
+                        )
+                    else:
+                        fail_turn_delivery_attempt(
+                            self.group_id,
+                            actor_id=self.actor_id,
+                            attempt=delivery_attempt,
+                            reason="codex_turn_start_failed",
+                        )
                 self._emit(
                     "headless.control.failed" if payload.control_kind else "headless.turn.failed",
                     {
@@ -1239,7 +1360,7 @@ class CodexAppSession:
                         "error": str(exc_obj),
                     },
                 )
-                if timed_out:
+                if must_stop:
                     self.stop()
 
             try:
@@ -1254,7 +1375,7 @@ class CodexAppSession:
                 )
             except Exception as exc:
                 has_local_image = any(str(item.get("type") or "").strip() == "local_image" for item in locals().get("input_items", []))
-                if has_local_image:
+                if has_local_image and _is_preaccept_local_image_rejection(exc):
                     try:
                         response = self._request(
                             "turn/start",
@@ -1265,17 +1386,73 @@ class CodexAppSession:
                             timeout=30.0,
                         )
                     except Exception as retry_exc:
-                        _handle_turn_start_failed(retry_exc)
+                        _handle_turn_start_failed(
+                            retry_exc,
+                            acceptance_uncertain=not isinstance(retry_exc, CodexRequestRejectedError),
+                        )
                         continue
                 else:
-                    _handle_turn_start_failed(exc)
+                    _handle_turn_start_failed(
+                        exc,
+                        acceptance_uncertain=not isinstance(exc, CodexRequestRejectedError),
+                    )
                     continue
             try:
                 turn = response.get("turn") if isinstance(response, dict) else {}
                 turn_id = str((turn or {}).get("id") or "").strip()
+                if not turn_id:
+                    raise RuntimeError("codex turn/start response missing turn.id")
+                with self._lock:
+                    expected_attempt_id = str((delivery_attempt or {}).get("attempt_id") or "")
+                    if self._starting_delivery_attempt_id != expected_attempt_id:
+                        raise RuntimeError("codex turn/start attempt is no longer current")
+                    started_turn_id = str(self._starting_runtime_turn_id or "").strip()
+                    if started_turn_id and started_turn_id != turn_id:
+                        raise RuntimeError("codex turn/start response conflicts with turn/started")
+                    early_terminal = self._pending_turn_terminals.pop(turn_id, None)
+                    self._pending_turn_terminals.clear()
+                    if not isinstance(early_terminal, dict):
+                        self._starting_delivery_attempt_id = ""
+                        self._starting_runtime_turn_id = ""
+                        self._active_turn_id = turn_id
+                if isinstance(early_terminal, dict):
+                    if not bool(early_terminal.pop("__processed", False)):
+                        early_terminal["__starting_bound"] = True
+                        self._handle_notification("turn/completed", early_terminal)
+                    with self._lock:
+                        if self._starting_delivery_attempt_id == expected_attempt_id:
+                            self._starting_delivery_attempt_id = ""
+                            self._starting_runtime_turn_id = ""
+                        self._pending_turn_terminals.clear()
+                    if managed_delivery_attempt:
+                        fail_turn_delivery_attempt(
+                            self.group_id,
+                            actor_id=self.actor_id,
+                            attempt=delivery_attempt,
+                            reason="codex_turn_completed_before_start_response",
+                        )
+                    continue
+                if managed_delivery_attempt:
+                    finalize_turn_delivery_attempt(
+                        self.group_id,
+                        actor_id=self.actor_id,
+                        attempt=delivery_attempt,
+                        binding={"runtime_turn_id": turn_id},
+                    )
+                    receipt = turn_delivery_attempt_receipt(
+                        self.group_id,
+                        actor_id=self.actor_id,
+                        attempt=delivery_attempt,
+                    )
+                else:
+                    receipt = {"finalized": True, "grant": None}
+                if not bool(receipt.get("finalized")):
+                    continue
+                grant = receipt.get("grant") if isinstance(receipt.get("grant"), dict) else None
                 with self._lock:
                     self._active_turn_id = turn_id
                     self._active_event_id = payload.event_id
+                    self._active_grant_generation = int((grant or {}).get("generation") or 0)
                     self._session_state.status = "working"
                     self._session_state.current_task_id = turn_id or payload.event_id or None
                     self._session_state.updated_at = utc_now_iso()
@@ -1310,12 +1487,26 @@ class CodexAppSession:
                 logger.warning("codex turn start failed: group=%s actor=%s err=%s", self.group_id, self.actor_id, exc)
                 with self._lock:
                     self._session_state.status = "idle"
+                    self._active_turn_id = ""
+                    self._active_turn_generation = 0
                     self._active_event_id = ""
+                    self._active_delivery_attempt = None
+                    self._active_grant_generation = 0
                     self._active_control_kind = ""
                     self._active_payload = None
                     self._session_state.current_task_id = None
                     self._session_state.updated_at = utc_now_iso()
+                    self._starting_delivery_attempt_id = ""
+                    self._starting_runtime_turn_id = ""
+                    self._pending_turn_terminals.clear()
                 self._persist_state()
+                if managed_delivery_attempt:
+                    terminalize_uncertain_delivery_attempt(
+                        self.group_id,
+                        actor_id=self.actor_id,
+                        attempt=delivery_attempt,
+                        reason="codex_accepted_finalize_uncertain",
+                    )
                 self._emit(
                     "headless.control.failed" if payload.control_kind else "headless.turn.failed",
                     {
@@ -1336,6 +1527,8 @@ class CodexAppSession:
         with self._lock:
             active_event_id = str(self._active_event_id or "").strip()
             control_kind = str(self._active_control_kind or "").strip().lower()
+            active_turn_generation = int(self._active_turn_generation or 0)
+            active_delivery_attempt = self._active_delivery_attempt
             if self._active_turn_id or active_event_id:
                 self._last_turn_event_monotonic = time.monotonic()
                 if self._active_stalled_emitted and self._session_state.status == "waiting":
@@ -1388,11 +1581,62 @@ class CodexAppSession:
             self._persist_state()
             self._record_remote_tui_thread_runtime_session(thread_id, captured_from="app_server_remote_tui_thread_started")
             return
+        if method == "turn/completed":
+            turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+            completed_turn_id = str(turn.get("id") or "").strip()
+            if not completed_turn_id:
+                return
+            with self._lock:
+                current_turn_id = str(self._active_turn_id or "").strip()
+                starting_attempt_id = str(self._starting_delivery_attempt_id or "").strip()
+                if starting_attempt_id:
+                    starting_turn_id = str(self._starting_runtime_turn_id or "").strip()
+                    if bool(params.get("__starting_bound")) and starting_turn_id == completed_turn_id:
+                        active_event_id = str(self._active_event_id or "").strip()
+                        control_kind = str(self._active_control_kind or "").strip().lower()
+                        active_turn_generation = int(self._active_turn_generation or 0)
+                        active_delivery_attempt = self._active_delivery_attempt
+                    else:
+                        processed = bool(current_turn_id and completed_turn_id == current_turn_id)
+                        pending_terminal = dict(params)
+                        pending_terminal["__processed"] = processed
+                        self._pending_turn_terminals[completed_turn_id] = pending_terminal
+                        if not processed:
+                            return
+                elif not current_turn_id or completed_turn_id != current_turn_id:
+                    return
+                active_event_id = str(self._active_event_id or "").strip()
+                control_kind = str(self._active_control_kind or "").strip().lower()
+                active_turn_generation = int(self._active_turn_generation or 0)
+                active_delivery_attempt = self._active_delivery_attempt
+            if isinstance(active_delivery_attempt, dict):
+                invalidate_turn_grant_if_identity(
+                    self.group_id,
+                    self.actor_id,
+                    attempt_id=str(active_delivery_attempt.get("attempt_id") or ""),
+                    generation=int(active_delivery_attempt.get("generation") or 0),
+                    event_ids=[active_event_id],
+                    binding={"transport": "codex_app", "turn_generation": active_turn_generation},
+                    reason="codex_turn_completed",
+                )
         if method == "turn/started":
             turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
             turn_id = str(turn.get("id") or "").strip()
             thread_id = str(turn.get("threadId") or params.get("threadId") or "").strip()
+            if not turn_id:
+                return
             with self._lock:
+                starting_attempt_id = str(self._starting_delivery_attempt_id or "").strip()
+                if starting_attempt_id:
+                    starting_turn_id = str(self._starting_runtime_turn_id or "").strip()
+                    if starting_turn_id and starting_turn_id != turn_id:
+                        return
+                    self._starting_runtime_turn_id = turn_id
+                    if isinstance(self._pending_turn_terminals.get(turn_id), dict):
+                        return
+                    current_turn_id = str(self._active_turn_id or "").strip()
+                    if current_turn_id and current_turn_id != turn_id:
+                        return
                 if thread_id and not str(self._session_state.thread_id or "").strip():
                     self._session_state.thread_id = thread_id
                 self._active_turn_id = turn_id
@@ -1431,6 +1675,9 @@ class CodexAppSession:
             with self._lock:
                 self._active_turn_id = ""
                 self._active_event_id = ""
+                self._active_turn_generation = 0
+                self._active_delivery_attempt = None
+                self._active_grant_generation = 0
                 self._active_control_kind = ""
                 self._active_payload = None
                 self._session_state.status = "idle"
@@ -1770,6 +2017,9 @@ class CodexAppSession:
             with self._lock:
                 self._active_turn_id = ""
                 self._active_event_id = ""
+                self._active_turn_generation = 0
+                self._active_delivery_attempt = None
+                self._active_grant_generation = 0
                 self._session_state.status = "idle"
                 self._session_state.current_task_id = None
                 self._session_state.updated_at = now

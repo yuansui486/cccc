@@ -4233,8 +4233,13 @@ class TestCodexAppFlow(unittest.TestCase):
                 self.assertTrue(manager.actor_running("g_test", "peer1"))
             self.assertTrue(session._turn_queue.empty())
             command = list(popen.call_args.args[0])
-            self.assertEqual(command[:3], [r"C:\Tools\codex.cmd", "app-server", "--listen"])
-            self.assertTrue(str(command[3]).startswith("ws://127.0.0.1:"))
+            self.assertEqual(command[0], r"C:\Tools\codex.cmd")
+            app_server_index = command.index("app-server")
+            listen_index = command.index("--listen")
+            self.assertEqual(listen_index, app_server_index + 1)
+            listen_url = str(command[listen_index + 1])
+            self.assertTrue(listen_url.startswith("ws://127.0.0.1:"))
+            self.assertIn("mcp_servers.windows-mcp.enabled=false", command)
             connect_ws.assert_called_once()
             self.assertEqual([item[0] for item in requests], ["initialize"])
             stored = read_runtime_session("g_test", "peer1")
@@ -4249,7 +4254,7 @@ class TestCodexAppFlow(unittest.TestCase):
                     "--dangerously-bypass-approvals-and-sandbox",
                     "--search",
                     "--remote",
-                    command[3],
+                    listen_url,
                 ],
             )
             self.assertEqual(started_pty[0]["runtime"], "codex")

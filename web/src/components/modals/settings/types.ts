@@ -11,6 +11,7 @@ export type GroupTabId =
   | "im"
   | "transcript"
   | "copyGroups"
+  | "groupBridge"
   | "blueprint";
 export type GlobalTabId =
   | "blueprint"
@@ -22,6 +23,7 @@ export type GlobalTabId =
   | "branding"
   | "webAccess"
   | "webModels"
+  | "groupBridge"
   | "developer";
 
 // Shared style class helpers — glass design system
