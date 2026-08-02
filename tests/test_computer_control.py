@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+from no1.computer_control import mcp as computer_control_mcp
 from no1.computer_control.lease import ComputerControlLease, LeaseConflict
 from no1.computer_control.derived_authority import DerivedAuthorityStore
 from no1.computer_control.mcp import (
@@ -49,6 +50,7 @@ from no1.ports.mcp.server import (
 from no1.kernel.capabilities import CORE_BASIC_TOOLS, WEB_MODEL_CORE_TOOLS
 from no1.ports.mcp import main as mcp_main
 from no1.daemon.computer_control_ops import try_handle_computer_control_op
+from no1.util import file_lock as file_lock_module
 from no1.util.file_lock import acquire_lockfile, release_lockfile
 from no1.ports.web.routes.computer_control import _require_local_computer_control_admin
 
@@ -3190,6 +3192,13 @@ class _SetupSession:
         return [{"name": "Snapshot", "inputSchema": {"type": "object"}}]
 
 
+class _WindowsOSProxy:
+    name = "nt"
+
+    def __getattr__(self, attr):
+        return getattr(os, attr)
+
+
 class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
     def test_command_search_path_refreshes_machine_and_user_registry_paths(self):
         machine_root = str(Path(tempfile.gettempdir()) / "machine-python")
@@ -3287,6 +3296,10 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
     def test_find_uv_ignores_missing_user_base_in_frozen_runtime(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
+            empty_home = root / "empty-home"
+            empty_home.mkdir()
+            frozen_executable = root / "frozen-runtime" / "onecolleague"
+            frozen_executable.parent.mkdir()
             uv_name = "uv.exe" if os.name == "nt" else "uv"
             uv_path = root / "Scripts" / uv_name
             uv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3296,6 +3309,10 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
 
             with patch("no1.computer_control.mcp.site.USER_BASE", None), patch(
                 "no1.computer_control.mcp.shutil.which", return_value=None
+            ), patch(
+                "no1.computer_control.mcp.Path.home", return_value=empty_home
+            ), patch(
+                "no1.computer_control.mcp.sys.executable", str(frozen_executable)
             ):
                 result = setup._find_uv()
 
@@ -3336,8 +3353,9 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
     def test_python_reported_script_directory_precedes_stale_uv_on_path(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            stale = root / "old" / "uv.exe"
-            installed = root / "Python313" / "Scripts" / "uv.exe"
+            uv_name = "uv.exe" if os.name == "nt" else "uv"
+            stale = root / "old" / uv_name
+            installed = root / "Python313" / "Scripts" / uv_name
             stale.parent.mkdir(parents=True)
             installed.parent.mkdir(parents=True)
             stale.write_bytes(b"")
@@ -3370,7 +3388,9 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
                     await setup._run_command(["python.exe", "-m", "pip"], timeout=1)
 
     async def test_latest_package_is_installed_without_a_version_constraint(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            computer_control_mcp, "os", _WindowsOSProxy()
+        ):
             root = Path(td)
             session = _SetupSession()
             setup = WindowsMCPSetup(root, session, WorkflowStore(root))
@@ -3384,9 +3404,8 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             setup._ensure_python_313 = AsyncMock(return_value=root / "python.exe")
             setup._run_command = AsyncMock(return_value="")
 
-            with patch("no1.computer_control.mcp.os.name", "nt"):
-                await setup.ensure(force=True)
-                result = await setup.wait()
+            await setup.ensure(force=True)
+            result = await setup.wait()
 
             self.assertEqual(result["phase"], "ready")
             self.assertEqual(result["version"], "1.2.3")
@@ -3570,13 +3589,15 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             started.set()
             await asyncio.Event().wait()
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            computer_control_mcp, "os", _WindowsOSProxy()
+        ):
             setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
             setup._ensure_uv = AsyncMock(side_effect=wait_for_cancel)
-            with patch("no1.computer_control.mcp.os.name", "nt"):
-                await setup.ensure(force=True)
-                await asyncio.wait_for(started.wait(), timeout=1)
-                result = await setup.cancel()
+            self.assertIs(file_lock_module.os, os)
+            await setup.ensure(force=True)
+            await asyncio.wait_for(started.wait(), timeout=1)
+            result = await setup.cancel()
 
             self.assertEqual(result["phase"], "cancelled")
             self.assertFalse(result["in_progress"])
