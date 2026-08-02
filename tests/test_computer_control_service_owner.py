@@ -773,7 +773,7 @@ else:
 
         with tempfile.TemporaryDirectory() as td, patch.dict(
             os.environ,
-            {"CCCC_HOME": td},
+            {"ONECOLLEAGUE_HOME": td, "CCCC_HOME": td},
         ):
             home = Path(td)
             group_id = create_group(

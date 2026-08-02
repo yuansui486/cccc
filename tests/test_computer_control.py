@@ -53,6 +53,34 @@ from no1.util.file_lock import acquire_lockfile, release_lockfile
 from no1.ports.web.routes.computer_control import _require_local_computer_control_admin
 
 
+def _canonical_home_env(home: str | Path, **extra: str):
+    canonical_home = str(Path(home).expanduser().resolve())
+    return patch.dict(
+        os.environ,
+        {"ONECOLLEAGUE_HOME": canonical_home, "CCCC_HOME": canonical_home, **extra},
+        clear=False,
+    )
+
+
+class TestCanonicalHomeFixture(unittest.TestCase):
+    def test_canonical_home_env_restores_both_variables_after_exception(self) -> None:
+        from no1.paths import onecolleague_home
+
+        sentinels = {"ONECOLLEAGUE_HOME": "outer-one", "CCCC_HOME": "outer-cccc"}
+        with patch.dict(os.environ, sentinels, clear=False):
+            with tempfile.TemporaryDirectory() as td:
+                canonical_home = Path(td).resolve()
+                with self.assertRaisesRegex(RuntimeError, "fixture failure"):
+                    with _canonical_home_env(canonical_home):
+                        self.assertEqual(os.environ["ONECOLLEAGUE_HOME"], str(canonical_home))
+                        self.assertEqual(os.environ["CCCC_HOME"], str(canonical_home))
+                        self.assertEqual(onecolleague_home(), canonical_home)
+                        raise RuntimeError("fixture failure")
+                self.assertEqual(os.environ["ONECOLLEAGUE_HOME"], "outer-one")
+                self.assertEqual(os.environ["CCCC_HOME"], "outer-cccc")
+            self.assertFalse(canonical_home.exists())
+
+
 class TestComputerControlServiceConstruction(unittest.TestCase):
     def test_runner_receives_the_service_run_authority_store(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -308,7 +336,7 @@ class TestComputerControl(unittest.TestCase):
     def test_activated_workflow_create_preserves_request_target_and_records_created_resource(self):
         from no1.daemon.computer_control_ops import _workflow
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="activated-workflow-create", topic="")
             store = WorkflowStore(home)
@@ -467,11 +495,7 @@ class TestComputerControl(unittest.TestCase):
             "onecolleague_computer_workflow",
             "onecolleague_computer_run",
         }
-        with tempfile.TemporaryDirectory() as td, patch.dict(
-            os.environ,
-            {"CCCC_HOME": td, "CCCC_MCP_TOOL_PROFILE": ""},
-            clear=False,
-        ):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td, CCCC_MCP_TOOL_PROFILE=""):
             group_id = create_group(load_registry(), title="local-computer-tools", topic="").group_id
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -550,7 +574,7 @@ class TestComputerControl(unittest.TestCase):
     def test_computer_control_mcp_passes_presented_receipt_unchanged(self):
         from no1.kernel.actors import add_actor
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="receipt-passthrough", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
@@ -607,7 +631,7 @@ class TestComputerControl(unittest.TestCase):
         from no1.kernel.actors import add_actor
         from no1.kernel.group import load_group
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="claim-gate", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
@@ -668,7 +692,7 @@ class TestComputerControl(unittest.TestCase):
         from no1.kernel.actors import add_actor
         from no1.kernel.ledger import append_event
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="request-order", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
@@ -760,7 +784,7 @@ class TestComputerControl(unittest.TestCase):
         from no1.kernel.actors import add_actor
         from no1.kernel.ledger import append_event
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="recording-derived", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
@@ -917,7 +941,7 @@ class TestComputerControl(unittest.TestCase):
     def test_daemon_recording_abort_requires_exact_stop_owner_before_services(self):
         from no1.kernel.actors import add_actor
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-stop-owner", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
@@ -1021,11 +1045,7 @@ class TestComputerControl(unittest.TestCase):
             *((name, {"current_patch": {name: True}}) for name in permission_names),
         ]
         for label, mutation in cases:
-            with self.subTest(label=label), tempfile.TemporaryDirectory() as td, patch.dict(
-                os.environ,
-                {"CCCC_HOME": td},
-                clear=False,
-            ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
                 group = create_group(load_registry(), title=f"request-facts-{label}", topic="")
                 add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
                 group.save()
@@ -1110,7 +1130,7 @@ class TestComputerControl(unittest.TestCase):
         from no1.kernel.actors import add_actor
         from no1.kernel.ledger import append_event
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="trusted-run-claim", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
@@ -1213,7 +1233,7 @@ class TestComputerControl(unittest.TestCase):
         from no1.kernel.actors import add_actor
         from no1.kernel.ledger import append_event
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="missing-run-request", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
@@ -1274,7 +1294,7 @@ class TestComputerControl(unittest.TestCase):
         from no1.kernel.actors import add_actor
         from no1.kernel.ledger import append_event
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="untrusted-run-writeback", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
@@ -1401,7 +1421,7 @@ class TestComputerControl(unittest.TestCase):
         )
         from no1.kernel.ledger import append_event
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="request-claim", topic="")
             provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
             request_payload = {
@@ -1568,7 +1588,7 @@ class TestComputerControl(unittest.TestCase):
         )
         from no1.kernel.ledger import append_event
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="request-activation-race", topic="")
             provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
             request_payload = {
@@ -1788,9 +1808,7 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(config.read_text(encoding="utf-8"), original)
 
     def test_store_revision_trust_and_lease_isolation(self):
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="desktop")
             definition = WorkflowDefinition.model_validate({"name": "ok", "nodes": [{"id": "s", "type": "start"}, {"id": "e", "type": "end"}], "edges": [{"source": "s", "target": "e"}]})
             store = WorkflowStore(Path(td))
@@ -1811,11 +1829,6 @@ class TestComputerControl(unittest.TestCase):
             lease.acquire(group_id=group.group_id, actor_id="a", run_id="r")
             with self.assertRaises(LeaseConflict):
                 lease.acquire(group_id="other", actor_id="b", run_id="r2")
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
     def test_trigger_validation_and_debounce(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1829,9 +1842,7 @@ class TestComputerControl(unittest.TestCase):
         self.assertEqual(hits, 2)
 
     def test_request_authorization_risk_and_optimization_proposal(self):
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="requests")
             store = WorkflowStore(Path(td))
             requests = ComputerRequestStore(store)
@@ -1857,11 +1868,6 @@ class TestComputerControl(unittest.TestCase):
             accepted = store.decide_proposal(group.group_id, workflow_id, proposal["proposal_id"], accept=True)
             self.assertEqual(accepted["status"], "accepted")
             self.assertEqual(store.get(group.group_id, workflow_id)["version"], 2)
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
     def test_structured_chat_contract_is_rendered_separately(self):
         rendered = build_actor_delivery_text(
             text="请整理桌面文件",
@@ -2067,9 +2073,7 @@ class TestComputerControl(unittest.TestCase):
                     ]
                 }
 
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="recording-image")
             store = WorkflowStore(Path(td))
             requests = ComputerRequestStore(store)
@@ -2124,13 +2128,8 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(artifact["type"], "image_artifact")
             artifact_path = store.state_root(group.group_id) / "recordings" / artifact["path"]
             self.assertEqual(artifact_path.read_bytes(), b"fake-png")
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
     def test_recording_start_failure_rolls_back_authority_lease_and_resource(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-start-rollback")
             store = WorkflowStore(home)
@@ -2175,7 +2174,7 @@ class TestComputerControl(unittest.TestCase):
             session.catalog_sync.assert_not_called()
 
     def test_recording_root_claim_derives_only_one_resource_after_abort(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-single-derivation", topic="")
             store = WorkflowStore(home)
@@ -2246,7 +2245,7 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(snapshot(), before)
 
     def test_recording_service_restart_suspends_and_same_generation_receipt_can_resume(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-restart")
             store = WorkflowStore(home)
@@ -2302,7 +2301,7 @@ class TestComputerControl(unittest.TestCase):
             self.assertTrue(lease.status()["active"])
 
     def test_recording_restart_finishes_suspended_authority_prefix_and_can_resume(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-suspended-prefix", topic="")
             store = WorkflowStore(home)
@@ -2364,7 +2363,7 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(resumed["status"], "exploring")
 
     def test_recording_restart_treats_terminating_authority_as_stop_prefix(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-terminating-prefix", topic="")
             store = WorkflowStore(home)
@@ -2414,9 +2413,7 @@ class TestComputerControl(unittest.TestCase):
 
     def test_recording_restart_converges_initializing_and_orphan_pending_prefixes(self):
         for phase in ("orphan_pending", "initializing_pending", "initializing_active"):
-            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as td, patch.dict(
-                os.environ, {"CCCC_HOME": td}, clear=False
-            ):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
                 home = Path(td)
                 group = create_group(load_registry(), title=f"recording-{phase}", topic="")
                 store = WorkflowStore(home)
@@ -2486,7 +2483,7 @@ class TestComputerControl(unittest.TestCase):
                     self.assertEqual(recovered["status"], "start_failed")
 
     def test_recording_restart_does_not_release_other_group_with_same_resource_id(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-owner-g1", topic="")
             other_group = create_group(load_registry(), title="recording-owner-g2", topic="")
@@ -2568,7 +2565,7 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(lease_value["run_id"], recording_id)
 
     def test_recording_restart_finishes_revoked_terminating_crash_prefix(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-stop-recovery", topic="")
             store = WorkflowStore(home)
@@ -2697,7 +2694,7 @@ class TestComputerControl(unittest.TestCase):
                 self.release.wait(5)
                 return {"content": [{"type": "text", "text": "done"}]}
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)
             group = create_group(load_registry(), title="recording-abort")
             store = WorkflowStore(home)
@@ -2796,9 +2793,7 @@ class TestComputerControl(unittest.TestCase):
                 )
 
     def test_computer_artifacts_are_exposed_as_mcp_images_with_path_containment(self):
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="mcp-image")
             root = group.path / "state" / "computer-control" / "recordings"
             image_path = root / "artifacts" / "rec_test" / "ev_1.png"
@@ -2828,11 +2823,6 @@ class TestComputerControl(unittest.TestCase):
                 bucket="recordings",
             )
             self.assertNotIn(_MCP_EXTRA_CONTENT_KEY, escaped)
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
     def test_mcp_main_emits_extra_image_content_without_leaking_internal_marker(self):
         image_data = base64.b64encode(b"image-bytes").decode("ascii")
         with patch.object(
@@ -2877,9 +2867,7 @@ class TestComputerControl(unittest.TestCase):
                 self.successful_calls.append(name)
                 return {"content": [{"type": "text", "text": arguments.get("text", "ok")}]}
 
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="recording")
             store = WorkflowStore(Path(td))
             requests = ComputerRequestStore(store)
@@ -2999,19 +2987,12 @@ class TestComputerControl(unittest.TestCase):
                 time.sleep(0.02)
             self.assertEqual(run["status"], "published")
             self.assertEqual(session.successful_calls.count("Type"), 2)
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
     def test_replay_awaits_verification_then_auto_publishes_and_trusts(self):
         class ReplaySession:
             async def call_tool(self, name, arguments, *, timeout):
                 return {"sent": arguments["text"]}
 
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="verify")
             store = WorkflowStore(Path(td))
             definition = WorkflowDefinition.model_validate({
@@ -3062,11 +3043,6 @@ class TestComputerControl(unittest.TestCase):
             manifest = store.get(group.group_id, created["manifest"]["workflow_id"])["manifest"]
             self.assertEqual(manifest["published_version"], 1)
             self.assertEqual(manifest["trusted"]["1"]["fingerprint"], "fp")
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
     def test_transport_failure_does_not_enter_adaptive_recovery(self):
         from no1.computer_control.mcp import MCPUnavailable
 
@@ -3076,9 +3052,7 @@ class TestComputerControl(unittest.TestCase):
             async def call_tool(self, name, arguments, *, timeout):
                 raise MCPUnavailable("transport lost")
 
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="transport")
             store = WorkflowStore(Path(td))
             definition = WorkflowDefinition.model_validate({
@@ -3103,19 +3077,12 @@ class TestComputerControl(unittest.TestCase):
                 time.sleep(0.02)
             self.assertEqual(run["status"], "failed")
             runner._wait_for_recovery.assert_not_awaited()
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
     def test_tool_error_result_fails_replay_and_cannot_be_verified(self):
         class ToolErrorSession:
             async def call_tool(self, name, arguments, *, timeout):
                 return {"isError": True, "content": [{"type": "text", "text": "Either loc or label must be provided."}]}
 
-        old = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             group = create_group(load_registry(), title="tool-error")
             store = WorkflowStore(Path(td))
             definition = WorkflowDefinition.model_validate({
@@ -3204,11 +3171,6 @@ class TestComputerControl(unittest.TestCase):
                         runner._write(write_group, active_variant)
                     self.assertEqual(active_path.read_bytes(), active_before)
             runner.cancel_sync(group.group_id, active["run_id"])
-        if old is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old
-
 
 class _SetupSession:
     def __init__(self):

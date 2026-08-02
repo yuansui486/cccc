@@ -148,9 +148,11 @@ class TestGroupBridgeSurface(unittest.TestCase):
         from no1.kernel.access_tokens import create_access_token
         from no1.ports.web.app import create_app
 
-        old_home = os.environ.get("CCCC_HOME")
-        with tempfile.TemporaryDirectory() as td:
-            os.environ["CCCC_HOME"] = td
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            {"ONECOLLEAGUE_HOME": td, "CCCC_HOME": td},
+            clear=False,
+        ):
             calls = []
 
             def fake_call_daemon(req, **_kwargs):
@@ -196,11 +198,6 @@ class TestGroupBridgeSurface(unittest.TestCase):
             )
             self.assertEqual(calls[1]["args"]["by"], "user")
             self.assertEqual(calls[1]["args"]["payload"]["source_by"], "user")
-
-        if old_home is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = old_home
 
     def test_mcp_session_send_delegates_closed_args(self):
         from no1.ports.mcp import common as mcp_common

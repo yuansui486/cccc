@@ -67,7 +67,11 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name)
-        self.env = patch.dict(os.environ, {"CCCC_HOME": str(self.home)}, clear=False)
+        self.env = patch.dict(
+            os.environ,
+            {"ONECOLLEAGUE_HOME": str(self.home), "CCCC_HOME": str(self.home)},
+            clear=False,
+        )
         self.env.start()
         group_path = self.home / "groups" / "g"
         group_path.mkdir(parents=True)

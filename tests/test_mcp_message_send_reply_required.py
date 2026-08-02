@@ -260,7 +260,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td, patch.dict(
             os.environ,
-            {**_CLEAN_ENV, "CCCC_HOME": td},
+            {**_CLEAN_ENV, "ONECOLLEAGUE_HOME": td, "CCCC_HOME": td},
             clear=False,
         ):
             created, _ = handle_request(
@@ -311,7 +311,11 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
             captured["req"] = req
             return {"ok": True, "result": {"event_id": "ev_headless"}}
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {**_CLEAN_ENV, "CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            {**_CLEAN_ENV, "ONECOLLEAGUE_HOME": td, "CCCC_HOME": td},
+            clear=False,
+        ):
             create_resp, _ = handle_request(
                 DaemonRequest.model_validate({"op": "group_create", "args": {"title": "headless-send", "topic": "", "by": "user"}})
             )

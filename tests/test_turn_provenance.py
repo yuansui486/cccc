@@ -10,9 +10,11 @@ from unittest.mock import Mock, patch
 
 class TestTurnProvenance(unittest.TestCase):
     def setUp(self) -> None:
-        self._old_home = os.environ.get("CCCC_HOME")
+        self._home_vars = ("ONECOLLEAGUE_HOME", "CCCC_HOME")
+        self._old_homes = {name: os.environ.get(name) for name in self._home_vars}
         self._home = tempfile.TemporaryDirectory()
-        os.environ["CCCC_HOME"] = self._home.name
+        for name in self._home_vars:
+            os.environ[name] = self._home.name
 
         from no1.kernel.group import create_group
         from no1.kernel.registry import load_registry
@@ -20,11 +22,12 @@ class TestTurnProvenance(unittest.TestCase):
         self.group = create_group(load_registry(), title="turn-provenance", topic="")
 
     def tearDown(self) -> None:
+        for name, old_home in self._old_homes.items():
+            if old_home is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = old_home
         self._home.cleanup()
-        if self._old_home is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = self._old_home
 
     def _append(self, *, provenance=None, source_platform: str = ""):
         from no1.contracts.v1 import ChatMessageData

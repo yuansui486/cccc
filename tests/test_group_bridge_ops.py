@@ -31,6 +31,7 @@ class TestGroupBridgeOps(unittest.TestCase):
             os.environ,
             {
                 "CCCC_GROUP_BRIDGE_LOCAL_ENDPOINT": self.endpoint,
+                "ONECOLLEAGUE_HOME": str(self.home),
                 "CCCC_HOME": str(self.home),
             },
         )

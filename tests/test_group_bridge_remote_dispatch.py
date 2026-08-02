@@ -17,7 +17,10 @@ class TestGroupBridgeRemoteDispatch(unittest.TestCase):
 
         self._td = tempfile.TemporaryDirectory()
         self.home = Path(self._td.name)
-        self._env = patch.dict(os.environ, {"CCCC_HOME": str(self.home)})
+        self._env = patch.dict(
+            os.environ,
+            {"ONECOLLEAGUE_HOME": str(self.home), "CCCC_HOME": str(self.home)},
+        )
         self._env.start()
         self.addCleanup(self._env.stop)
         self.addCleanup(self._td.cleanup)

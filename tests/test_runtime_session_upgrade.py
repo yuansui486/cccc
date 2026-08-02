@@ -8,16 +8,19 @@ from unittest.mock import patch
 
 class TestRuntimeSessionUpgrade(unittest.TestCase):
     def setUp(self) -> None:
-        self._old_home = os.environ.get("CCCC_HOME")
+        self._home_vars = ("ONECOLLEAGUE_HOME", "CCCC_HOME")
+        self._old_homes = {name: os.environ.get(name) for name in self._home_vars}
         self._temp = tempfile.TemporaryDirectory()
-        os.environ["CCCC_HOME"] = self._temp.name
+        for name in self._home_vars:
+            os.environ[name] = self._temp.name
 
     def tearDown(self) -> None:
+        for name, old_home in self._old_homes.items():
+            if old_home is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = old_home
         self._temp.cleanup()
-        if self._old_home is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = self._old_home
 
     def test_grok_managed_session_first_start_and_resume(self) -> None:
         from no1.daemon.runtime_session_ops import (

@@ -8,17 +8,20 @@ from unittest.mock import ANY, patch
 
 class TestWebModelRuntimeOps(unittest.TestCase):
     def _with_home(self):
-        old_home = os.environ.get("CCCC_HOME")
+        home_vars = ("ONECOLLEAGUE_HOME", "CCCC_HOME")
+        old_homes = {name: os.environ.get(name) for name in home_vars}
         td_ctx = tempfile.TemporaryDirectory()
         td = td_ctx.__enter__()
-        os.environ["CCCC_HOME"] = td
+        for name in home_vars:
+            os.environ[name] = td
 
         def cleanup() -> None:
+            for name, old_home in old_homes.items():
+                if old_home is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = old_home
             td_ctx.__exit__(None, None, None)
-            if old_home is None:
-                os.environ.pop("CCCC_HOME", None)
-            else:
-                os.environ["CCCC_HOME"] = old_home
 
         return td, cleanup
 

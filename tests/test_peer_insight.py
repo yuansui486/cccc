@@ -10,9 +10,11 @@ class TestPeerInsightAdmission(unittest.TestCase):
         from no1.contracts.v1 import DaemonRequest
         from no1.daemon.server import handle_request
 
-        self._old_home = os.environ.get("CCCC_HOME")
+        self._home_vars = ("ONECOLLEAGUE_HOME", "CCCC_HOME")
+        self._old_homes = {name: os.environ.get(name) for name in self._home_vars}
         self._td = tempfile.TemporaryDirectory()
-        os.environ["CCCC_HOME"] = self._td.name
+        for name in self._home_vars:
+            os.environ[name] = self._td.name
         self.addCleanup(self._cleanup)
 
         def call(op: str, args: dict):
@@ -36,10 +38,11 @@ class TestPeerInsightAdmission(unittest.TestCase):
             self.assertTrue(added.ok, added.error)
 
     def _cleanup(self) -> None:
-        if self._old_home is None:
-            os.environ.pop("CCCC_HOME", None)
-        else:
-            os.environ["CCCC_HOME"] = self._old_home
+        for name, old_home in self._old_homes.items():
+            if old_home is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = old_home
         self._td.cleanup()
 
     def _group(self):

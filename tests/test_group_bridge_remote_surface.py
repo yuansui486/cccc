@@ -96,7 +96,11 @@ class TestGroupBridgeRemoteSurface(unittest.TestCase):
         from no1.kernel.access_tokens import create_access_token
         from no1.ports.web.app import create_app
 
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            {"ONECOLLEAGUE_HOME": td, "CCCC_HOME": td},
+            clear=False,
+        ):
             token = str(create_access_token("web-user", allowed_groups=["g_allowed"], is_admin=False).get("token") or "")
             calls: list[dict] = []
 
