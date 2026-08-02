@@ -121,3 +121,26 @@
 .copy-button:active {
   transform: scale(0.95);
 }
+
+.mermaid-render-target {
+  overflow-x: auto;
+  padding: 0.75rem;
+  background: transparent;
+}
+
+.mermaid-render-target svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-error {
+  padding: 0.5rem 0.75rem;
+  color: #b45309;
+  font-size: 0.75rem;
+}
+
+.mermaid-source {
+  display: block;
+}

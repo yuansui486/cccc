@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { CheckIcon, CopyIcon } from './Icons';
 import { classNames } from '../utils/classNames';
 import { copyTextToClipboard } from '../utils/copy';
+import { activateMermaidBlocks, isMermaidFenceLanguage } from '../utils/mermaid';
 
 const copyIconMarkup = renderToStaticMarkup(<CopyIcon className="w-3.5 h-3.5" strokeWidth={2} aria-hidden="true" />);
 const copiedIconMarkup = renderToStaticMarkup(<CheckIcon className="w-3.5 h-3.5" strokeWidth={2} aria-hidden="true" />);
@@ -14,9 +15,10 @@ interface MarkdownRendererProps {
     className?: string;
     /** Force light text (for colored backgrounds like user messages) */
     invertText?: boolean;
+    enableMermaid?: boolean;
 }
 
-export function MarkdownRenderer({ content, isDark, className, invertText }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, isDark, className, invertText, enableMermaid = false }: MarkdownRendererProps) {
     const containerRef = useRef<HTMLDivElement>(null);
 
     const md = useMemo(() => {
@@ -35,6 +37,18 @@ export function MarkdownRenderer({ content, isDark, className, invertText }: Mar
             const escaped = instance.utils.escapeHtml(token.content || "");
             const encodedCode = encodeURIComponent(token.content || "");
 
+            if (enableMermaid && isMermaidFenceLanguage(finalLang)) {
+                const encodedSource = encodeURIComponent(token.content || "");
+                return (
+                    '<div class="code-block-wrapper mermaid-block" data-mermaid-block data-mermaid-state="pending">' +
+                    '<div class="code-block-header"><span class="code-block-lang">MERMAID</span></div>' +
+                    '<div class="mermaid-render-target" data-mermaid-target role="img" aria-label="Mermaid diagram"></div>' +
+                    '<div class="mermaid-error" data-mermaid-error hidden data-render-failed="Unable to render diagram; showing source." data-too-large="Diagram is too large; showing source."></div>' +
+                    '<pre data-mermaid-source data-source="' + encodedSource + '" hidden><code class="language-mermaid">' + escaped + '</code></pre>' +
+                    '</div>'
+                );
+            }
+
             // Render the full fence here so markdown-it does not wrap custom markup in another pre/code pair.
             return (
                 '<div class="code-block-wrapper relative group">' +
@@ -52,7 +66,7 @@ export function MarkdownRenderer({ content, isDark, className, invertText }: Mar
             );
         };
         return instance;
-    }, []);
+    }, [enableMermaid]);
 
     const htmlContent = useMemo(() => {
         return md.render(content || "");
@@ -104,6 +118,12 @@ export function MarkdownRenderer({ content, isDark, className, invertText }: Mar
         container.addEventListener('click', handleCopy);
         return () => container.removeEventListener('click', handleCopy);
     }, [htmlContent]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container || !enableMermaid) return;
+        return activateMermaidBlocks(container, isDark ? 'dark' : 'default');
+    }, [enableMermaid, htmlContent, isDark]);
 
     return (
         <div
