@@ -455,6 +455,17 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         audit(ctx.home, "computer_control.setup_upgrade", details={"version": result.get("version"), "phase": result.get("phase")})
         return {"ok": True, "result": result}
 
+    @global_router.post("/setup/cancel")
+    async def setup_cancel() -> Dict[str, Any]:
+        result = await daemon_control("setup", group_id="_global", action="cancel")
+        audit(
+            ctx.home,
+            "computer_control.setup_cancel",
+            details={"attempt_id": result.get("attempt_id"), "phase": result.get("phase")},
+        )
+        _emit("setup_cancel", attempt_id=result.get("attempt_id"), phase=result.get("phase"))
+        return {"ok": True, "result": result}
+
     @global_router.get("/catalog")
     async def catalog(tool: Optional[str] = Query(None)) -> Dict[str, Any]:
         try:

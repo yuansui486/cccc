@@ -426,6 +426,8 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
                         details=lease_status.get("lease") if isinstance(lease_status.get("lease"), dict) else {},
                     )
                 return _ok(service.session.run_sync(service.setup.upgrade()))
+            if action == "cancel":
+                return _ok(service.session.run_sync(service.setup.cancel()))
             if action == "restart_session":
                 setup_status = service.setup.status()
                 if bool(setup_status.get("in_progress")):

@@ -14,6 +14,7 @@ import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 from ..util.fs import atomic_write_text
 from .lease import ComputerControlLease
@@ -22,6 +23,9 @@ from .storage import WorkflowStore
 MCP_PROTOCOL_VERSION = "2024-11-05"
 WINDOWS_MCP_PACKAGE = "windows-mcp"
 WINDOWS_MCP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
+DEFAULT_PYPI_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
+OFFICIAL_PYPI_INDEX_URL = "https://pypi.org/simple"
+_SETUP_TRANSIENT_PHASES = {"checking", "downloading", "initializing", "verifying"}
 
 
 class MCPUnavailable(RuntimeError):
@@ -241,7 +245,34 @@ def validate_workflow_tools(definition: Any, catalog: Sequence[Dict[str, Any]]) 
 def _redact(value: str) -> str:
     value = re.sub(r"(?i)(token|secret|password|api[_-]?key)(\s*[=:]\s*)\S+", r"\1\2<redacted>", value)
     value = re.sub(r"(?i)(authorization:\s*)(?:bearer\s+)?\S+", r"\1<redacted>", value)
+    value = re.sub(r"(?i)(https?://)([^/@\s:]+):([^/@\s]+)@", r"\1<redacted>:<redacted>@", value)
+    value = re.sub(r"(?i)([?&](?:token|secret|password|api[_-]?key)=)[^&\s]+", r"\1<redacted>", value)
     return value.strip()
+
+
+def _safe_index_url(value: Any, *, default_path: str = "/simple") -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    if parsed.scheme.casefold() != "https" or not parsed.hostname:
+        return ""
+    try:
+        parsed.port
+    except ValueError:
+        return ""
+    return urlunsplit(("https", parsed.netloc, parsed.path or default_path, "", "")).rstrip("/")
+
+
+def _coerce_process_id(value: Any) -> Optional[int]:
+    try:
+        process_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return process_id if process_id > 0 else None
 
 
 def _creation_flags() -> int:
@@ -596,16 +627,45 @@ class WindowsMCPSetup:
         self.lease = lease or ComputerControlLease(home)
         self.state_root = home / "state" / "computer-control"
         self.path = self.state_root / "setup.json"
+        self.log_path = self.state_root / "setup-install.log"
         self.uv_root = self.state_root / "uv-tools"
         self.tool_dir = self.uv_root / "tools"
         self.bin_dir = self.uv_root / "bin"
+        self.python_dir = self.uv_root / "python"
         self._lock = asyncio.Lock()
         self._task: Optional[asyncio.Task[None]] = None
+        self._active_process: Optional[asyncio.subprocess.Process] = None
+        self._attempt_package_index: Optional[str] = None
+        self._attempt_fallback_allowed = False
         self._setup_logs: deque[str] = deque(maxlen=200)
+        self._load_setup_logs()
         self._status: Dict[str, Any] = self._load_status()
+        if str(self._status.get("phase") or "") in _SETUP_TRANSIENT_PHASES:
+            previous_phase = str(self._status.get("phase") or "")
+            self._append_setup_log("上一次安装任务随 OneColleague 进程结束，已标记为中断", stream="system")
+            self._set(
+                "failed",
+                detail="setup_interrupted",
+                finished_at=time.time(),
+                owner_pid=None,
+                process_id=None,
+                can_cancel=False,
+                error={
+                    "code": "setup_interrupted",
+                    "message": f"Windows-MCP 安装在“{previous_phase}”阶段中断，请点击修复重新开始",
+                },
+                failure={"phase": previous_phase, "exit_code": None, "stderr_tail": list(self._setup_logs)[-10:]},
+            )
         executable = self._windows_mcp_executable()
         if executable.is_file():
             self.session.configure(executable, str(self._status.get("version") or self._installed_version()))
+
+    def _load_setup_logs(self) -> None:
+        try:
+            lines = self.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return
+        self._setup_logs.extend(line[:4000] for line in lines[-200:] if line.strip())
 
     def _load_status(self) -> Dict[str, Any]:
         try:
@@ -624,13 +684,91 @@ class WindowsMCPSetup:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(self.path, json.dumps(self._status, ensure_ascii=False, indent=2) + "\n")
 
+    def _append_setup_log(self, line: Any, *, stream: str = "stdout") -> None:
+        text = _redact(str(line or "").replace("\r", "").strip())
+        if not text:
+            return
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        formatted = f"[{stamp}] [{stream}] {text}"[:4000]
+        self._setup_logs.append(formatted)
+        self._status["last_activity_at"] = time.time()
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with self.log_path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(formatted + "\n")
+        except OSError:
+            pass
+
+    def _begin_attempt(self, operation: str) -> str:
+        attempt_id = "setup_" + uuid.uuid4().hex[:16]
+        self._setup_logs.clear()
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            atomic_write_text(self.log_path, "")
+        except OSError:
+            pass
+        now = time.time()
+        package_index, fallback_allowed = self._package_index()
+        self._attempt_package_index = package_index
+        self._attempt_fallback_allowed = fallback_allowed
+        self._set(
+            "checking",
+            attempt_id=attempt_id,
+            operation=operation,
+            detail="checking_uv",
+            step="checking_uv",
+            started_at=now,
+            step_started_at=now,
+            last_activity_at=now,
+            owner_pid=os.getpid(),
+            process_id=None,
+            current_command=None,
+            can_cancel=True,
+            package_index=_redact(package_index),
+            package_index_fallback=False,
+            package_index_fallback_allowed=fallback_allowed,
+            python_path=None,
+            python_source=None,
+            uv_version=None,
+            error=None,
+            failure=None,
+        )
+        self._append_setup_log(f"开始 Windows-MCP {operation}，Python 包索引：{package_index}", stream="system")
+        return attempt_id
+
+    def _set_step(self, phase: str, detail: str, **extra: Any) -> None:
+        self._set(phase, detail=detail, step=detail, step_started_at=time.time(), **extra)
+
     def status(self) -> Dict[str, Any]:
+        if (
+            self._task is not None
+            and self._task.done()
+            and str(self._status.get("phase") or "") in _SETUP_TRANSIENT_PHASES
+        ):
+            previous_phase = str(self._status.get("phase") or "")
+            self._append_setup_log("安装任务意外结束，已退出进行中状态", stream="system")
+            self._set(
+                "failed",
+                detail="setup_task_stopped",
+                finished_at=time.time(),
+                owner_pid=None,
+                process_id=None,
+                current_command=None,
+                can_cancel=False,
+                error={
+                    "code": "setup_task_stopped",
+                    "message": "Windows-MCP 安装任务意外结束，请复制诊断信息后点击修复",
+                },
+                failure={"phase": previous_phase, "exit_code": None, "stderr_tail": list(self._setup_logs)[-10:]},
+            )
         result = dict(self._status or {"phase": "not_started", "version": ""})
         result["session_running"] = self.session.running
         result["session_started_at"] = getattr(self.session, "started_at", None)
         result["transport_restarts"] = int(getattr(self.session, "transport_restarts", 0))
         result["in_progress"] = bool(self._task and not self._task.done())
-        result["logs"] = (list(self._setup_logs) + self.session.logs)[-50:]
+        result["can_cancel"] = bool(result["in_progress"])
+        result["logs"] = (list(self._setup_logs) + [_redact(str(line)) for line in self.session.logs])[-200:]
+        result["log_truncated"] = len(self._setup_logs) >= self._setup_logs.maxlen
         return result
 
     async def ensure(self, *, force: bool = False, upgrade: bool = False) -> Dict[str, Any]:
@@ -645,20 +783,23 @@ class WindowsMCPSetup:
     async def wait(self) -> Dict[str, Any]:
         task = self._task
         if task is not None:
-            await task
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         return self.status()
 
     async def _run(self, *, force: bool, upgrade: bool) -> None:
         async with self._lock:
+            operation = "upgrade" if upgrade else ("repair" if force else "install")
+            setup_id = self._begin_attempt(operation)
             try:
-                setup_id = "setup_" + uuid.uuid4().hex[:16]
                 with self.lease.hold(
                     group_id="_global",
                     actor_id="setup",
                     run_id=setup_id,
                     observe_only=False,
                 ) as lease_guard:
-                    self._set("checking", error=None, failure=None)
                     if os.name != "nt":
                         raise MCPUnavailable("Computer control requires Windows")
                     uv = await self._ensure_uv()
@@ -667,15 +808,20 @@ class WindowsMCPSetup:
                     if (force or upgrade) and self.session.running:
                         await self.session.stop()
                     if upgrade and executable.is_file():
-                        self._set("downloading", detail="upgrading_windows_mcp")
-                        await self._run_command([str(uv), "tool", "upgrade", WINDOWS_MCP_PACKAGE], env=env, timeout=900)
+                        self._set_step("downloading", "upgrading_windows_mcp")
+                        await self._run_package_command(
+                            [str(uv), "tool", "upgrade"],
+                            [WINDOWS_MCP_PACKAGE],
+                            env=env,
+                            timeout=900,
+                        )
                     elif force or not executable.is_file():
-                        self._set("downloading", detail="installing_windows_mcp")
-                        command = [str(uv), "tool", "install", "--python", "3.13"]
+                        python = await self._ensure_python_313(uv, env=env)
+                        self._set_step("downloading", "installing_windows_mcp")
+                        command = [str(uv), "tool", "install", "--python", str(python), "--no-python-downloads"]
                         if force:
                             command.append("--force")
-                        command.append(WINDOWS_MCP_PACKAGE)
-                        await self._run_command(command, env=env, timeout=900)
+                        await self._run_package_command(command, [WINDOWS_MCP_PACKAGE], env=env, timeout=900)
                     if lease_guard["lost"].is_set():
                         raise PermissionError("computer_control_lease_required")
                     if not executable.is_file():
@@ -683,21 +829,56 @@ class WindowsMCPSetup:
                     version = self._installed_version()
                     self.session.configure(executable, version)
                     await self.session.stop()
-                    self._set("initializing", version=version, detail="starting_mcp_session")
+                    self._set_step("initializing", "starting_mcp_session", version=version, can_cancel=False)
                     tools = await self.session.start()
                     self.refresh_catalog(tools, version=version)
+            except asyncio.CancelledError:
+                self._append_setup_log("安装已由用户取消", stream="system")
+                self._set(
+                    "cancelled",
+                    detail="setup_cancelled",
+                    finished_at=time.time(),
+                    owner_pid=None,
+                    process_id=None,
+                    current_command=None,
+                    can_cancel=False,
+                    error={"code": "setup_cancelled", "message": "Windows-MCP 安装已取消"},
+                )
+                raise
             except Exception as exc:
                 process = self.session._process
+                self._append_setup_log(str(exc), stream="error")
                 failure = {
                     "phase": self._status.get("phase"),
                     "exit_code": process.returncode if process is not None else None,
-                    "stderr_tail": self.session.logs[-10:],
+                    "stderr_tail": list(self._setup_logs)[-10:],
                 }
                 self._set(
                     "failed",
+                    detail=self._status.get("detail"),
+                    finished_at=time.time(),
+                    owner_pid=None,
+                    process_id=None,
+                    current_command=None,
+                    can_cancel=False,
                     error={"code": "windows_mcp_setup_failed", "message": _redact(str(exc))},
                     failure=failure,
                 )
+
+    async def cancel(self) -> Dict[str, Any]:
+        task = self._task
+        if task is None or task.done():
+            return self.status()
+        self._append_setup_log("收到取消安装请求", stream="system")
+        process = self._active_process
+        if process is not None and process.returncode is None:
+            await self._terminate_process(process)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return self.status()
 
     async def repair(self) -> Dict[str, Any]:
         return await self.ensure(force=True)
@@ -707,7 +888,7 @@ class WindowsMCPSetup:
 
     def refresh_catalog(self, tools: Sequence[Dict[str, Any]], *, version: Optional[str] = None) -> Dict[str, Any]:
         current_version = str(version or self.session.version or self._status.get("version") or "")
-        self._set("verifying", version=current_version, tool_count=len(tools), detail="checking_tool_catalog")
+        self._set_step("verifying", "checking_tool_catalog", version=current_version, tool_count=len(tools), can_cancel=False)
         fingerprint = self.store.fingerprint(current_version, list(tools))
         revoked = self.store.revoke_stale_trust(fingerprint)
         self._set(
@@ -717,11 +898,92 @@ class WindowsMCPSetup:
             tool_count=len(tools),
             revoked_trust_count=revoked,
             detail=None,
+            finished_at=time.time(),
             error=None,
             failure=None,
             python_candidates=[],
+            owner_pid=None,
+            process_id=None,
+            current_command=None,
+            can_cancel=False,
         )
         return self.status()
+
+    def _package_index(self) -> tuple[str, bool]:
+        explicit = str(os.environ.get("ONECOLLEAGUE_PYPI_INDEX_URL") or "").strip()
+        inherited = str(os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX_URL") or "").strip()
+        configured = explicit or inherited
+        selected = _safe_index_url(configured or DEFAULT_PYPI_INDEX_URL)
+        if not selected:
+            selected = DEFAULT_PYPI_INDEX_URL
+        return selected, not bool(configured and _safe_index_url(configured))
+
+    @staticmethod
+    def _should_fallback_package_index(error: Exception) -> bool:
+        message = str(error).casefold()
+        return any(
+            token in message
+            for token in (
+                "timed out",
+                "timeout",
+                "failed to connect",
+                "connection",
+                "dns",
+                "network",
+                "certificate",
+                "tls",
+                "ssl",
+                "failed to fetch",
+                "http 404",
+                "http 500",
+                "http 502",
+                "http 503",
+                "http 504",
+                "no solution found",
+                "no matching distribution",
+                "could not find a version",
+                "not found in the package registry",
+            )
+        )
+
+    async def _run_package_command(
+        self,
+        prefix: Sequence[str],
+        suffix: Sequence[str],
+        *,
+        env: Dict[str, str],
+        timeout: float,
+    ) -> str:
+        index, fallback_allowed = self._current_package_index()
+        try:
+            return await self._run_command(
+                [*prefix, "--default-index", index, *suffix],
+                env=env,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            if not fallback_allowed or index == OFFICIAL_PYPI_INDEX_URL or not self._should_fallback_package_index(exc):
+                raise
+            self._append_setup_log(
+                f"国内镜像不可用，回退官方 PyPI：{OFFICIAL_PYPI_INDEX_URL}",
+                stream="system",
+            )
+            self._set(
+                str(self._status.get("phase") or "downloading"),
+                package_index=OFFICIAL_PYPI_INDEX_URL,
+                package_index_fallback=True,
+            )
+            self._attempt_package_index = OFFICIAL_PYPI_INDEX_URL
+            return await self._run_command(
+                [*prefix, "--default-index", OFFICIAL_PYPI_INDEX_URL, *suffix],
+                env=env,
+                timeout=timeout,
+            )
+
+    def _current_package_index(self) -> tuple[str, bool]:
+        if self._attempt_package_index:
+            return self._attempt_package_index, self._attempt_fallback_allowed
+        return self._package_index()
 
     def _uv_environment(self) -> Dict[str, str]:
         self.tool_dir.mkdir(parents=True, exist_ok=True)
@@ -734,6 +996,7 @@ class WindowsMCPSetup:
             {
                 "UV_TOOL_DIR": str(self.tool_dir),
                 "UV_TOOL_BIN_DIR": str(self.bin_dir),
+                "UV_PYTHON_INSTALL_DIR": str(self.python_dir),
                 "UV_NO_PROGRESS": "1",
                 "PYTHONUTF8": "1",
             }
@@ -744,13 +1007,75 @@ class WindowsMCPSetup:
         suffix = ".exe" if os.name == "nt" else ""
         return self.bin_dir / f"windows-mcp{suffix}"
 
+    async def _ensure_python_313(self, uv: Path, *, env: Dict[str, str]) -> Path:
+        self.python_dir.mkdir(parents=True, exist_ok=True)
+        find_command = [str(uv), "python", "find", "3.13", "--no-python-downloads", "--no-project"]
+        self._set_step("checking", "checking_python_313")
+        try:
+            output = await self._run_command(find_command, env=env, timeout=30)
+            python = self._python_path_from_output(output)
+        except Exception:
+            python = None
+        if python is None:
+            self._set_step("downloading", "installing_python_313")
+            command = [
+                str(uv),
+                "-v",
+                "python",
+                "install",
+                "3.13",
+                "--install-dir",
+                str(self.python_dir),
+                "--no-bin",
+                "--no-registry",
+            ]
+            mirror = _safe_index_url(
+                os.environ.get("ONECOLLEAGUE_UV_PYTHON_MIRROR"),
+                default_path="",
+            )
+            if mirror:
+                command.extend(["--mirror", mirror])
+            await self._run_command(command, env=env, timeout=900)
+            self._set_step("checking", "checking_python_313")
+            output = await self._run_command(find_command, env=env, timeout=30)
+            python = self._python_path_from_output(output)
+        if python is None:
+            raise MCPUnavailable("uv 已完成 Python 3.13 准备，但未返回可用的解释器路径")
+        try:
+            managed = python.resolve().is_relative_to(self.python_dir.resolve())
+        except (OSError, ValueError, AttributeError):
+            managed = str(python).casefold().startswith(str(self.python_dir).casefold())
+        source = "uv_managed" if managed else "system"
+        self._set(
+            "checking",
+            detail="python_313_ready",
+            python_path=str(python),
+            python_source=source,
+        )
+        self._append_setup_log(f"使用 Python 3.13：{python}（{source}）", stream="system")
+        return python
+
+    @staticmethod
+    def _python_path_from_output(output: str) -> Optional[Path]:
+        for line in reversed(str(output or "").splitlines()):
+            value = line.strip().strip('"')
+            if not value:
+                continue
+            try:
+                path = Path(value)
+            except (TypeError, ValueError, OSError):
+                continue
+            if path.is_file():
+                return path
+        return None
+
     async def _ensure_uv(self) -> Path:
         errors: List[str] = []
 
         async def find_working_uv(*, extra_roots: Sequence[Path] = ()) -> Optional[Path]:
             for candidate in self._uv_candidates(extra_roots=extra_roots):
                 try:
-                    await self._run_command(
+                    output = await self._run_command(
                         [str(candidate), "--version"],
                         env=self._bootstrap_environment(),
                         timeout=30,
@@ -758,6 +1083,8 @@ class WindowsMCPSetup:
                 except Exception as exc:
                     errors.append(_redact(str(exc)))
                     continue
+                version = str(output or "").strip().splitlines()[-1] if str(output or "").strip() else ""
+                self._status["uv_version"] = _redact(version)
                 return candidate
             return None
 
@@ -766,11 +1093,12 @@ class WindowsMCPSetup:
             self._set("checking", detail="uv_ready", uv_path=str(existing), python_candidates=[])
             return existing
         commands = self._python_commands()
-        self._set(
+        self._set_step(
             "downloading",
-            detail="installing_uv_with_pip",
+            "installing_uv_with_pip",
             python_candidates=[" ".join(str(part) for part in command) for command in commands],
         )
+        package_index, fallback_allowed = self._current_package_index()
         for command in commands:
             try:
                 script_dirs = await self._python_script_dirs(command)
@@ -778,14 +1106,45 @@ class WindowsMCPSetup:
                 errors.append(_redact(str(exc)))
                 continue
             for location_args in (["--user"], []):
-                try:
-                    await self._run_command(
-                        [*command, "-m", "pip", "install", *location_args, "uv"],
-                        env=self._bootstrap_environment(),
-                        timeout=600,
-                    )
-                except Exception as exc:
-                    errors.append(_redact(str(exc)))
+                indexes = [package_index]
+                for index in indexes:
+                    try:
+                        await self._run_command(
+                            [
+                                *command,
+                                "-m",
+                                "pip",
+                                "install",
+                                *location_args,
+                                "--index-url",
+                                index,
+                                "uv",
+                            ],
+                            env=self._bootstrap_environment(),
+                            timeout=600,
+                        )
+                    except Exception as exc:
+                        errors.append(_redact(str(exc)))
+                        if (
+                            fallback_allowed
+                            and index != OFFICIAL_PYPI_INDEX_URL
+                            and self._should_fallback_package_index(exc)
+                        ):
+                            indexes.append(OFFICIAL_PYPI_INDEX_URL)
+                            self._append_setup_log(
+                                f"国内镜像不可用，回退官方 PyPI：{OFFICIAL_PYPI_INDEX_URL}",
+                                stream="system",
+                            )
+                            self._set(
+                                "downloading",
+                                package_index=OFFICIAL_PYPI_INDEX_URL,
+                                package_index_fallback=True,
+                            )
+                            self._attempt_package_index = OFFICIAL_PYPI_INDEX_URL
+                            package_index = OFFICIAL_PYPI_INDEX_URL
+                        continue
+                    break
+                else:
                     continue
                 installed = await find_working_uv(extra_roots=script_dirs)
                 if installed is not None:
@@ -802,6 +1161,7 @@ class WindowsMCPSetup:
         if search_path:
             env["PATH"] = search_path
         env["PYTHONUTF8"] = "1"
+        env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
         return env
 
     async def _python_script_dirs(self, command: Sequence[str]) -> List[Path]:
@@ -1035,7 +1395,8 @@ class WindowsMCPSetup:
         timeout: float,
     ) -> str:
         display = " ".join(command)
-        self._setup_logs.append(_redact(f"> {display}"))
+        display = _redact(f"> {display}")
+        self._append_setup_log(display, stream="command")
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -1053,15 +1414,57 @@ class WindowsMCPSetup:
             command_name = Path(str(command[0])).name
             detail = f"WinError {exc.winerror}" if getattr(exc, "winerror", None) is not None else str(exc)
             raise MCPUnavailable(f"{command_name} 无法启动：{detail}") from exc
+        self._active_process = process
+        self._set(
+            str(self._status.get("phase") or "checking"),
+            process_id=_coerce_process_id(getattr(process, "pid", None)),
+            current_command=display.removeprefix("> "),
+            can_cancel=True,
+        )
+        output_parts: deque[str] = deque(maxlen=500)
+
+        async def read_stream(reader: Any, stream: str) -> None:
+            if reader is None or not callable(getattr(reader, "readline", None)):
+                return
+            while True:
+                raw = await reader.readline()
+                if not raw:
+                    return
+                if isinstance(raw, bytes):
+                    line = raw.decode("utf-8", errors="replace")
+                else:
+                    line = str(raw)
+                output_parts.append(line)
+                for child in line.replace("\r", "\n").splitlines():
+                    self._append_setup_log(child, stream=stream)
+
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            await asyncio.wait_for(
+                asyncio.gather(
+                    read_stream(getattr(process, "stdout", None), "stdout"),
+                    read_stream(getattr(process, "stderr", None), "stderr"),
+                    process.wait(),
+                ),
+                timeout=timeout,
+            )
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+            await self._terminate_process(process)
             raise MCPUnavailable(f"Command timed out: {Path(command[0]).name}")
-        output = (stdout + b"\n" + stderr).decode("utf-8", errors="replace")
+        except asyncio.CancelledError:
+            await self._terminate_process(process)
+            raise
+        finally:
+            if self._active_process is process:
+                self._active_process = None
+            if str(self._status.get("phase") or "") in _SETUP_TRANSIENT_PHASES:
+                self._set(
+                    str(self._status.get("phase") or "checking"),
+                    process_id=None,
+                    current_command=None,
+                    can_cancel=False,
+                )
+        output = "".join(output_parts)
         lines = [_redact(line) for line in output.splitlines() if line.strip()]
-        self._setup_logs.extend(line[:2000] for line in lines[-30:])
         if process.returncode != 0:
             tail = " | ".join(lines[-8:])
             if process.returncode == 9009:
@@ -1071,3 +1474,35 @@ class WindowsMCPSetup:
                 )
             raise MCPUnavailable(f"{Path(command[0]).name} exited with code {process.returncode}{': ' + tail if tail else ''}")
         return output
+
+    async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
+        if process.returncode is not None:
+            return
+        if sys.platform == "win32" and getattr(process, "pid", None):
+            try:
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill.exe",
+                    "/PID",
+                    str(process.pid),
+                    "/T",
+                    "/F",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    creationflags=_creation_flags(),
+                )
+                await asyncio.wait_for(killer.wait(), timeout=8)
+            except Exception:
+                pass
+        if process.returncode is None:
+            try:
+                process.terminate()
+            except (ProcessLookupError, OSError):
+                pass
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+            except (ProcessLookupError, OSError):
+                pass
+            await process.wait()

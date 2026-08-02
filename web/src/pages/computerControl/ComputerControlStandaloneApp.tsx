@@ -35,7 +35,6 @@ import {
   computerControlApi,
   type ComputerControlRequest,
   type ComputerControlLease,
-  type ComputerControlSettings,
   type ComputerSetup,
   type ElementPickerElement,
   type ElementPickerSession,
@@ -59,8 +58,9 @@ import { normalizeDefinition, serializeDefinition } from "./types";
 import { WorkflowCanvas } from "./WorkflowCanvas";
 import { formatPickerDiagnostics, pickerCapabilitySummary } from "./pickerPresentation";
 import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+import { copyTextToClipboard } from "../../utils/copy";
 import { useUIStore } from "../../stores";
-import { computerControlProviderLabel, computerControlSessionDetails, formatComputerControlTime, latestComputerControlObservation, newestComputerControlObservation, setupErrorMessage, shouldRefreshComputerControlAfterSseTransition } from "./statusPresentation";
+import { computerControlProviderLabel, computerControlSessionDetails, formatComputerControlTime, formatSetupDiagnostics, formatSetupDuration, latestComputerControlObservation, newestComputerControlObservation, setupErrorMessage, setupStepLabel, shouldRefreshComputerControlAfterSseTransition } from "./statusPresentation";
 
 type Section = "tools" | "steps" | "properties" | "runs";
 type Snapshot = { nodes: CanvasNode[]; edges: CanvasEdge[] };
@@ -106,6 +106,7 @@ function phaseLabel(phase: string): string {
         verifying: "正在验证工具",
         ready: "已就绪",
         failed: "安装失败",
+        cancelled: "已取消",
         not_started: "等待安装",
       } as Record<string, string>
     )[phase] || phase
@@ -241,6 +242,12 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     phase: "not_started",
     version: "",
   });
+  const [setupPollError, setSetupPollError] = useState("");
+  const [setupLogsOpen, setSetupLogsOpen] = useState(false);
+  const [setupClock, setSetupClock] = useState(() => Date.now());
+  const setupLogRef = React.useRef<HTMLPreElement | null>(null);
+  const setupLogPinnedRef = React.useRef(true);
+  const setupPhaseRef = React.useRef(setup.phase);
   const [tools, setTools] = useState<ToolCatalogItem[]>([]);
   const [toolSearch, setToolSearch] = useState("");
   const [workflows, setWorkflows] = useState<WorkflowManifest[]>([]);
@@ -260,11 +267,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   const [section, setSection] = useState<Section>("steps");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  const [trustDialogOpen, setTrustDialogOpen] = useState(false);
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
-  const [settings, setSettings] = useState<ComputerControlSettings>({
-    auto_publish_and_trust: true,
-  });
   const [lease, setLease] = useState<ComputerControlLease>({ active: false });
   const activeGroupIdRef = React.useRef(groupId);
   activeGroupIdRef.current = groupId;
@@ -288,21 +291,24 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           workflowResponse,
           runResponse,
           requestResponse,
-          settingsResponse,
           leaseResponse,
         ] = await Promise.all([
           computerControlApi.status(),
           computerControlApi.workflows(requestedGroupId),
           computerControlApi.runs(requestedGroupId),
           computerControlApi.requests(requestedGroupId),
-          computerControlApi.settings(requestedGroupId),
           computerControlApi.leaseStatus(),
         ]);
         if (activeGroupIdRef.current !== requestedGroupId) {
           refreshQueued.current = true;
           continue;
         }
-        if (status.ok) setSetup(status.result);
+        if (status.ok) {
+          setSetup(status.result);
+          setSetupPollError("");
+        } else {
+          setSetupPollError(friendlyError(status.error.message));
+        }
         if (workflowResponse.ok) {
           setWorkflows(workflowResponse.result.workflows || []);
           const first = workflowResponse.result.workflows?.[0];
@@ -310,7 +316,6 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         }
         if (runResponse.ok) setRuns(runResponse.result.runs || []);
         if (requestResponse.ok) setRequests(requestResponse.result.requests || []);
-        if (settingsResponse.ok) setSettings(settingsResponse.result);
         if (leaseResponse.ok) setLease(leaseResponse.result);
       }
     })();
@@ -335,7 +340,10 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       const response = await computerControlApi.ensure();
       if (!cancelled && response.ok) {
         setSetup(response.result);
+        setSetupPollError("");
         if (response.result.phase === "ready") await loadCatalog();
+      } else if (!cancelled && !response.ok) {
+        setSetupPollError(friendlyError(response.error.message));
       }
       if (!cancelled) setBusy("");
       await refresh();
@@ -346,21 +354,38 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   }, [loadCatalog, refresh]);
 
   useEffect(() => {
-    if (setup.phase === "ready") {
-      return;
-    }
-    if (setup.phase === "failed") return;
+    if (!setup.in_progress && ["ready", "failed", "cancelled"].includes(setup.phase)) return;
     const timer = window.setInterval(() => {
       void computerControlApi.status().then((response) => {
         if (response.ok) {
           setSetup(response.result);
+          setSetupPollError("");
           if (response.result.phase === "ready" && tools.length === 0)
             void loadCatalog();
-        }
+        } else setSetupPollError(friendlyError(response.error.message));
       });
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [loadCatalog, setup.phase, tools.length]);
+  }, [loadCatalog, setup.in_progress, setup.phase, tools.length]);
+
+  useEffect(() => {
+    if (!setup.in_progress) return undefined;
+    const timer = window.setInterval(() => setSetupClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [setup.in_progress]);
+
+  useEffect(() => {
+    const previous = setupPhaseRef.current;
+    setupPhaseRef.current = setup.phase;
+    if (setup.attempt_id && (setup.in_progress || ["failed", "cancelled"].includes(setup.phase))) {
+      if (previous !== setup.phase || setup.logs?.length === 1) setSetupLogsOpen(true);
+    }
+  }, [setup.attempt_id, setup.in_progress, setup.logs?.length, setup.phase]);
+
+  useEffect(() => {
+    const panel = setupLogRef.current;
+    if (setupLogsOpen && panel && setupLogPinnedRef.current) panel.scrollTop = panel.scrollHeight;
+  }, [setup.logs, setupLogsOpen]);
 
   useEffect(() => {
     setSelectedId("");
@@ -600,7 +625,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     );
   }, [toolSearch, tools]);
   const setupReady = setup.phase === "ready";
-  const isTrusted = Boolean(selectedManifest?.effective_version);
+  const hasEditableDraft = Boolean(record) || workflows.length === 0;
   const canLinearReorder =
     edges.length === Math.max(0, nodes.length - 1) &&
     edges.every((edge) => !edge.data?.branch || edge.data.branch === "next");
@@ -656,13 +681,22 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     if (kind === "wait") model.duration_seconds = 1;
     if (kind === "loop") model.max_iterations = 3;
     const end = nodes.find((node) => node.data.model.type === "end");
-    const incoming = end
-      ? edges.find((edge) => edge.target === end.id)
-      : undefined;
+    const selectedTarget = selectedNode && selectedNode.data.model.type !== "start"
+      ? selectedNode
+      : end;
+    const incoming = selectedTarget
+      ? edges.filter((edge) => edge.target === selectedTarget.id)
+      : [];
+    const targetPosition = selectedTarget?.position;
+    model.position = position || (targetPosition
+      ? { x: Math.max(40, targetPosition.x - 260), y: targetPosition.y }
+      : model.position);
     setNodes((items) => {
       const next = [...items];
-      const endIndex = next.findIndex((node) => node.data.model.type === "end");
-      next.splice(endIndex >= 0 ? endIndex : next.length, 0, {
+      const targetIndex = selectedTarget
+        ? next.findIndex((node) => node.id === selectedTarget.id)
+        : -1;
+      next.splice(targetIndex >= 0 ? targetIndex : next.length, 0, {
         id,
         type: "workflow",
         position: model.position!,
@@ -670,19 +704,19 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       });
       return next;
     });
-    if (end && incoming) {
+    if (selectedTarget && incoming.length > 0) {
       setEdges((items) => [
-        ...items.filter((edge) => edge.id !== incoming.id),
-        {
-          id: `${incoming.source}-${id}`,
-          source: incoming.source,
+        ...items.filter((edge) => !incoming.some((candidate) => candidate.id === edge.id)),
+        ...incoming.map((edge) => ({
+          id: `${edge.source}-${id}-${nextId("edge")}`,
+          source: edge.source,
           target: id,
-          data: { branch: "next" },
-        },
+          data: { branch: edge.data?.branch || "next" },
+        })),
         {
-          id: `${id}-${end.id}`,
+          id: `${id}-${selectedTarget.id}`,
           source: id,
-          target: end.id,
+          target: selectedTarget.id,
           data: { branch: "next" },
         },
       ]);
@@ -770,8 +804,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         ...current,
         ...response.result,
         phase: response.result.phase || response.result.setup_phase || current.phase,
-        session_started_at: response.result.session_started_at || response.result.started_at || current.session_started_at,
+        session_started_at: response.result.session_started_at || current.session_started_at,
       }));
+      setSetupPollError("");
       setMessage(
         kind === "upgrade" ? "正在检查 Windows-MCP 更新"
           : kind === "restart" ? "Windows-MCP 会话已重启，正在刷新工具和运行状态"
@@ -783,6 +818,36 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       }
     } else setMessage(friendlyError(response.error.message));
     setBusy("");
+  }
+
+  async function refreshSetupStatus() {
+    setBusy("refresh-setup");
+    const response = await computerControlApi.status();
+    if (response.ok) {
+      setSetup(response.result);
+      setSetupPollError("");
+      setMessage("Windows-MCP 安装状态已刷新");
+    } else {
+      setSetupPollError(friendlyError(response.error.message));
+    }
+    setBusy("");
+  }
+
+  async function cancelSetup() {
+    if (!setup.in_progress || busy) return;
+    setBusy("cancel-setup");
+    const response = await computerControlApi.cancelSetup();
+    if (response.ok) {
+      setSetup(response.result);
+      setSetupPollError("");
+      setMessage("Windows-MCP 安装已取消");
+    } else setMessage(friendlyError(response.error.message));
+    setBusy("");
+  }
+
+  async function copySetupDiagnostics() {
+    const copied = await copyTextToClipboard(formatSetupDiagnostics(setup, setupPollError));
+    setMessage(copied ? "安装诊断信息已复制" : "复制失败，请展开日志后手动选择");
   }
 
   function resetEditor() {
@@ -854,103 +919,135 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     setBusy("");
   }
 
-  async function save() {
-    if (!record) return;
-    setBusy("save");
+  const applyWorkflowRecord = useCallback((value: WorkflowRecord) => {
+    const nextDefinition = normalizeDefinition(value.definition);
+    const canvas = toCanvas(nextDefinition);
+    setWorkflows((items) => [
+      value.manifest,
+      ...items.filter((item) => item.workflow_id !== value.manifest.workflow_id),
+    ]);
+    setSelectedId(value.manifest.workflow_id);
+    setRecord(value);
+    setDefinition(nextDefinition);
+    setNodes(canvas.nodes);
+    setEdges(canvas.edges);
+    setHistory([]);
+    return value;
+  }, []);
+
+  async function persistDraft(): Promise<WorkflowRecord | null> {
     const current = fromCanvas(definition, nodes, edges);
-    const response = await computerControlApi.updateWorkflow(
-      groupId,
-      record.manifest.workflow_id,
-      serializeDefinition(current),
-      record.manifest.revision,
-    );
-    if (response.ok) {
-      const next = normalizeDefinition(response.result.definition);
-      setRecord(response.result);
-      setDefinition(next);
-      setMessage(
-        settings.auto_publish_and_trust
-          ? "已保存，并自动发布和信任新版本"
-          : "已保存为新版本",
-      );
-      setHistory([]);
+    const payload = serializeDefinition(current);
+    if (record) {
+      const savedDefinition = { ...record.definition };
+      delete savedDefinition.change_note;
+      if (JSON.stringify(savedDefinition) === JSON.stringify(payload)) return record;
+    }
+    if (setupReady) {
+      const compiled = await computerControlApi.compileWorkflow(groupId, payload);
+      if (!compiled.ok) {
+        setMessage(friendlyError(compiled.error.message));
+        return null;
+      }
+      if (!compiled.result.valid) {
+        const diagnostic = compiled.result.diagnostics?.find((item) => item.severity !== "warning") || compiled.result.diagnostics?.[0];
+        setMessage(diagnostic ? `${diagnostic.path ? `${diagnostic.path}：` : ""}${diagnostic.message}` : "工作流参数校验未通过");
+        return null;
+      }
+    }
+    const response = record
+      ? await computerControlApi.updateWorkflow(
+          groupId,
+          record.manifest.workflow_id,
+          payload,
+          record.manifest.revision,
+        )
+      : await computerControlApi.createWorkflow(groupId, payload);
+    if (!response.ok) {
+      setMessage(friendlyError(response.error.message));
+      return null;
+    }
+    return applyWorkflowRecord(response.result);
+  }
+
+  async function save() {
+    setBusy("save");
+    const saved = await persistDraft();
+    if (saved) {
+      setMessage("已保存，当前版本会自动发布并信任");
       await refresh();
-    } else setMessage(response.error.message);
+    }
     setBusy("");
   }
 
   async function publish() {
-    if (!selectedManifest) return;
     setBusy("publish");
+    const saved = await persistDraft();
+    const manifest = saved?.manifest || selectedManifest;
+    if (!manifest) {
+      setBusy("");
+      return;
+    }
     const response = await computerControlApi.publish(
       groupId,
-      selectedManifest.workflow_id,
-      selectedManifest.current_version,
+      manifest.workflow_id,
+      manifest.current_version,
     );
     if (response.ok) {
-      setMessage("当前版本已发布");
+      setMessage("当前版本已发布并自动信任");
       await refresh();
     } else setMessage(response.error.message);
     setBusy("");
   }
 
+  async function openTriggerEditor() {
+    if (busy) return;
+    if (!record) {
+      setBusy("prepare-trigger");
+      const saved = await persistDraft();
+      setBusy("");
+      if (!saved) return;
+    }
+    setTriggerDialogOpen(true);
+  }
+
   async function run() {
-    if (!selectedManifest) return;
     if (lease.active) {
       setSection("runs");
       setMessage("电脑当前正在执行其他任务，请先在运行面板中停止占用。");
       return;
     }
     setBusy("run");
+    const saved = await persistDraft();
+    let manifest = saved?.manifest || selectedManifest;
+    if (!manifest) {
+      setBusy("");
+      return;
+    }
+    if (!manifest.effective_version) {
+      const finalized = await computerControlApi.publish(
+        groupId,
+        manifest.workflow_id,
+        manifest.current_version,
+      );
+      if (!finalized.ok) {
+        setMessage(friendlyError(finalized.error.message));
+        setBusy("");
+        return;
+      }
+      manifest = finalized.result.manifest;
+      applyWorkflowRecord(finalized.result);
+    }
     const response = await computerControlApi.run(
       groupId,
-      selectedManifest.workflow_id,
+      manifest.workflow_id,
       "foreman",
-      selectedManifest.effective_version || undefined,
+      manifest.effective_version || undefined,
     );
     if (response.ok) {
       setMessage("运行已启动");
       await refresh();
       setSection("runs");
-    } else setMessage(response.error.message);
-    setBusy("");
-  }
-
-  async function updateAutoTrust(
-    enabled: boolean,
-    authorizeCurrentFingerprint = false,
-  ) {
-    setBusy("settings");
-    const response = await computerControlApi.updateSettings(
-      groupId,
-      enabled,
-      authorizeCurrentFingerprint,
-    );
-    if (response.ok) {
-      setSettings(response.result);
-      setMessage(
-        authorizeCurrentFingerprint
-          ? "已重新授权当前 Windows-MCP 工具版本"
-          : enabled
-            ? "新版本将自动发布并信任"
-            : "已关闭自动发布和信任",
-      );
-      await refresh();
-    } else setMessage(friendlyError(response.error.message));
-    setBusy("");
-  }
-
-  async function trust() {
-    if (!selectedManifest) return;
-    setBusy("trust");
-    const response = await computerControlApi.trust(
-      groupId,
-      selectedManifest.workflow_id,
-      selectedManifest.current_version,
-    );
-    if (response.ok) {
-      setMessage("当前版本已受信");
-      await refresh();
     } else setMessage(response.error.message);
     setBusy("");
   }
@@ -1271,7 +1368,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           <button
             className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50"
             onClick={() => void save()}
-            disabled={!record || Boolean(busy)}
+            disabled={!hasEditableDraft || Boolean(busy)}
           >
             <Save size={15} />
             保存
@@ -1279,24 +1376,16 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           <button
             className="hidden h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50 sm:inline-flex"
             onClick={() => void publish()}
-            disabled={!selectedManifest || Boolean(busy)}
+            disabled={!hasEditableDraft || Boolean(busy)}
           >
             <Upload size={15} />
             发布
           </button>
           <button
-            className="hidden h-9 items-center gap-1 rounded-md border border-emerald-500/40 px-3 text-sm text-emerald-700 disabled:opacity-50 sm:inline-flex"
-            onClick={() => setTrustDialogOpen(true)}
-            disabled={!selectedManifest || Boolean(busy)}
-          >
-            <ShieldCheck size={15} />
-            信任
-          </button>
-          <button
             className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50"
-            onClick={() => setTriggerDialogOpen(true)}
-            disabled={!record || Boolean(busy)}
-            title={!record ? "请先选择或创建工作流" : "配置元素、定时、周期和一次性触发"}
+            onClick={() => void openTriggerEditor()}
+            disabled={!hasEditableDraft || Boolean(busy)}
+            title="配置元素、定时、周期和一次性触发"
           >
             <AlarmClock size={15} />
             自动触发
@@ -1304,7 +1393,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           <button
             className="inline-flex h-9 items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 text-sm text-white disabled:opacity-50"
             onClick={() => void run()}
-            disabled={!setupReady || !isTrusted || Boolean(busy)}
+            disabled={!setupReady || !hasEditableDraft || Boolean(busy)}
           >
             <Play size={15} />
             运行
@@ -1321,108 +1410,150 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         </div>
       )}
 
-      <div className="mx-4 mt-3 flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
-        {setup.phase === "ready" ? (
-          <Check size={15} className="text-emerald-600" />
-        ) : setup.phase === "failed" ? (
-          <AlertTriangle size={15} className="text-red-600" />
-        ) : (
-          <LoaderCircle size={15} className="animate-spin text-amber-600" />
-        )}
-        <div className="min-w-0 flex-1">
-          <span className="font-medium">
-            Windows-MCP {phaseLabel(setup.phase)}
-          </span>
-          {setup.version && (
-            <span className="ml-2 text-[var(--color-text-secondary)]">
-              版本 {setup.version}
-            </span>
+      {setup.phase !== "ready" && (
+      <div className="mx-4 mt-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
+        <div className="flex flex-wrap items-start gap-3">
+          {setup.phase === "ready" ? (
+            <Check size={15} className="mt-0.5 shrink-0 text-emerald-600" />
+          ) : setup.phase === "failed" ? (
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red-600" />
+          ) : setup.phase === "cancelled" ? (
+            <CircleStop size={15} className="mt-0.5 shrink-0 text-amber-600" />
+          ) : (
+            <LoaderCircle size={15} className="mt-0.5 shrink-0 animate-spin text-amber-600" />
           )}
-          <div className="text-[var(--color-text-secondary)]">
-            {setupErrorMessage(setup.error?.message, setup.phase) ||
-              (setup.phase === "ready"
-                ? `已验证 ${setup.tool_count || 0} 个电脑工具`
-                : "首次准备可能需要一到两分钟，可以继续浏览此页面")}
+          <div className="min-w-0 flex-[1_1_18rem]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="font-medium">Windows-MCP {phaseLabel(setup.phase)}</span>
+              {setup.version && <span className="text-[var(--color-text-secondary)]">版本 {setup.version}</span>}
+              {setup.started_at && (
+                <span className="text-[var(--color-text-secondary)]">
+                  耗时 {formatSetupDuration(setup.started_at, setup.in_progress ? null : setup.finished_at || setup.updated_at, setupClock)}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 text-[var(--color-text-secondary)]">
+              {setupErrorMessage(setup.error?.message, setup.phase) ||
+                (setup.phase === "ready"
+                  ? `已验证 ${setup.tool_count || 0} 个电脑工具`
+                  : setupStepLabel(setup.step || setup.detail, setup.phase))}
+            </div>
+            {setupPollError && (
+              <div className="mt-1 text-red-600">状态刷新失败：{setupPollError}</div>
+            )}
             {setup.phase === "failed" && setup.python_candidates && setup.python_candidates.length > 0 && (
               <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
                 已尝试：{setup.python_candidates.join("、")}
               </div>
             )}
+            {(setup.in_progress || setup.package_index) && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+                {setup.package_index && <span>Python 包：{setup.package_index}{setup.package_index_fallback ? "（镜像失败，已回退）" : ""}</span>}
+                <span>Python 3.13：由 uv 自动检测和准备</span>
+                {setup.last_activity_at && <span>最近活动：{formatComputerControlTime(setup.last_activity_at)}</span>}
+              </div>
+            )}
+            {(sessionDetails.startedAt || sessionDetails.transportRestarts !== null) && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+                {sessionDetails.startedAt && <span>会话启动：{formatComputerControlTime(sessionDetails.startedAt)}</span>}
+                {sessionDetails.transportRestarts !== null && <span>会话恢复/重启：{sessionDetails.transportRestarts} 次</span>}
+              </div>
+            )}
+            {currentObservation && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+                {currentObservation.updatedAt && <span>最近观察：{formatComputerControlTime(currentObservation.updatedAt)}</span>}
+                {currentObservation.provider && <span>提供者：{computerControlProviderLabel(currentObservation.provider)}</span>}
+                {currentObservation.targetWindow && <span className="max-w-72 truncate">目标窗口：{currentObservation.targetWindow}</span>}
+                {currentObservation.elementCount !== null && <span>元素：{currentObservation.elementCount} 个</span>}
+              </div>
+            )}
           </div>
-          {(sessionDetails.startedAt || sessionDetails.transportRestarts !== null) && (
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
-              {sessionDetails.startedAt && <span>会话启动：{formatComputerControlTime(sessionDetails.startedAt)}</span>}
-              {sessionDetails.transportRestarts !== null && <span>会话恢复/重启：{sessionDetails.transportRestarts} 次</span>}
-            </div>
-          )}
-          {currentObservation && (
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
-              {currentObservation.updatedAt && <span>最近观察：{formatComputerControlTime(currentObservation.updatedAt)}</span>}
-              {currentObservation.provider && <span>提供者：{computerControlProviderLabel(currentObservation.provider)}</span>}
-              {currentObservation.targetWindow && <span className="max-w-72 truncate">目标窗口：{currentObservation.targetWindow}</span>}
-              {currentObservation.elementCount !== null && <span>元素：{currentObservation.elementCount} 个</span>}
-            </div>
-          )}
+          <div className="ml-6 flex w-full shrink-0 flex-wrap justify-end gap-1.5 sm:ml-0 sm:w-auto">
+            <button
+              title="刷新安装状态"
+              aria-label="刷新安装状态"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border disabled:opacity-40"
+              onClick={() => void refreshSetupStatus()}
+              disabled={Boolean(busy)}
+            >
+              <RefreshCw size={13} className={busy === "refresh-setup" ? "animate-spin" : ""} />
+            </button>
+            <button
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+              onClick={() => void copySetupDiagnostics()}
+              disabled={!setup.logs?.length && !setup.error && !setupPollError}
+            >
+              <Copy size={13} />
+              复制诊断
+            </button>
+            {setup.in_progress ? (
+              <button
+                className="inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2 py-1 text-red-600 disabled:opacity-40"
+                onClick={() => void cancelSetup()}
+                disabled={Boolean(busy) || !setup.can_cancel}
+              >
+                <CircleStop size={13} />
+                取消安装
+              </button>
+            ) : setup.phase === "failed" || setup.phase === "cancelled" ? (
+              <button
+                className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
+                onClick={() => void beginSetup("repair")}
+                disabled={Boolean(busy) || lease.active}
+              >
+                <Wrench size={13} />
+                修复
+              </button>
+            ) : (
+              <>
+                <button
+                  title="仅重启 Windows-MCP 连接，不会重新安装或升级"
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+                  onClick={() => void beginSetup("restart")}
+                  disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+                >
+                  <RefreshCw size={13} />
+                  重启会话
+                </button>
+                <button
+                  title="检查并安装最新版 Windows-MCP"
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+                  onClick={() => void beginSetup("upgrade")}
+                  disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+                >
+                  <Upload size={13} />
+                  更新组件
+                </button>
+              </>
+            )}
+          </div>
         </div>
-        {setup.phase === "failed" ? (
-          <button
-            className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-            onClick={() => void beginSetup("repair")}
-            disabled={Boolean(busy) || lease.active}
-          >
-            <Wrench size={13} />
-            修复
-          </button>
-        ) : (
-          <div className="flex shrink-0 items-center gap-1.5">
+        {(setup.logs?.length || setup.current_command) && (
+          <div className="mt-2 border-t border-[var(--color-border)] pt-2">
             <button
-              title="仅重启 Windows-MCP 连接，不会重新安装或升级"
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
-              onClick={() => void beginSetup("restart")}
-              disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+              className="inline-flex items-center gap-1 text-[var(--color-text-secondary)]"
+              onClick={() => setSetupLogsOpen((open) => !open)}
             >
-              <RefreshCw size={13} />
-              重启会话
+              {setupLogsOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {setupLogsOpen ? "收起安装日志" : "展开安装日志"}
+              {setup.current_command && !setupLogsOpen && <span className="max-w-96 truncate">· {setup.current_command}</span>}
             </button>
-            <button
-              title="检查并安装最新版 Windows-MCP"
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
-              onClick={() => void beginSetup("upgrade")}
-              disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
-            >
-              <Upload size={13} />
-              更新组件
-            </button>
+            {setupLogsOpen && (
+              <pre
+                ref={setupLogRef}
+                onScroll={(event) => {
+                  const panel = event.currentTarget;
+                  setupLogPinnedRef.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
+                }}
+                className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-black/90 p-2 font-mono text-[11px] leading-5 text-zinc-100"
+              >
+                {(setup.logs || []).join("\n") || setup.current_command}
+              </pre>
+            )}
           </div>
         )}
       </div>
-
-      <div className="mx-4 mt-3 flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
-        <ShieldCheck size={15} className="shrink-0 text-emerald-600" />
-        <div className="min-w-0 flex-1">
-          <div className="font-medium">自动发布并信任新版本</div>
-          <div className="text-[var(--color-text-secondary)]">
-            保存、回滚或接受 AI 优化后立即可运行；不会自动开启无人值守触发器。
-          </div>
-        </div>
-        {settings.reauthorization_required ? (
-          <button
-            className="shrink-0 rounded-md border border-amber-500/40 px-2.5 py-1.5 text-amber-700 disabled:opacity-40"
-            disabled={Boolean(busy) || !setupReady}
-            onClick={() => void updateAutoTrust(true, true)}
-          >
-            重新授权工具版本
-          </button>
-        ) : (
-          <input
-            aria-label="自动发布并信任新版本"
-            type="checkbox"
-            checked={settings.auto_publish_and_trust}
-            disabled={Boolean(busy)}
-            onChange={(event) => void updateAutoTrust(event.target.checked)}
-          />
-        )}
-      </div>
+      )}
 
       {requests
         .filter((item) => item.status === "pending_approval")
@@ -1496,9 +1627,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent-primary)] disabled:opacity-40"
-                  onClick={() => setTriggerDialogOpen(true)}
-                  disabled={!record || Boolean(busy)}
-                  title={!record ? "请先选择或创建工作流" : "配置元素、定时、周期和一次性触发"}
+                  onClick={() => void openTriggerEditor()}
+                  disabled={!hasEditableDraft || Boolean(busy)}
+                  title="配置元素、定时、周期和一次性触发"
                 >
                   <AlarmClock size={12} />
                   自动触发
@@ -1524,23 +1655,38 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 </button>
               </div>
             </div>
-            <div className="relative">
-              <select
-                className="h-9 w-full appearance-none rounded-md border border-[var(--color-border)] bg-transparent px-2.5 pr-8 text-sm"
-                value={selectedId}
-                onChange={(event) => setSelectedId(event.target.value)}
-              >
-                {workflows.map((item) => (
-                  <option key={item.workflow_id} value={item.workflow_id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={14}
-                className="pointer-events-none absolute right-2.5 top-3"
-              />
-            </div>
+            {workflows.length > 0 ? (
+              <div className="relative">
+                <select
+                  className="h-9 w-full appearance-none rounded-md border border-[var(--color-border)] bg-transparent px-2.5 pr-8 text-sm"
+                  value={selectedId}
+                  onChange={(event) => setSelectedId(event.target.value)}
+                >
+                  {workflows.map((item) => (
+                    <option key={item.workflow_id} value={item.workflow_id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={14}
+                  className="pointer-events-none absolute right-2.5 top-3"
+                />
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-secondary)]">
+                <div>还没有工作流，先在画布中规划步骤。</div>
+                <button
+                  type="button"
+                  className="mt-2 inline-flex h-8 items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 text-xs text-white"
+                  onClick={() => void createWorkflow()}
+                  disabled={Boolean(busy)}
+                >
+                  <Copy size={13} />
+                  新建工作流
+                </button>
+              </div>
+            )}
           </div>
           {versions.length > 0 && (
             <div className="mb-4 border-t border-[var(--color-border)] pt-3">
@@ -1672,40 +1818,45 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         <section
           className={`${section === "steps" ? "flex" : "hidden md:flex"} min-h-[520px] min-w-0 flex-col border-r border-[var(--color-border)]`}
         >
-          <div className="flex h-12 items-center gap-1 overflow-x-auto border-b border-[var(--color-border)] px-3">
-            <span className="mr-2 text-xs font-medium text-[var(--color-text-secondary)]">
+          <div className="flex min-h-16 flex-wrap items-center gap-2 overflow-x-auto border-b border-[var(--color-border)] px-4 py-2.5">
+            <span className="mr-1 text-sm font-semibold text-[var(--color-text-primary)]">
               添加步骤
             </span>
+            <span className="mr-2 text-xs text-[var(--color-text-secondary)]">
+              {selectedNode && selectedNode.data.model.type !== "start"
+                ? `将插入到“${selectedNode.data.model.title || nodeLabel(selectedNode.data.model.type)}”之前`
+                : "未选中步骤时追加到结束节点之前"}
+            </span>
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5"
+              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
               onClick={() => addNode("action")}
             >
-              <MousePointer2 size={14} />
+              <MousePointer2 size={16} />
               操作
             </button>
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5"
+              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
               onClick={() => addNode("condition")}
             >
-              <GitBranch size={14} />
+              <GitBranch size={16} />
               判断
             </button>
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5"
+              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
               onClick={() => addNode("wait")}
             >
-              <Hourglass size={14} />
+              <Hourglass size={16} />
               等待
             </button>
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5"
+              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
               onClick={() => addNode("approval")}
             >
-              <ShieldCheck size={14} />
+              <ShieldCheck size={16} />
               确认
             </button>
           </div>
-          <div className="hidden min-h-[400px] flex-1 md:block">
+          <div className="hidden min-h-[540px] flex-1 md:block">
             <WorkflowCanvas
               nodes={nodes}
               edges={edges}
@@ -2132,63 +2283,6 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         />
       )}
 
-      {trustDialogOpen && selectedManifest && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="信任电脑控制工作流"
-        >
-          <div className="w-full max-w-lg rounded-md bg-[var(--color-bg-primary)] p-5 shadow-2xl">
-            <div className="flex items-start gap-3">
-              <ShieldCheck
-                className="mt-0.5 shrink-0 text-emerald-600"
-                size={20}
-              />
-              <div>
-                <h2 className="text-base font-semibold">
-                  信任“{selectedManifest.name}”当前版本
-                </h2>
-                <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                  信任后，该版本和已启用的自动触发器可以使用 Windows-MCP
-                  的全部电脑权限。
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 border-y border-[var(--color-border)] py-3 text-sm">
-              <div className="font-medium">包含的高风险权限</div>
-              <ul className="mt-2 space-y-1 text-[var(--color-text-secondary)]">
-                <li>运行 PowerShell 和系统命令</li>
-                <li>写入、移动和删除文件</li>
-                <li>启动或结束进程</li>
-                <li>修改 Windows 注册表</li>
-                <li>控制鼠标、键盘、窗口和剪贴板</li>
-              </ul>
-              <p className="mt-3 text-red-700 dark:text-red-300">
-                部分操作不可撤销。工作流或 Windows-MCP
-                工具指纹变化后，信任会自动失效。
-              </p>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                className="h-9 rounded-md border border-[var(--color-border)] px-3 text-sm"
-                onClick={() => setTrustDialogOpen(false)}
-              >
-                取消
-              </button>
-              <button
-                className="h-9 rounded-md bg-emerald-600 px-3 text-sm text-white"
-                onClick={() => {
-                  setTrustDialogOpen(false);
-                  void trust();
-                }}
-              >
-                确认信任当前版本
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
