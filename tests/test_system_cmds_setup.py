@@ -27,7 +27,7 @@ class TestSystemCmdsSetup(unittest.TestCase):
         mock_ensure.assert_called_once_with(
             "codex",
             Path(".").resolve(),
-            auto_mcp_runtimes=("claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi"),
+            auto_mcp_runtimes=("claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode"),
         )
         payload = mock_print.call_args.args[0]
         self.assertTrue(bool(payload.get("ok")))
@@ -96,6 +96,21 @@ class TestSystemCmdsSetup(unittest.TestCase):
             claude.get("command"),
             " ".join(system_cmds.shlex.quote(part) for part in resolved_cmd),
         )
+
+    def test_cmd_setup_opencode_reports_runtime_env_injection(self) -> None:
+        from no1.cli import system_cmds
+
+        args = argparse.Namespace(runtime="opencode", path=".")
+        with patch("no1.kernel.runtime.detect_runtime", return_value=SimpleNamespace(available=True, path="/usr/local/bin/opencode")), patch(
+            "no1.daemon.mcp_install.ensure_mcp_installed"
+        ) as mock_ensure, patch.object(system_cmds, "_print_json") as mock_print:
+            self.assertEqual(system_cmds.cmd_setup(args), 0)
+        mock_ensure.assert_not_called()
+        payload = mock_print.call_args.args[0]
+        result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        opencode = (result.get("mcp") or {}).get("opencode") or {}
+        self.assertEqual(opencode.get("mode"), "auto")
+        self.assertEqual(opencode.get("status"), "runtime_env")
 
 
 if __name__ == "__main__":

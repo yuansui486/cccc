@@ -432,6 +432,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     # Supported runtimes
     # - claude/codex/droid/amp/auggie/neovate/gemini/hermes/kimi: MCP setup can be automated via their CLIs
+    # - opencode: MCP setup is injected into the actor process through OPENCODE_CONFIG_CONTENT
     # - custom: user-provided runtime; MCP setup is manual (generic guidance only)
     SUPPORTED_RUNTIMES = [
         "claude",
@@ -443,6 +444,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         "gemini",
         "hermes",
         "kimi",
+        "opencode",
         "custom",
     ]
 
@@ -479,6 +481,16 @@ def cmd_setup(args: argparse.Namespace) -> int:
             results["notes"].append(f"{rt}: CLI not found; run the command shown in result.mcp.{rt}.command")
 
     def _auto_setup(rt: str) -> None:
+        if rt == "opencode":
+            runtime_info = detect_runtime(rt)
+            results["mcp"][rt] = {
+                "mode": "auto",
+                "status": "runtime_env",
+                "hint": "OneColleague injects the OpenCode MCP config through OPENCODE_CONFIG_CONTENT when each actor starts; no global OpenCode config is modified.",
+            }
+            if not runtime_info.available:
+                results["notes"].append("opencode: CLI not found; install OpenCode before starting an opencode actor")
+            return
         runtime_info = detect_runtime(rt)
         was_ready = is_mcp_installed(rt) if runtime_info.available else False
         if ensure_mcp_installed(rt, project_path, auto_mcp_runtimes=auto_mcp_runtimes):

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import ANY, Mock, call, patch
 
-from no1.daemon.mcp_install import ensure_mcp_installed, is_mcp_installed
+from no1.daemon.mcp_install import ensure_mcp_installed, is_mcp_installed, prepare_runtime_mcp_env
 from no1.kernel.runtime import get_onecolleague_mcp_stdio_command
 
 
@@ -20,6 +20,34 @@ class TestMcpInstall(unittest.TestCase):
                 ok = ensure_mcp_installed("unknown-runtime", cwd, auto_mcp_runtimes=("claude", "codex"))
                 self.assertTrue(ok)
                 mock_run.assert_not_called()
+
+    def test_prepare_runtime_mcp_env_opencode_injects_inline_config(self) -> None:
+        env = {
+            "ONECOLLEAGUE_HOME": "/tmp/onecolleague-home",
+            "CCCC_HOME": "/tmp/onecolleague-home",
+            "ONECOLLEAGUE_GROUP_ID": "g_123",
+            "ONECOLLEAGUE_ACTOR_ID": "peer1",
+            "OPENCODE_CONFIG_CONTENT": json.dumps({"mcp": {"other": {"type": "local", "command": ["other"]}}}),
+        }
+        with patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]):
+            prepared = prepare_runtime_mcp_env("opencode", env)
+        doc = json.loads(prepared["OPENCODE_CONFIG_CONTENT"])
+        self.assertEqual(doc["mcp"]["other"]["command"], ["other"])
+        self.assertEqual(doc["mcp"]["onecolleague"]["command"], ["/abs/onecolleague", "mcp"])
+        self.assertEqual(doc["mcp"]["onecolleague"]["environment"]["ONECOLLEAGUE_GROUP_ID"], "g_123")
+        with patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]):
+            self.assertTrue(is_mcp_installed("opencode", env=prepared))
+
+    def test_ensure_mcp_installed_opencode_uses_prepared_env_without_cli(self) -> None:
+        env = prepare_runtime_mcp_env("opencode", {"ONECOLLEAGUE_HOME": "/tmp/home"})
+        with tempfile.TemporaryDirectory() as td, patch("no1.daemon.mcp_install.subprocess.run") as mock_run:
+            self.assertTrue(ensure_mcp_installed("opencode", Path(td), auto_mcp_runtimes=("opencode",), env=env))
+            mock_run.assert_not_called()
+
+    def test_ensure_mcp_installed_opencode_missing_inline_config_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td, patch("no1.daemon.mcp_install.subprocess.run") as mock_run:
+            self.assertFalse(ensure_mcp_installed("opencode", Path(td), auto_mcp_runtimes=("opencode",), env={}))
+            mock_run.assert_not_called()
 
     def test_build_mcp_add_command_hermes_uses_safe_prepare_wrapper(self) -> None:
         from no1.daemon.mcp_install import build_mcp_add_command

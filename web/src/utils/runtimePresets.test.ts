@@ -17,6 +17,16 @@ import {
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
+  it("shows OpenCode as a selectable runtime when discovered", () => {
+    const groups = buildRuntimeChoiceGroups([
+      { name: "opencode", display_name: "OpenCode", available: true, recommended_command: "opencode" },
+    ]);
+
+    expect(groups.find((group) => group.labelKey === "runtimeGroupOpenCode")?.options).toEqual([
+      { kind: "runtime", id: "opencode", label: "OpenCode", runtime: "opencode", disabled: false },
+    ]);
+  });
+
   it("groups model choices by CLI family", () => {
     const groups = buildRuntimeChoiceGroups([
       { name: "claude", display_name: "Claude Code", available: true, recommended_command: "claude" },
@@ -30,6 +40,7 @@ describe("runtime presets", () => {
       "runtimeGroupClaude",
       "runtimeGroupGemini",
       "runtimeGroupKimi",
+      "runtimeGroupOpenCode",
     ]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options.map((option) => option.id)).toEqual([
       "model:deepseek-v4-pro-claude",

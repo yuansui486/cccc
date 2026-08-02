@@ -1494,6 +1494,7 @@ export const SUPPORTED_RUNTIMES = [
   "gemini",
   "hermes",
   "kimi",
+  "opencode",
   "web_model",
   "custom",
 ] as const;
@@ -1510,6 +1511,7 @@ export const RUNTIME_INFO: Record<string, { label: string; desc: string }> = {
   hermes: { label: "Hermes Agent", desc: "Uses your Hermes profile with OneColleague MCP" },
   kimi: { label: "Kimi CLI", desc: "" },
   neovate: { label: "Neovate Code", desc: "" },
+  opencode: { label: "OpenCode", desc: "Uses inline OpenCode MCP config at actor launch" },
   web_model: { label: "ChatGPT Web Model", desc: "ChatGPT browser delivery + remote MCP connector" },
   custom: { label: "Custom", desc: "Manual MCP installation needed" },
 };
@@ -1517,7 +1519,7 @@ export const RUNTIME_INFO: Record<string, { label: string; desc: string }> = {
 // Runtime colors for visual distinction
 // Dark theme: semi-transparent dark backgrounds with bright text
 // Light theme: semi-transparent light backgrounds with darker text
-export const RUNTIME_COLORS: Record<string, { 
+export const RUNTIME_COLORS: Record<string, {
   // Dark theme
   bg: string; 
   text: string; 
@@ -1564,6 +1566,10 @@ export const RUNTIME_COLORS: Record<string, {
   neovate: {
     bg: "bg-fuchsia-900/30", text: "text-fuchsia-300", border: "border-fuchsia-600/50", dot: "bg-fuchsia-400",
     bgLight: "bg-fuchsia-50", textLight: "text-fuchsia-700", borderLight: "border-fuchsia-300", dotLight: "bg-fuchsia-500"
+  },
+  opencode: {
+    bg: "bg-stone-900/40", text: "text-stone-200", border: "border-stone-500/60", dot: "bg-stone-300",
+    bgLight: "bg-stone-100", textLight: "text-stone-800", borderLight: "border-stone-300", dotLight: "bg-stone-600"
   },
   web_model: {
     bg: "bg-indigo-900/30", text: "text-indigo-300", border: "border-indigo-600/50", dot: "bg-indigo-400",

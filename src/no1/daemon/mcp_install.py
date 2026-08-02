@@ -117,6 +117,16 @@ def _json_mcp_entry_matches_expected(entry: Any, expected_cmd: list[str]) -> boo
     )
 
 
+def _mcp_command_array_matches_expected(command: Any, expected_cmd: list[str]) -> bool:
+    if not isinstance(command, list) or len(command) != len(expected_cmd) or not expected_cmd:
+        return False
+    actual = [str(part or "").strip().strip('"').strip("'") for part in command]
+    expected = [str(part or "").strip().strip('"').strip("'") for part in expected_cmd]
+    if _normalize_mcp_command_value(actual[0]) != _normalize_mcp_command_value(expected[0]):
+        return False
+    return actual[1:] == expected[1:]
+
+
 def _runtime_expected_onecolleague_command(runtime: str) -> list[str]:
     cmd = list(get_onecolleague_mcp_stdio_command())
     if sys.platform.startswith("win") and runtime == "droid" and cmd:
@@ -158,6 +168,86 @@ def _kimi_share_dir(env: Dict[str, str] | None) -> Path:
     if raw:
         return Path(raw).expanduser()
     return _home_dir(env) / ".kimi"
+
+
+_OPENCODE_CONTEXT_ENV_KEYS = ("ONECOLLEAGUE_HOME", "CCCC_HOME", "ONECOLLEAGUE_GROUP_ID", "CCCC_GROUP_ID", "ONECOLLEAGUE_ACTOR_ID", "CCCC_ACTOR_ID")
+
+
+def _opencode_context_environment(env: Dict[str, str] | None) -> Dict[str, str]:
+    result: Dict[str, str] = {}
+    if not isinstance(env, dict):
+        return result
+    for key in _OPENCODE_CONTEXT_ENV_KEYS:
+        value = str(env.get(key) or "").strip()
+        if value:
+            result[key] = value
+    return result
+
+
+def _opencode_onecolleague_entry(env: Dict[str, str] | None) -> Dict[str, Any]:
+    return {
+        "type": "local",
+        "command": _runtime_expected_onecolleague_command("opencode"),
+        "enabled": True,
+        "environment": _opencode_context_environment(env),
+    }
+
+
+def _read_opencode_inline_config(env: Dict[str, str] | None) -> Dict[str, Any]:
+    raw = str((env or {}).get("OPENCODE_CONFIG_CONTENT") or "").strip() if isinstance(env, dict) else ""
+    if not raw:
+        return {}
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid OPENCODE_CONFIG_CONTENT: expected JSON object") from exc
+    if not isinstance(doc, dict):
+        raise ValueError("invalid OPENCODE_CONFIG_CONTENT: expected JSON object")
+    return dict(doc)
+
+
+def _opencode_mcp_entry_matches_expected(entry: Any, expected_cmd: list[str], env: Dict[str, str] | None) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if str(entry.get("type") or "").strip().lower() != "local":
+        return False
+    if coerce_bool(entry.get("enabled"), default=True) is False:
+        return False
+    if not _mcp_command_array_matches_expected(entry.get("command"), expected_cmd):
+        return False
+    expected_env = _opencode_context_environment(env)
+    actual_env = entry.get("environment")
+    if not isinstance(actual_env, dict):
+        return not expected_env
+    return all(str(actual_env.get(key) or "").strip() in {value, f"{{env:{key}}}"} for key, value in expected_env.items())
+
+
+def _opencode_mcp_state(env: Dict[str, str] | None) -> str:
+    try:
+        doc = _read_opencode_inline_config(env)
+    except ValueError:
+        return "stale"
+    servers = doc.get("mcp") if isinstance(doc, dict) else None
+    if not isinstance(servers, dict):
+        return "missing"
+    entry = servers.get(MCP_SERVER_NAME)
+    if entry is None:
+        return "missing"
+    return "ready" if _opencode_mcp_entry_matches_expected(entry, _runtime_expected_onecolleague_command("opencode"), env) else "stale"
+
+
+def prepare_runtime_mcp_env(runtime: str, env: Dict[str, Any] | None) -> Dict[str, str]:
+    """Prepare runtime-scoped MCP environment without changing user config."""
+    result = {str(k): str(v) for k, v in (env or {}).items() if isinstance(k, str)}
+    if str(runtime or "").strip().lower() != "opencode":
+        return result
+    doc = _read_opencode_inline_config(result)
+    mcp = doc.get("mcp")
+    mcp = dict(mcp) if isinstance(mcp, dict) else {}
+    mcp[MCP_SERVER_NAME] = _opencode_onecolleague_entry(result)
+    doc["mcp"] = mcp
+    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(doc, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return result
 
 
 def build_mcp_add_command(runtime: str) -> list[str] | None:
@@ -398,6 +488,9 @@ def _runtime_mcp_state(runtime: str, *, env: Dict[str, str] | None = None) -> st
 
     if runtime == "kimi":
         return _json_mcp_state((_kimi_share_dir(env) / "mcp.json",), expected_cmd)
+
+    if runtime == "opencode":
+        return _opencode_mcp_state(env)
 
     return "missing"
 

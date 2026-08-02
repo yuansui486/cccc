@@ -10,6 +10,7 @@ class TestRuntimeCommandDefaults(unittest.TestCase):
 
         self.assertEqual(get_runtime_command_with_flags("kimi"), ["kimi", "--yolo"])
         self.assertEqual(get_runtime_command_with_flags("hermes"), ["hermes", "--tui", "--yolo"])
+        self.assertEqual(get_runtime_command_with_flags("opencode"), ["opencode"])
 
     def test_onecolleague_mcp_stdio_command_prefers_unresolved_venv_entrypoint(self) -> None:
         from no1.kernel.runtime import get_onecolleague_mcp_stdio_command

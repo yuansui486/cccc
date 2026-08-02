@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -244,6 +245,77 @@ class TestActorRuntimeOps(unittest.TestCase):
             reason="actor_start",
             retry_seconds=0.0,
         )
+
+    def test_opencode_actor_start_injects_inline_mcp_config_into_pty_env(self) -> None:
+        from no1.daemon.actors import actor_runtime_ops
+
+        captured: dict[str, object] = {}
+
+        def fake_start_pty_actor_with_runtime_resume(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(pid=1234)
+
+        def inject_context(env, gid, aid):
+            out = dict(env)
+            out["ONECOLLEAGUE_HOME"] = "/tmp/onecolleague-home"
+            out["CCCC_HOME"] = "/tmp/onecolleague-home"
+            out["ONECOLLEAGUE_GROUP_ID"] = gid
+            out["ONECOLLEAGUE_ACTOR_ID"] = aid
+            return out
+
+        with tempfile.TemporaryDirectory() as td:
+            ledger_path = Path(td) / "ledger.jsonl"
+            group = SimpleNamespace(
+                group_id="g-test",
+                doc={"active_scope_key": "scope1", "state": "active", "running": False},
+                save=lambda: None,
+                ledger_path=ledger_path,
+            )
+            actor = {
+                "id": "open-1",
+                "default_scope_key": "scope1",
+                "runner": "pty",
+                "runtime": "opencode",
+                "command": ["opencode"],
+                "env": {"OPENCODE_CONFIG_CONTENT": json.dumps({"mcp": {"other": {"type": "local", "command": ["other"]}}})},
+            }
+            with (
+                patch.object(actor_runtime_ops, "find_actor", return_value=actor),
+                patch.object(actor_runtime_ops.pty_runner, "PTY_SUPPORTED", True),
+                patch.object(actor_runtime_ops, "runtime_start_preflight_error", return_value=""),
+                patch.object(actor_runtime_ops, "start_pty_actor_with_runtime_resume", side_effect=fake_start_pty_actor_with_runtime_resume),
+                patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]),
+            ):
+                result = actor_runtime_ops.start_actor_process(
+                    group,
+                    "open-1",
+                    command=[],
+                    env={},
+                    runner="pty",
+                    runtime="opencode",
+                    by="user",
+                    find_scope_url=lambda _group, _scope_key: td,
+                    effective_runner_kind=lambda runner: runner,
+                    merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+                    normalize_runtime_command=lambda _runtime, command: list(command),
+                    ensure_mcp_installed=lambda _runtime, _cwd, **kwargs: "OPENCODE_CONFIG_CONTENT" in kwargs.get("env", {}),
+                    inject_actor_context_env=inject_context,
+                    prepare_pty_env=lambda env: dict(env),
+                    pty_backlog_bytes=lambda: 1024,
+                    write_headless_state=lambda _gid, _aid: None,
+                    write_pty_state=lambda _gid, _aid, _pid: None,
+                    clear_preamble_sent=lambda _group, _aid: None,
+                    throttle_reset_actor=lambda _gid, _aid: None,
+                    supported_runtimes=("opencode",),
+                )
+
+        self.assertTrue(bool(result.get("success")), result.get("error"))
+        env = captured.get("env") if isinstance(captured.get("env"), dict) else {}
+        doc = json.loads(str(env.get("OPENCODE_CONFIG_CONTENT") or "{}"))
+        self.assertEqual(doc["mcp"]["other"]["command"], ["other"])
+        self.assertEqual(doc["mcp"]["onecolleague"]["command"], ["/abs/onecolleague", "mcp"])
+        self.assertEqual(doc["mcp"]["onecolleague"]["environment"]["ONECOLLEAGUE_GROUP_ID"], "g-test")
+        self.assertEqual(doc["mcp"]["onecolleague"]["environment"]["ONECOLLEAGUE_ACTOR_ID"], "open-1")
 
 
 if __name__ == "__main__":

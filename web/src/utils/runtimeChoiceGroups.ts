@@ -12,15 +12,16 @@ export type RuntimeChoiceGroup = {
   options: RuntimeChoiceOption[];
 };
 
-const GROUP_ORDER = ["codex", "claude", "gemini", "kimi"] as const;
+const GROUP_ORDER = ["codex", "claude", "gemini", "kimi", "opencode"] as const;
 type GroupKey = typeof GROUP_ORDER[number];
-const VISIBLE_RUNTIME_CHOICES = new Set<SupportedRuntime>(["gemini"]);
+const VISIBLE_RUNTIME_CHOICES = new Set<SupportedRuntime>(["gemini", "opencode"]);
 
 const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }> = {
   claude: { labelKey: "runtimeGroupClaude", labelFallback: "Claude Code" },
   codex: { labelKey: "runtimeGroupCodex", labelFallback: "Codex" },
   gemini: { labelKey: "runtimeGroupGemini", labelFallback: "Gemini" },
   kimi: { labelKey: "runtimeGroupKimi", labelFallback: "Kimi" },
+  opencode: { labelKey: "runtimeGroupOpenCode", labelFallback: "OpenCode" },
 };
 
 export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[], priceMap?: RuntimePriceMap | null): RuntimeChoiceGroup[] {
@@ -61,6 +62,7 @@ function groupKeyForRuntime(runtime: SupportedRuntime): GroupKey {
   if (runtime === "codex") return "codex";
   if (runtime === "gemini") return "gemini";
   if (runtime === "kimi") return "kimi";
+  if (runtime === "opencode") return "opencode";
   return "claude";
 }
 

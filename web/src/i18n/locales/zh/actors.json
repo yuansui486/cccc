@@ -57,6 +57,7 @@
   "runtimeGroupCodex": "Codex",
   "runtimeGroupGemini": "Gemini",
   "runtimeGroupKimi": "Kimi",
+  "runtimeGroupOpenCode": "OpenCode",
   "notInstalled": "（未安装）",
   "manualMcpRequired": "需要手动安装 MCP",
   "customCommandHint": "请在 <1>高级选项 → 命令覆盖</1> 中提供运行时命令。",

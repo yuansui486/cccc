@@ -269,5 +269,6 @@
   "runtimeGroupClaude": "Claude Code",
   "runtimeGroupCodex": "Codex",
   "runtimeGroupGemini": "Gemini",
-  "runtimeGroupKimi": "Kimi"
+  "runtimeGroupKimi": "Kimi",
+  "runtimeGroupOpenCode": "OpenCode"
 }

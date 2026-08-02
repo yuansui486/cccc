@@ -56,6 +56,7 @@ const RUNTIME_DEFAULT_COMMANDS: Record<string, string> = {
   gemini: "gemini --yolo",
   kimi: "kimi --yolo",
   neovate: "neovate",
+  opencode: "opencode",
   custom: "",
 };
 
