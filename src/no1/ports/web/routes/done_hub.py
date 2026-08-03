@@ -292,6 +292,36 @@ def _normalize_model_list(payload: Any) -> list[str]:
     return out
 
 
+def _normalize_available_model_rows(payload: Any) -> list[Dict[str, Any]]:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, dict):
+        rows = list(data.items())
+    elif isinstance(data, list):
+        rows = [(str(index), value) for index, value in enumerate(data)]
+    else:
+        return []
+    out: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_name, raw_value in rows:
+        value = raw_value if isinstance(raw_value, dict) else {}
+        price = value.get("price") if isinstance(value.get("price"), dict) else value
+        model = str(value.get("model") or value.get("id") or value.get("name") or raw_name or "").strip()
+        key = model.lower()
+        if not model or key in seen:
+            continue
+        seen.add(key)
+        item: Dict[str, Any] = {
+            "model": model,
+            "locked": bool(price.get("locked")) if isinstance(price, dict) else False,
+        }
+        for field in ("input", "output"):
+            number = price.get(field) if isinstance(price, dict) else None
+            if isinstance(number, (int, float)):
+                item[field] = float(number)
+        out.append(item)
+    return out
+
+
 async def _configure_local_clients(client: httpx.AsyncClient, *, base_url: str, session: Dict[str, Any]) -> Dict[str, Any]:
     group = str(session.get("group") or "").strip().lower()
     if group == "pro":
@@ -531,5 +561,29 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             return {"ok": False, "error": {"code": "done_hub_prices_failed", "message": str(exc)}}
 
         return {"ok": True, "result": {"items": _normalize_price_rows(payload), "models": models}}
+
+    @router.get("/models")
+    async def done_hub_models() -> Dict[str, Any]:
+        try:
+            base_url = _normalize_base_url(os.environ.get("ONECOLLEAGUE_DONE_HUB_BASE_URL", "") or _DEFAULT_DONE_HUB_BASE_URL)
+            async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
+                resp = await client.get(f"{base_url}/api/available_model")
+                if resp.status_code >= 400:
+                    return {
+                        "ok": False,
+                        "error": {
+                            "code": "done_hub_models_failed",
+                            "message": f"done-hub returned HTTP {resp.status_code}",
+                        },
+                    }
+                try:
+                    payload = resp.json()
+                except Exception:
+                    return {"ok": False, "error": {"code": "done_hub_models_failed", "message": "done-hub returned invalid JSON"}}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": {"code": "done_hub_models_failed", "message": str(exc)}}
+
+        items = _normalize_available_model_rows(payload)
+        return {"ok": True, "result": {"items": items, "models": [item["model"] for item in items]}}
 
     return [router]

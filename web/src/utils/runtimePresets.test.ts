@@ -10,6 +10,8 @@ import {
   mergePresetSecrets,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
+  opencodeRuntimePreset,
+  opencodeRuntimePresetId,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -25,6 +27,28 @@ describe("runtime presets", () => {
     expect(groups.find((group) => group.labelKey === "runtimeGroupOpenCode")?.options).toEqual([
       { kind: "runtime", id: "opencode", label: "OpenCode", runtime: "opencode", disabled: false },
     ]);
+  });
+
+  it("adds dynamic OpenCode models and uses the OneColleague provider prefix", () => {
+    const groups = buildRuntimeChoiceGroups(
+      [{ name: "opencode", display_name: "OpenCode", available: true, recommended_command: "opencode" }],
+      null,
+      ["gpt-5.4", "deepseek-v4-pro", "qwen3.6-plus", "new-model"],
+    );
+    const options = groups.find((group) => group.labelKey === "runtimeGroupOpenCode")?.options || [];
+
+    expect(options.map((option) => option.id)).toContain(opencodeRuntimePresetId("new-model"));
+    expect(options.map((option) => option.id)).not.toContain(opencodeRuntimePresetId("gpt-5.5"));
+    const preset = opencodeRuntimePreset("new-model");
+    expect(preset).toBeTruthy();
+    expect(commandForRuntimePreset(preset!, {
+      name: "opencode",
+      display_name: "OpenCode",
+      available: true,
+      recommended_command: "opencode",
+    })).toBe("opencode -m onecolleague/new-model");
+    expect(runtimePresetIdFor("opencode", "opencode -m onecolleague/new-model")).toBe(opencodeRuntimePresetId("new-model"));
+    expect(mergePresetSecrets("", preset!, "done-hub-key")).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
   });
 
   it("groups model choices by CLI family", () => {

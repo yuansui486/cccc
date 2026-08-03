@@ -29,17 +29,25 @@ class TestMcpInstall(unittest.TestCase):
             "ONECOLLEAGUE_ACTOR_ID": "peer1",
             "OPENCODE_CONFIG_CONTENT": json.dumps({"mcp": {"other": {"type": "local", "command": ["other"]}}}),
         }
-        with patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]):
+        with patch("no1.daemon.opencode_provider.get_opencode_model_catalog", return_value=[{"model": "gpt-5.4", "locked": True}]), patch(
+            "no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]
+        ):
             prepared = prepare_runtime_mcp_env("opencode", env)
         doc = json.loads(prepared["OPENCODE_CONFIG_CONTENT"])
         self.assertEqual(doc["mcp"]["other"]["command"], ["other"])
         self.assertEqual(doc["mcp"]["onecolleague"]["command"], ["/abs/onecolleague", "mcp"])
         self.assertEqual(doc["mcp"]["onecolleague"]["environment"]["ONECOLLEAGUE_GROUP_ID"], "g_123")
+        provider = doc["provider"]["onecolleague"]
+        self.assertEqual(provider["npm"], "@ai-sdk/openai-compatible")
+        self.assertEqual(provider["options"]["baseURL"], "https://peer.shierkeji.com/v1")
+        self.assertEqual(provider["options"]["apiKey"], "{env:ONECOLLEAGUE_API_KEY}")
+        self.assertTrue(provider["models"])
         with patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]):
             self.assertTrue(is_mcp_installed("opencode", env=prepared))
 
     def test_ensure_mcp_installed_opencode_uses_prepared_env_without_cli(self) -> None:
-        env = prepare_runtime_mcp_env("opencode", {"ONECOLLEAGUE_HOME": "/tmp/home"})
+        with patch("no1.daemon.opencode_provider.get_opencode_model_catalog", return_value=[{"model": "gpt-5.4", "locked": True}]):
+            env = prepare_runtime_mcp_env("opencode", {"ONECOLLEAGUE_HOME": "/tmp/home"})
         with tempfile.TemporaryDirectory() as td, patch("no1.daemon.mcp_install.subprocess.run") as mock_run:
             self.assertTrue(ensure_mcp_installed("opencode", Path(td), auto_mcp_runtimes=("opencode",), env=env))
             mock_run.assert_not_called()

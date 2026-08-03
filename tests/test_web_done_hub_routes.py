@@ -357,6 +357,41 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         self.assertEqual(calls[1][0:2], ("GET", f"{base}/api/prices/model_list"))
         self.assertIsNone(calls[1][2].get("headers"))
 
+    def test_done_hub_models_proxy_keeps_all_server_models(self) -> None:
+        base = "https://peer.shierkeji.com"
+        calls: list[tuple[str, str, dict]] = []
+
+        def _factory(*args, **kwargs):
+            return _FakeAsyncClient(
+                {
+                    ("GET", f"{base}/api/available_model"): _FakeResponse(
+                        200,
+                        {
+                            "success": True,
+                            "data": {
+                                "gpt-5.4": {"price": {"locked": True}},
+                                "deepseek-v4-pro": {"price": {"locked": False}},
+                                "qwen3.6-plus": {"model": "qwen3.6-plus", "price": {"input": 3, "output": 18}},
+                            },
+                        },
+                    ),
+                },
+                calls,
+            )
+
+        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+            client = self._create_client()
+            resp = client.get("/api/v1/done_hub/models")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(bool(body.get("ok")))
+        result = body.get("result") or {}
+        self.assertEqual(result.get("models"), ["gpt-5.4", "deepseek-v4-pro", "qwen3.6-plus"])
+        self.assertTrue(result["items"][0]["locked"])
+        self.assertEqual(result["items"][2]["input"], 3.0)
+        self.assertEqual(calls[0][0:2], ("GET", f"{base}/api/available_model"))
+
     def test_done_hub_team_presets_can_use_env_override(self) -> None:
         base = "https://peer.shierkeji.com"
         preset_base = "http://agent-service.local:8012"

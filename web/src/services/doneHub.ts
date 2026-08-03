@@ -43,8 +43,20 @@ export type DoneHubModelPrice = {
   locked?: boolean;
 };
 
+export type DoneHubModel = {
+  model: string;
+  input?: number;
+  output?: number;
+  locked?: boolean;
+};
+
 type DoneHubPricesResult = {
   items?: DoneHubModelPrice[];
+  models?: string[];
+};
+
+type DoneHubModelsResult = {
+  items?: DoneHubModel[];
   models?: string[];
 };
 
@@ -231,6 +243,32 @@ export async function fetchDoneHubPrices(): Promise<DoneHubApiResponse<DoneHubPr
 
   try {
     return JSON.parse(text) as DoneHubApiResponse<DoneHubPricesResult>;
+  } catch {
+    return makeError("PARSE_ERROR", `Invalid JSON response: ${text.slice(0, 100)}`);
+  }
+}
+
+export async function fetchDoneHubModels(): Promise<DoneHubApiResponse<DoneHubModelsResult>> {
+  let resp: Response;
+  try {
+    resp = await fetch("/api/v1/done_hub/models", {
+      method: "GET",
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+  } catch (error) {
+    return makeError("NETWORK_ERROR", error instanceof Error ? error.message : "Network request failed");
+  }
+
+  const text = await resp.text();
+  if (!text) {
+    if (resp.ok) return { ok: true, result: { items: [], models: [] } };
+    return makeError("EMPTY_RESPONSE", `Server returned ${resp.status} with empty body`);
+  }
+
+  try {
+    return JSON.parse(text) as DoneHubApiResponse<DoneHubModelsResult>;
   } catch {
     return makeError("PARSE_ERROR", `Invalid JSON response: ${text.slice(0, 100)}`);
   }

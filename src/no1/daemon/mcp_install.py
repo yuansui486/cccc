@@ -14,6 +14,7 @@ from ..kernel.runtime import get_onecolleague_mcp_stdio_command
 from ..util.conv import coerce_bool
 from ..util.fs import read_json
 from ..util.process import resolve_subprocess_argv
+from .opencode_provider import merge_opencode_provider_config
 
 MCP_SERVER_NAME = "onecolleague"
 MCP_SERVER_NAMES = (MCP_SERVER_NAME,)
@@ -242,6 +243,7 @@ def prepare_runtime_mcp_env(runtime: str, env: Dict[str, Any] | None) -> Dict[st
     if str(runtime or "").strip().lower() != "opencode":
         return result
     doc = _read_opencode_inline_config(result)
+    doc = merge_opencode_provider_config(doc, result)
     mcp = doc.get("mcp")
     mcp = dict(mcp) if isinstance(mcp, dict) else {}
     mcp[MCP_SERVER_NAME] = _opencode_onecolleague_entry(result)

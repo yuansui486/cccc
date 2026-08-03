@@ -25,6 +25,7 @@ import {
   mergePresetSecrets,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
+  OPENCODE_FALLBACK_MODELS,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -34,7 +35,7 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
-import { fetchDoneHubPrices } from "../../services/doneHub";
+import { fetchDoneHubModels, fetchDoneHubPrices } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -109,6 +110,10 @@ const SECRETS_PLACEHOLDER: Record<string, { set: string; unset: string }> = {
     unset: "ANTHROPIC_AUTH_TOKEN\nANTHROPIC_BASE_URL",
   },
   codex: {
+    set: 'ONECOLLEAGUE_API_KEY="..."',
+    unset: "ONECOLLEAGUE_API_KEY",
+  },
+  opencode: {
     set: 'ONECOLLEAGUE_API_KEY="..."',
     unset: "ONECOLLEAGUE_API_KEY",
   },
@@ -205,11 +210,15 @@ export function EditActorModal({
   const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
+  const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const secretFetchSeqRef = useRef(0);
   const presetSecretsPrimedRef = useRef("");
   const runtimeAuthPrimedRef = useRef("");
   const doneHubCodexApiKey = useDoneHubStore((state) => String(state.session?.codex_api_key || "").trim());
-  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes, runtimePriceMap), [runtimes, runtimePriceMap]);
+  const runtimeChoiceGroups = useMemo(
+    () => buildRuntimeChoiceGroups(runtimes, runtimePriceMap, opencodeModels),
+    [runtimes, runtimePriceMap, opencodeModels],
+  );
   const modalStateRef = useRef<{
     groupId: string;
     actorId: string;
@@ -391,9 +400,13 @@ export function EditActorModal({
   useEffect(() => {
     if (!isOpen || runtimePriceMap) return;
     let cancelled = false;
-    void fetchDoneHubPrices().then((resp) => {
+    void Promise.all([fetchDoneHubPrices(), fetchDoneHubModels()]).then(([priceResp, modelResp]) => {
       if (cancelled) return;
-      setRuntimePriceMap(resp.ok ? buildRuntimePriceMap(resp.result?.items || []) : {});
+      setRuntimePriceMap(priceResp.ok ? buildRuntimePriceMap(priceResp.result?.items || []) : {});
+      const models = modelResp.ok
+        ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
+        : [];
+      setOpencodeModels(models.length ? models : [...OPENCODE_FALLBACK_MODELS]);
     });
     return () => {
       cancelled = true;
@@ -449,7 +462,10 @@ export function EditActorModal({
       const next = mergePresetUnsetKeys(current, selectedRuntimePreset);
       return next === current ? current : next;
     });
-    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && currentDoneHubCodexApiKey)) {
+    if (
+      selectedRuntimePreset.envPrivate ||
+      (["codex", "opencode"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
+    ) {
       setSecretsPrimed(true);
     }
   }, [
@@ -474,7 +490,7 @@ export function EditActorModal({
       const next = mergeRuntimeAuthSecret(current, runtime, currentDoneHubCodexApiKey);
       return next === current ? current : next;
     });
-    if (runtime === "codex" && currentDoneHubCodexApiKey) {
+    if (["codex", "opencode"].includes(runtime) && currentDoneHubCodexApiKey) {
       setSecretsPrimed(true);
     }
   }, [isOpen, editMode, effectiveLinked, runtime, doneHubCodexApiKey]);
@@ -855,7 +871,10 @@ export function EditActorModal({
                             const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
                             setSecretsSetText((current) => mergePresetSecrets(current, preset, doneHubCodexApiKey));
                             setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
-                            if (preset.envPrivate || (preset.runtime === "codex" && doneHubCodexApiKey)) {
+                            if (
+                              preset.envPrivate ||
+                              (["codex", "opencode"].includes(preset.runtime) && doneHubCodexApiKey)
+                            ) {
                               setSecretsPrimed(true);
                             }
                           }

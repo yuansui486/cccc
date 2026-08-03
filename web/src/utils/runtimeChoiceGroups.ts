@@ -1,5 +1,5 @@
 import { RUNTIME_INFO, SUPPORTED_RUNTIMES, type RuntimeInfo, type SupportedRuntime } from "../types";
-import { RUNTIME_PRESETS, type RuntimePreset } from "./runtimePresets";
+import { runtimePresetsForModels, type RuntimePreset } from "./runtimePresets";
 import { runtimePriceLabel, type RuntimePriceMap } from "./runtimePrices";
 
 export type RuntimeChoiceOption =
@@ -24,11 +24,19 @@ const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }
   opencode: { labelKey: "runtimeGroupOpenCode", labelFallback: "OpenCode" },
 };
 
-export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[], priceMap?: RuntimePriceMap | null): RuntimeChoiceGroup[] {
+export function buildRuntimeChoiceGroups(
+  runtimes: RuntimeInfo[],
+  priceMap?: RuntimePriceMap | null,
+  modelCatalog?: string[],
+): RuntimeChoiceGroup[] {
   const groups = new Map<GroupKey, RuntimeChoiceOption[]>();
   for (const key of GROUP_ORDER) groups.set(key, []);
 
-  for (const preset of RUNTIME_PRESETS) {
+  const includeOpenCodeModels = Array.isArray(modelCatalog) && modelCatalog.length > 0;
+  const presets = runtimePresetsForModels(modelCatalog || []).filter(
+    (preset) => preset.runtime !== "opencode" || includeOpenCodeModels,
+  );
+  for (const preset of presets) {
     const runtimeAvailable = Boolean(runtimes.find((item) => item.name === preset.runtime)?.available);
     groups.get(groupKeyForRuntime(preset.runtime))?.push({
       kind: "preset",
@@ -40,7 +48,7 @@ export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[], priceMap?: Run
   }
 
   for (const runtime of SUPPORTED_RUNTIMES) {
-    if (runtimeHasPreset(runtime)) continue;
+    if (runtimeHasPreset(runtime, presets)) continue;
     if (!VISIBLE_RUNTIME_CHOICES.has(runtime)) continue;
     const runtimeAvailable = Boolean(runtimes.find((item) => item.name === runtime)?.available);
     const selectable = runtimeAvailable;
@@ -66,6 +74,6 @@ function groupKeyForRuntime(runtime: SupportedRuntime): GroupKey {
   return "claude";
 }
 
-function runtimeHasPreset(runtime: SupportedRuntime): boolean {
-  return RUNTIME_PRESETS.some((preset: RuntimePreset) => preset.runtime === runtime);
+function runtimeHasPreset(runtime: SupportedRuntime, presets: RuntimePreset[]): boolean {
+  return presets.some((preset: RuntimePreset) => preset.runtime === runtime);
 }

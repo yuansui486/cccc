@@ -13,6 +13,7 @@ Or via CLI:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -127,6 +128,17 @@ def _make_error(id: Any, code: int, message: str, data: Any = None) -> Dict[str,
     return {"jsonrpc": "2.0", "id": id, "error": error}
 
 
+def _debug_log(message: str, *args: Any) -> None:
+    """Write opt-in MCP diagnostics without contaminating the stdout transport."""
+    if str(os.environ.get("ONECOLLEAGUE_MCP_DEBUG") or "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    try:
+        detail = message % args if args else message
+    except Exception:
+        detail = message
+    print(f"[onecolleague-mcp] {detail}", file=sys.stderr, flush=True)
+
+
 def handle_request(req: Dict[str, Any]) -> Dict[str, Any]:
     """Handle an MCP JSON-RPC request."""
     req_id = req.get("id")
@@ -136,6 +148,16 @@ def handle_request(req: Dict[str, Any]) -> Dict[str, Any]:
     # MCP protocol methods
     if method == "initialize":
         _set_session_client_capabilities(params if isinstance(params, dict) else {})
+        client_info = params.get("clientInfo") if isinstance(params, dict) else {}
+        if not isinstance(client_info, dict):
+            client_info = {}
+        requested_protocol = params.get("protocolVersion") if isinstance(params, dict) else ""
+        _debug_log(
+            "initialize client=%s/%s requested_protocol=%s",
+            str((client_info or {}).get("name") or "unknown"),
+            str((client_info or {}).get("version") or "unknown"),
+            str(requested_protocol or "unknown"),
+        )
         return _make_response(req_id, {
             "protocolVersion": "2024-11-05",
             "capabilities": {
@@ -168,7 +190,20 @@ def handle_request(req: Dict[str, Any]) -> Dict[str, Any]:
         next_cursor = ""
         if cursor + limit < len(tools):
             next_cursor = _encode_cursor(cursor + limit)
-        return _make_response(req_id, {"tools": page, "nextCursor": next_cursor})
+        result: Dict[str, Any] = {"tools": page}
+        # OpenCode's MCP client rejects an empty nextCursor. The MCP spec
+        # treats this field as optional when the page is complete.
+        if next_cursor:
+            result["nextCursor"] = next_cursor
+        _debug_log(
+            "tools/list cursor=%s limit=%s returned=%s total=%s next_cursor=%s",
+            cursor,
+            limit,
+            len(page),
+            len(tools),
+            next_cursor or "<none>",
+        )
+        return _make_response(req_id, result)
 
     # Optional MCP surfaces (return empty to avoid noisy "Method not found" in some runtimes)
     if method == "resources/list":

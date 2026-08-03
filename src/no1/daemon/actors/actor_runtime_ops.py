@@ -81,7 +81,7 @@ def _coerce_string_env(raw: Any) -> Dict[str, str]:
 
 def _apply_runtime_env_compat(runtime: str, env: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(env or {})
-    if str(runtime or "").strip().lower() == "codex":
+    if str(runtime or "").strip().lower() in {"codex", "opencode"}:
         onecolleague_key = str(out.get("ONECOLLEAGUE_API_KEY") or "").strip()
         openai_key = str(out.get("OPENAI_API_KEY") or "").strip()
         if not onecolleague_key and openai_key:

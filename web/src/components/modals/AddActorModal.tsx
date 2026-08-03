@@ -25,6 +25,7 @@ import {
   defaultRuntimePresetFor,
   mergePresetSecrets,
   mergeRuntimeAuthSecret,
+  OPENCODE_FALLBACK_MODELS,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -34,7 +35,7 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
-import { fetchDoneHubPrices } from "../../services/doneHub";
+import { fetchDoneHubModels, fetchDoneHubPrices } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -120,6 +121,9 @@ function secretsPlaceholderForRuntime(runtime: SupportedRuntime): string {
   if (runtime === "codex") {
     return 'ONECOLLEAGUE_API_KEY="..."';
   }
+  if (runtime === "opencode") {
+    return 'ONECOLLEAGUE_API_KEY="..."';
+  }
   if (runtime === "gemini") {
     return 'GOOGLE_API_KEY="..."';
   }
@@ -174,11 +178,15 @@ export function AddActorModal({
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
+  const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const primedRuntimePresetRef = useRef("");
   const primedRuntimeAuthRef = useRef("");
   const primedCommandRef = useRef("");
   const doneHubCodexApiKey = useDoneHubStore((state) => String(state.session?.codex_api_key || "").trim());
-  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes, runtimePriceMap), [runtimes, runtimePriceMap]);
+  const runtimeChoiceGroups = useMemo(
+    () => buildRuntimeChoiceGroups(runtimes, runtimePriceMap, opencodeModels),
+    [runtimes, runtimePriceMap, opencodeModels],
+  );
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
   useEffect(() => {
@@ -190,9 +198,13 @@ export function AddActorModal({
   useEffect(() => {
     if (!isOpen || runtimePriceMap) return;
     let cancelled = false;
-    void fetchDoneHubPrices().then((resp) => {
+    void Promise.all([fetchDoneHubPrices(), fetchDoneHubModels()]).then(([priceResp, modelResp]) => {
       if (cancelled) return;
-      setRuntimePriceMap(resp.ok ? buildRuntimePriceMap(resp.result?.items || []) : {});
+      setRuntimePriceMap(priceResp.ok ? buildRuntimePriceMap(priceResp.result?.items || []) : {});
+      const models = modelResp.ok
+        ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
+        : [];
+      setOpencodeModels(models.length ? models : [...OPENCODE_FALLBACK_MODELS]);
     });
     return () => {
       cancelled = true;
@@ -244,7 +256,10 @@ export function AddActorModal({
     if (nextSecrets !== newActorSecretsSetText) {
       setNewActorSecretsSetText(nextSecrets);
     }
-    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && currentDoneHubCodexApiKey)) {
+    if (
+      selectedRuntimePreset.envPrivate ||
+      (["codex", "opencode"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
+    ) {
       setShowAdvancedActor(true);
     }
   }, [
@@ -271,7 +286,7 @@ export function AddActorModal({
     if (nextSecrets !== newActorSecretsSetText) {
       setNewActorSecretsSetText(nextSecrets);
     }
-    if (newActorRuntime === "codex" && currentDoneHubCodexApiKey) {
+    if (["codex", "opencode"].includes(newActorRuntime) && currentDoneHubCodexApiKey) {
       setShowAdvancedActor(true);
     }
   }, [
@@ -487,7 +502,10 @@ export function AddActorModal({
                                 setNewActorSecretsSetText(
                                   mergePresetSecrets(newActorSecretsSetText, preset, doneHubCodexApiKey)
                                 );
-                                if (preset.envPrivate || (preset.runtime === "codex" && doneHubCodexApiKey)) {
+                                if (
+                                  preset.envPrivate ||
+                                  (["codex", "opencode"].includes(preset.runtime) && doneHubCodexApiKey)
+                                ) {
                                   setShowAdvancedActor(true);
                                 }
                               }

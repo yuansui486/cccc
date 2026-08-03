@@ -1,15 +1,6 @@
 import type { RuntimeInfo, SupportedRuntime } from "../types";
 
-export type RuntimePresetId =
-  | "model:deepseek-v4-pro-claude"
-  | "model:qwen3.6-max-claude"
-  | "model:qwen3.6-plus-claude"
-  | "model:qwen3.6-flash-claude"
-  | "model:glm-4.7-claude"
-  | "model:doubao-code-claude"
-  | "model:gpt-5.4-codex"
-  | "model:gpt-5.5-codex"
-  | "model:kimi-k2.6-kimi";
+export type RuntimePresetId = string;
 
 export type RuntimePreset = {
   id: RuntimePresetId;
@@ -26,11 +17,25 @@ export type ClaudeReasoningEffort = "" | "low" | "medium" | "high" | "xhigh" | "
 
 const CODEX_REASONING_EFFORT_KEY = "model_reasoning_effort";
 const CLAUDE_LEGACY_EFFORT_ENV_KEY = "CLAUDE_CODE_EFFORT_LEVEL";
+export const OPENCODE_PROVIDER_ID = "onecolleague";
+
+export const OPENCODE_FALLBACK_MODELS = [
+  "gpt-5.4",
+  "gpt-5.5",
+  "deepseek-v4-pro",
+  "deepseek-v4-flash",
+  "qwen3.6-plus",
+  "qwen3.6-flash",
+  "GLM-4.7",
+  "doubao-seed-2-0-pro-260215",
+  "kimi-k2.6",
+] as const;
 
 const FALLBACK_RUNTIME_COMMANDS: Partial<Record<SupportedRuntime, string[]>> = {
   claude: ["claude", "--dangerously-skip-permissions"],
   codex: ["codex", "-c", "shell_environment_policy.inherit=all", "--dangerously-bypass-approvals-and-sandbox", "--search"],
   kimi: ["kimi", "--yolo"],
+  opencode: ["opencode"],
 };
 
 export const RUNTIME_PRESETS: RuntimePreset[] = [
@@ -140,12 +145,67 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
       KIMI_MODEL_NAME: "kimi-k2.6",
     },
   },
+  ...[
+    ["gpt-5.4", "gpt5.4"],
+    ["gpt-5.5", "gpt5.5"],
+    ["deepseek-v4-pro", "deepseek-v4-pro"],
+    ["deepseek-v4-flash", "deepseek-v4-flash"],
+    ["qwen3.6-plus", "qwen3.6-plus"],
+    ["qwen3.6-flash", "qwen3.6-flash"],
+  ].map(([model, label]) => ({
+    id: `model:opencode:${encodeURIComponent(model)}`,
+    label,
+    runtime: "opencode" as SupportedRuntime,
+    model,
+  })),
 ];
+
+export function opencodeRuntimePresetId(model: string): RuntimePresetId {
+  return `model:opencode:${encodeURIComponent(String(model || "").trim())}`;
+}
+
+export function opencodeRuntimePreset(model: string, label?: string): RuntimePreset | null {
+  const normalized = String(model || "").trim();
+  if (!normalized) return null;
+  return {
+    id: opencodeRuntimePresetId(normalized),
+    label: String(label || normalized).trim() || normalized,
+    runtime: "opencode",
+    model: normalized,
+  };
+}
+
+export function runtimePresetsForModels(models: string[]): RuntimePreset[] {
+  const normalizedModels = models
+    .map((model) => String(model || "").trim())
+    .filter(Boolean);
+  if (!normalizedModels.length) return [...RUNTIME_PRESETS];
+
+  const seen = new Set<string>();
+  const dynamic = normalizedModels
+    .filter((model) => {
+      const key = model.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((model) => opencodeRuntimePreset(model))
+    .filter((preset): preset is RuntimePreset => Boolean(preset));
+  return [...RUNTIME_PRESETS.filter((preset) => preset.runtime !== "opencode"), ...dynamic];
+}
 
 export function runtimePresetById(id: string): RuntimePreset | null {
   const needle = String(id || "").trim();
   if (!needle) return null;
-  return RUNTIME_PRESETS.find((preset) => preset.id === needle) || null;
+  const existing = RUNTIME_PRESETS.find((preset) => preset.id === needle);
+  if (existing) return existing;
+  const prefix = "model:opencode:";
+  if (!needle.startsWith(prefix)) return null;
+  try {
+    return opencodeRuntimePreset(decodeURIComponent(needle.slice(prefix.length)));
+  } catch {
+    return null;
+  }
 }
 
 export function defaultRuntimePresetFor(runtime: string): RuntimePreset | null {
@@ -173,6 +233,12 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
     if (model === "gpt-5.4") return "model:gpt-5.4-codex";
     if (model === "gpt-5.5") return "model:gpt-5.5-codex";
   }
+  if (normalizedRuntime === "opencode") {
+    const modelId = model.startsWith(`${OPENCODE_PROVIDER_ID}/`)
+      ? model.slice(OPENCODE_PROVIDER_ID.length + 1)
+      : model;
+    if (modelId) return opencodeRuntimePresetId(modelId);
+  }
   return "";
 }
 
@@ -192,6 +258,9 @@ export function commandForRuntimePreset(preset: RuntimePreset, runtimeInfo?: Run
   }
   if (preset.runtime === "codex" && preset.model) {
     return withCommandModel(command, preset.model, "-m").join(" ");
+  }
+  if (preset.runtime === "opencode" && preset.model) {
+    return withCommandModel(command, `${OPENCODE_PROVIDER_ID}/${preset.model}`, "-m").join(" ");
   }
   return command.join(" ");
 }
@@ -342,7 +411,7 @@ export function knownPresetSecretKeysForRuntime(runtime: string): Set<string> {
     for (const key of Object.keys(preset.envPrivate || {})) out.add(key);
   }
   if (runtime === "claude") out.add("ANTHROPIC_AUTH_TOKEN");
-  if (runtime === "codex") {
+  if (runtime === "codex" || runtime === "opencode") {
     out.add("ONECOLLEAGUE_API_KEY");
     out.add("OPENAI_API_KEY");
   }
@@ -372,7 +441,7 @@ function authSecretKeyForRuntimePreset(preset: RuntimePreset): string {
 }
 
 function authSecretKeyForRuntime(runtime: string): string {
-  if (String(runtime || "").trim() === "codex") return "ONECOLLEAGUE_API_KEY";
+  if (["codex", "opencode"].includes(String(runtime || "").trim())) return "ONECOLLEAGUE_API_KEY";
   return "";
 }
 
