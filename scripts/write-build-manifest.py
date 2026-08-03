@@ -25,6 +25,7 @@ def main() -> int:
     parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument("--build-id", default="")
     parser.add_argument("--commit", default="")
+    parser.add_argument("--tag", default="")
     args = parser.parse_args()
 
     artifact = args.artifact.resolve()
@@ -37,6 +38,7 @@ def main() -> int:
         "version": args.version,
         "buildId": args.build_id,
         "commit": args.commit,
+        "tag": args.tag,
         "artifact": {
             "name": artifact.name,
             "size": artifact.stat().st_size,
