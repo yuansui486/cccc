@@ -14,6 +14,10 @@ from ..computer_control.compiler import compile_or_raise
 from ..computer_control.lease import LeaseConflict
 from ..computer_control.elements import normalize_snapshot
 from ..computer_control.models import WorkflowDefinition
+from ..computer_control.platform_support import (
+    computer_control_availability,
+    computer_control_supported,
+)
 from ..computer_control.authorization import (
     RecordingStartClaim,
     RunStartClaim,
@@ -59,6 +63,8 @@ def _ok(value: Any) -> Tuple[DaemonResponse, bool]:
 def start_daemon_computer_control(home: Path, *, lock_handle: Any) -> Any:
     """Start daemon-owned recovery after the daemon lifecycle lock is held."""
 
+    if not computer_control_supported():
+        return None
     return start_daemon_services(home, lock_handle=lock_handle)
 
 
@@ -742,6 +748,13 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
             "permission_denied",
             "computer control is restricted to trusted local surfaces",
             details={"caller_surface": caller_surface or "missing"},
+        )
+    availability = computer_control_availability()
+    if not availability["supported"]:
+        return _error(
+            "computer_control_platform_unsupported",
+            "Computer control is only supported on Windows",
+            details={**availability, "retryable": False},
         )
     if not group_id:
         return _error("invalid_request", "group_id is required")

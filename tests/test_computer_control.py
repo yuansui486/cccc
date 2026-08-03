@@ -2484,6 +2484,111 @@ class TestComputerControl(unittest.TestCase):
                     recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
                     self.assertEqual(recovered["status"], "start_failed")
 
+    def test_recording_restart_converges_legacy_recording_without_authority(self):
+        expected = {
+            "initializing": ("start_failed", "failure_reason"),
+            "exploring": ("start_failed", "failure_reason"),
+            "terminating": ("aborted", "abort_reason"),
+        }
+        for status, (terminal_status, reason_field) in expected.items():
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
+                home = Path(td)
+                group = create_group(load_registry(), title=f"recording-orphan-{status}", topic="")
+                store = WorkflowStore(home)
+                requests = ComputerRequestStore(store)
+                request_id = f"req-orphan-{status}"
+                requests.append(
+                    group.group_id,
+                    {
+                        "request_id": request_id,
+                        "actor_id": "foreman",
+                        "mode": "create_and_run",
+                        "status": "accepted",
+                        "created_ts": time.time(),
+                    },
+                )
+                authorities, start_claim = self._recording_security(
+                    home, requests, group.group_id, request_id, "foreman"
+                )
+                lease = ComputerControlLease(home)
+                first = RecordingStore(home, store, requests, authorities, lease, Mock())
+                started = first.start(
+                    group.group_id,
+                    actor_id="foreman",
+                    request_id=request_id,
+                    start_claim=start_claim,
+                    name=f"orphan {status}",
+                )
+                recording_id = started["recording_id"]
+                value = first._read(group.group_id, recording_id, actor_id="foreman")
+                value["status"] = status
+                first._write(group.group_id, value)
+                authorities._path(group.group_id, "recording", recording_id).unlink()
+
+                restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+                self._recover_recordings(home, restarted)
+                recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
+
+                self.assertEqual(recovered["status"], terminal_status)
+                self.assertEqual(
+                    recovered[reason_field],
+                    "service_restart_missing_authority",
+                )
+                self.assertIsNone(
+                    authorities.persisted_record_snapshot(group.group_id, recording_id)
+                )
+                self.assertFalse(lease.status()["active"])
+
+                self._recover_recordings(home, restarted)
+                self.assertEqual(
+                    restarted._read(group.group_id, recording_id, actor_id="foreman")["status"],
+                    terminal_status,
+                )
+
+    def test_recording_restart_rejects_malformed_existing_authority(self):
+        with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-malformed-authority", topic="")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-malformed-authority",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-malformed-authority", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            first = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = first.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-malformed-authority",
+                start_claim=start_claim,
+                name="malformed authority",
+            )
+            authority_path = authorities._path(
+                group.group_id,
+                "recording",
+                started["recording_id"],
+            )
+            authority_path.write_text("{invalid", encoding="utf-8")
+
+            restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+            with self.assertRaisesRegex(
+                PermissionError,
+                "recording authority cannot recover this failed start",
+            ):
+                self._recover_recordings(home, restarted)
+            self.assertTrue(authority_path.exists())
+            self.assertTrue(lease.status()["active"])
+
     def test_recording_restart_does_not_release_other_group_with_same_resource_id(self):
         with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):
             home = Path(td)

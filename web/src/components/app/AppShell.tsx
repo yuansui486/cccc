@@ -7,6 +7,8 @@ import { ChatTab } from "../../pages/chat";
 import type { Actor, GroupContext, GroupDoc, GroupMeta, GroupRuntimeStatus, TextScale } from "../../types";
 import { SIDEBAR_COLLAPSED_WIDTH } from "../../stores/useUIStore";
 import { CHAT_TAB, COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+import type { ComputerControlAvailability } from "../../services/api/computerControl";
+import { Laptop } from "lucide-react";
 const ComputerControlWorkspace = lazy(() => import("../../pages/computerControl/ComputerControlStandaloneApp").then((module) => ({ default: module.ComputerControlWorkspace })));
 
 type AppShellProps = {
@@ -29,6 +31,7 @@ type AppShellProps = {
     quota: number | null;
     errorMessage: string;
   };
+  computerControlAvailability: ComputerControlAvailability | null;
   isTransitioning: boolean;
   sidebarOpen: boolean;
   sidebarCollapsed: boolean;
@@ -109,6 +112,7 @@ export function AppShell({
   activeTab,
   busy,
   doneHub,
+  computerControlAvailability,
   isTransitioning,
   sidebarOpen,
   sidebarCollapsed,
@@ -233,6 +237,7 @@ export function AppShell({
         theme={theme}
         textScale={textScale}
         doneHub={doneHub}
+        computerControlAvailability={computerControlAvailability}
         groupDoc={groupDoc}
         selectedGroupRunning={selectedGroupRunning}
         selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
@@ -343,9 +348,25 @@ export function AppShell({
           </div>
 
           <div className={activeTab === COMPUTER_CONTROL_TAB ? "absolute inset-0 flex min-h-0 flex-col" : "hidden"} aria-hidden={activeTab !== COMPUTER_CONTROL_TAB}>
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">正在加载电脑控制</div>}>
-              <ComputerControlWorkspace activeTab={activeTab} groupId={selectedGroupId} groupLabelById={groupLabelById} />
-            </Suspense>
+            {computerControlAvailability?.supported ? (
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">正在加载电脑控制</div>}>
+                <ComputerControlWorkspace activeTab={activeTab} groupId={selectedGroupId} groupLabelById={groupLabelById} />
+              </Suspense>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                <Laptop size={28} className="text-[var(--color-text-tertiary)]" />
+                <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                  {!computerControlAvailability
+                    ? "正在检查电脑控制可用性"
+                    : computerControlAvailability.reason === "windows_only"
+                      ? "电脑控制仅支持 Windows"
+                      : "电脑控制暂不可用"}
+                </div>
+                {computerControlAvailability?.platform && computerControlAvailability.platform !== "unknown" ? (
+                  <div className="text-xs text-[var(--color-text-tertiary)]">当前系统：{computerControlAvailability.platform}</div>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <div

@@ -8,6 +8,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from no1.ports.web.routes.computer_control import create_routers
 from no1.ports.web.schemas import RouteContext
 
@@ -46,6 +49,39 @@ def _endpoint(routers, method: str, suffix: str):
 
 
 class TestComputerControlWebOwnerSurface(unittest.TestCase):
+    def test_non_windows_availability_remains_readable_and_other_routes_are_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as td, patch(
+            "no1.ports.web.routes.computer_control._service",
+            return_value=SimpleNamespace(),
+        ), patch(
+            "no1.ports.web.routes.computer_control.require_admin",
+            return_value=object(),
+        ), patch(
+            "no1.computer_control.platform_support._platform_name",
+            return_value="darwin",
+        ):
+            app = FastAPI()
+            for router in create_routers(_context(Path(td))):
+                app.include_router(router)
+            with TestClient(app) as client:
+                availability = client.get("/api/v1/computer-control/availability")
+                setup = client.get("/api/v1/computer-control/setup/status")
+
+        self.assertEqual(availability.status_code, 200)
+        self.assertEqual(
+            availability.json()["result"],
+            {
+                "supported": False,
+                "platform": "darwin",
+                "reason": "windows_only",
+            },
+        )
+        self.assertEqual(setup.status_code, 409)
+        self.assertEqual(
+            setup.json()["detail"]["code"],
+            "computer_control_platform_unsupported",
+        )
+
     def test_web_routes_have_no_passive_workflow_or_request_writers(self) -> None:
         from no1.ports.web.routes.computer_control import create_routers
 

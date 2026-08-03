@@ -9,6 +9,7 @@ import {
   latestComputerControlObservation,
   newestComputerControlObservation,
   setupStepLabel,
+  setupErrorMessage,
   shouldRefreshComputerControlAfterSseTransition,
 } from "../../src/pages/computerControl/statusPresentation";
 
@@ -62,6 +63,22 @@ describe("computer control session presentation", () => {
     expect(formatSetupDiagnostics(setup)).toContain("setup_123");
     expect(formatSetupDiagnostics(setup)).toContain("https://pypi.tuna.tsinghua.edu.cn/simple");
     expect(computerControlSessionDetails(setup).startedAt).toBeNull();
+  });
+
+  it("distinguishes daemon recovery failures from an installation that has not started", () => {
+    const setup = {
+      phase: "service_unavailable",
+      version: "",
+      error: {
+        code: "computer_control_not_ready",
+        message: "computer-control daemon service is not ready",
+      },
+    };
+
+    expect(setupStepLabel("", setup.phase)).toBe("后台服务恢复失败");
+    expect(setupErrorMessage(setup.error.message, setup.phase)).toContain("后台服务恢复失败");
+    expect(formatSetupDiagnostics(setup)).toContain("状态：service_unavailable");
+    expect(formatSetupDiagnostics(setup)).not.toContain("阶段：等待安装");
   });
 
   it("requests a full refresh after SSE reconnects while the page is active", () => {
@@ -120,6 +137,28 @@ describe("computer control session API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/computer-control/setup/restart-session",
       expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("loads host availability before starting Windows-MCP", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        result: { supported: false, platform: "darwin", reason: "windows_only" },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", { location: { search: "" } });
+    vi.stubGlobal("sessionStorage", { getItem: () => null, setItem: () => undefined, removeItem: () => undefined });
+
+    const response = await computerControlApi.availability();
+
+    expect(response.ok && response.result.supported).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/computer-control/availability",
+      expect.any(Object),
     );
   });
 

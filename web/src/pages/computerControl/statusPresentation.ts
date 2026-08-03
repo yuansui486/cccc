@@ -2,6 +2,9 @@ import type { ComputerSetup } from "../../services/api/computerControl";
 
 export function setupErrorMessage(message: unknown, phase = ""): string {
   const text = String(message || "");
+  if (/computer-control daemon service is not ready|computer_control_not_ready/i.test(text)) {
+    return "电脑控制后台服务恢复失败，请重启 OneColleague 后重试。";
+  }
   if (/9009|python(?:\.exe|\.EXE)?.*未找到|not found.*python/i.test(text)) {
     return "找不到可用的 Python 命令（Windows 错误 9009）。请安装 Python 3.9+，勾选“Add Python to PATH”或安装 Python Launcher，然后点击“修复”。";
   }
@@ -39,6 +42,8 @@ export function setupStepLabel(step: unknown, phase = ""): string {
     failed: "安装失败",
     cancelled: "安装已取消",
     not_started: "等待安装",
+    loading: "正在读取状态",
+    service_unavailable: "后台服务恢复失败",
   } as Record<string, string>)[phase] || key || "等待安装";
 }
 

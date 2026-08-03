@@ -1,5 +1,11 @@
 import { apiJson, type ApiResponse } from "./base";
 
+export type ComputerControlAvailability = {
+  supported: boolean;
+  platform: string;
+  reason: string;
+};
+
 export type ComputerSetup = {
   phase: string;
   setup_phase?: string;
@@ -188,6 +194,7 @@ function ensureInBackground(): Promise<ApiResponse<ComputerSetup>> {
 }
 
 export const computerControlApi = {
+  availability: () => apiJson<ComputerControlAvailability>(`${root}/availability`),
   ensure: (force = false) => apiJson<ComputerSetup>(`${root}/setup/ensure?force=${force}`, { method: "POST" }),
   ensureInBackground,
   status: () => apiJson<ComputerSetup>(`${root}/setup/status`),

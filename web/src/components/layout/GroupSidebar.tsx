@@ -55,6 +55,7 @@ import { SortableGroupItem } from "./SortableGroupItem";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../stores/useUIStore";
 import { Laptop } from "lucide-react";
 import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+import type { ComputerControlAvailability } from "../../services/api/computerControl";
 
 export interface GroupSidebarProps {
   orderedGroups: GroupMeta[];
@@ -72,6 +73,7 @@ export interface GroupSidebarProps {
     quota: number | null;
     errorMessage: string;
   };
+  computerControlAvailability: ComputerControlAvailability | null;
   groupDoc: GroupDoc | null;
   selectedGroupRunning: boolean;
   selectedGroupRuntimeStatus: GroupRuntimeStatus | null;
@@ -118,6 +120,7 @@ export function GroupSidebar({
   theme,
   textScale,
   doneHub: _doneHub,
+  computerControlAvailability,
   groupDoc,
   selectedGroupRunning,
   selectedGroupRuntimeStatus,
@@ -176,6 +179,14 @@ export function GroupSidebar({
   const [groupTitleDraft, setGroupTitleDraft] = useState("");
   const [groupTitleSaving, setGroupTitleSaving] = useState(false);
   const archivedSet = useMemo(() => new Set(archivedGroupIds), [archivedGroupIds]);
+  const computerControlSupported = computerControlAvailability?.supported === true;
+  const computerControlTitle = !computerControlAvailability
+    ? "正在检查电脑控制可用性"
+    : computerControlSupported
+      ? "电脑控制"
+      : computerControlAvailability.reason === "windows_only"
+        ? "电脑控制仅支持 Windows"
+        : "电脑控制暂不可用";
   const workingGroups = useMemo(
     () => orderedGroups.filter((g) => !archivedSet.has(String(g.group_id || "").trim())),
     [archivedSet, orderedGroups]
@@ -747,10 +758,11 @@ export function GroupSidebar({
 
           <button
             type="button"
-            onClick={() => handleTabSelect(COMPUTER_CONTROL_TAB)}
-            title="电脑控制"
-            aria-label="电脑控制"
-            className={classNames("relative flex h-11 w-11 items-center justify-center rounded-xl transition-all", activeTab === COMPUTER_CONTROL_TAB ? "glass-group-item-active glow-pulse" : "glass-group-item hover:scale-105")}
+            onClick={() => computerControlSupported && handleTabSelect(COMPUTER_CONTROL_TAB)}
+            disabled={!computerControlSupported}
+            title={computerControlTitle}
+            aria-label={computerControlTitle}
+            className={classNames("relative flex h-11 w-11 items-center justify-center rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-40", activeTab === COMPUTER_CONTROL_TAB ? "glass-group-item-active glow-pulse" : "glass-group-item hover:scale-105")}
           >
             <Laptop size={18} />
           </button>
@@ -1093,9 +1105,13 @@ export function GroupSidebar({
             </button>
             <button
               type="button"
-              onClick={() => handleTabSelect(COMPUTER_CONTROL_TAB)}
-              className={navButtonClass(activeTab === COMPUTER_CONTROL_TAB)}
-              title="电脑控制"
+              onClick={() => computerControlSupported && handleTabSelect(COMPUTER_CONTROL_TAB)}
+              disabled={!computerControlSupported}
+              className={classNames(
+                navButtonClass(activeTab === COMPUTER_CONTROL_TAB),
+                "disabled:cursor-not-allowed disabled:opacity-40",
+              )}
+              title={computerControlTitle}
             >
               <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><Laptop size={22} strokeWidth={1.8} /></span>
               <span className="min-w-0 flex-1 truncate">电脑控制</span>
@@ -1109,6 +1125,8 @@ export function GroupSidebar({
     activeTaskCount,
     actors,
     busy,
+    computerControlSupported,
+    computerControlTitle,
     getActorIndicator,
     groupDoc,
     isCollapsed,

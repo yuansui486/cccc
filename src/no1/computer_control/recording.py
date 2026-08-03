@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import base64
+import logging
 import threading
 import time
 import uuid
@@ -24,6 +25,9 @@ from .risk import classify_tool
 from .runtime import WorkflowRunner
 from .storage import WorkflowStore
 from .elements import element_at_point, element_center, locator_from_element, normalize_snapshot, resolve_locator
+
+
+logger = logging.getLogger(__name__)
 
 
 class RecordingStore:
@@ -384,9 +388,22 @@ class RecordingStore:
             ):
                 continue
             actor_id = str(value.get("actor_id") or "")
-            authority_state = str(
-                self.authorities.persisted_record(group_id, recording_id).get("state") or ""
+            authority_record = self.authorities.persisted_record_snapshot(
+                group_id,
+                recording_id,
             )
+            if authority_record is None:
+                self._finish_recovered_orphan(
+                    value,
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    recording_id=recording_id,
+                    terminal_status=(
+                        "aborted" if value.get("status") == "terminating" else "start_failed"
+                    ),
+                )
+                continue
+            authority_state = str(authority_record.get("state") or "")
             if value.get("status") == "initializing":
                 self._finish_recovered_stop(
                     value,
@@ -429,6 +446,36 @@ class RecordingStore:
                 }
             )
             self._write(group_id, value)
+
+    def _finish_recovered_orphan(
+        self,
+        value: Dict[str, Any],
+        *,
+        group_id: str,
+        actor_id: str,
+        recording_id: str,
+        terminal_status: str,
+    ) -> None:
+        previous_status = str(value.get("status") or "")
+        self._release_recovered_recording_lease(group_id, actor_id, recording_id)
+        value.update({"status": terminal_status, "updated_at": time.time()})
+        if terminal_status == "aborted":
+            value["abort_reason"] = str(
+                value.get("abort_reason") or "service_restart_missing_authority"
+            )
+        else:
+            value["failure_reason"] = str(
+                value.get("failure_reason") or "service_restart_missing_authority"
+            )
+        self._write(group_id, value)
+        logger.warning(
+            "Recovered orphan computer-control recording without authority: "
+            "group_id=%s recording_id=%s previous_status=%s terminal_status=%s",
+            group_id,
+            recording_id,
+            previous_status,
+            terminal_status,
+        )
 
     def _finish_recovered_stop(
         self,

@@ -108,6 +108,8 @@ function phaseLabel(phase: string): string {
         failed: "安装失败",
         cancelled: "已取消",
         not_started: "等待安装",
+        loading: "正在读取状态",
+        service_unavailable: "后台服务不可用",
       } as Record<string, string>
     )[phase] || phase
   );
@@ -150,6 +152,10 @@ function runStatusLabel(status: unknown): string {
 function friendlyError(message: unknown): string {
   const text = String(message || "");
   const rules: Array<[RegExp, string]> = [
+    [
+      /computer-control daemon service is not ready|computer_control_not_ready/i,
+      "电脑控制后台服务恢复失败，请重启 OneColleague 后重试。",
+    ],
     [
       /workflow version is not trusted|workflow_not_trusted/i,
       "当前工作流版本尚未发布并信任。",
@@ -239,7 +245,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   const sseStatus = useUIStore((state) => state.sseStatus);
   const sseDisconnectedSinceRefresh = React.useRef(sseStatus === "disconnected");
   const [setup, setSetup] = useState<ComputerSetup>({
-    phase: "not_started",
+    phase: "loading",
     version: "",
   });
   const [setupPollError, setSetupPollError] = useState("");
@@ -248,6 +254,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   const setupLogRef = React.useRef<HTMLPreElement | null>(null);
   const setupLogPinnedRef = React.useRef(true);
   const setupPhaseRef = React.useRef(setup.phase);
+  const setupStatusLoadedRef = React.useRef(false);
   const [tools, setTools] = useState<ToolCatalogItem[]>([]);
   const [toolSearch, setToolSearch] = useState("");
   const [workflows, setWorkflows] = useState<WorkflowManifest[]>([]);
@@ -278,6 +285,22 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   const [pickerStatus, setPickerStatus] = useState("");
   const [pickerSession, setPickerSession] = useState<ElementPickerSession | null>(null);
 
+  const applySetupStatus = useCallback((value: ComputerSetup) => {
+    setupStatusLoadedRef.current = true;
+    setSetup(value);
+    setSetupPollError("");
+  }, []);
+
+  const markSetupStatusUnavailable = useCallback((message: unknown) => {
+    const friendly = friendlyError(message);
+    setSetupPollError(friendly);
+    if (setupStatusLoadedRef.current) return;
+    setSetup((current) => ({
+      ...current,
+      phase: "service_unavailable",
+    }));
+  }, []);
+
   const refresh = useCallback(async () => {
     refreshQueued.current = true;
     if (refreshInFlight.current) return refreshInFlight.current;
@@ -304,10 +327,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           continue;
         }
         if (status.ok) {
-          setSetup(status.result);
-          setSetupPollError("");
+          applySetupStatus(status.result);
         } else {
-          setSetupPollError(friendlyError(status.error.message));
+          markSetupStatusUnavailable(status.error.message);
         }
         if (workflowResponse.ok) {
           setWorkflows(workflowResponse.result.workflows || []);
@@ -325,7 +347,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     } finally {
       if (refreshInFlight.current === task) refreshInFlight.current = null;
     }
-  }, []);
+  }, [applySetupStatus, markSetupStatusUnavailable]);
 
   const loadCatalog = useCallback(async () => {
     const response = await computerControlApi.catalog();
@@ -339,11 +361,10 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       setBusy("ensure");
       const response = await computerControlApi.ensure();
       if (!cancelled && response.ok) {
-        setSetup(response.result);
-        setSetupPollError("");
+        applySetupStatus(response.result);
         if (response.result.phase === "ready") await loadCatalog();
       } else if (!cancelled && !response.ok) {
-        setSetupPollError(friendlyError(response.error.message));
+        markSetupStatusUnavailable(response.error.message);
       }
       if (!cancelled) setBusy("");
       await refresh();
@@ -351,22 +372,21 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     return () => {
       cancelled = true;
     };
-  }, [loadCatalog, refresh]);
+  }, [applySetupStatus, loadCatalog, markSetupStatusUnavailable, refresh]);
 
   useEffect(() => {
     if (!setup.in_progress && ["ready", "failed", "cancelled"].includes(setup.phase)) return;
     const timer = window.setInterval(() => {
       void computerControlApi.status().then((response) => {
         if (response.ok) {
-          setSetup(response.result);
-          setSetupPollError("");
+          applySetupStatus(response.result);
           if (response.result.phase === "ready" && tools.length === 0)
             void loadCatalog();
-        } else setSetupPollError(friendlyError(response.error.message));
+        } else markSetupStatusUnavailable(response.error.message);
       });
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [loadCatalog, setup.in_progress, setup.phase, tools.length]);
+  }, [applySetupStatus, loadCatalog, markSetupStatusUnavailable, setup.in_progress, setup.phase, tools.length]);
 
   useEffect(() => {
     if (!setup.in_progress) return undefined;
@@ -800,6 +820,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             ? await computerControlApi.restartSession()
           : await computerControlApi.ensure();
     if (response.ok) {
+      setupStatusLoadedRef.current = true;
       setSetup((current) => ({
         ...current,
         ...response.result,
@@ -824,11 +845,10 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     setBusy("refresh-setup");
     const response = await computerControlApi.status();
     if (response.ok) {
-      setSetup(response.result);
-      setSetupPollError("");
+      applySetupStatus(response.result);
       setMessage("Windows-MCP 安装状态已刷新");
     } else {
-      setSetupPollError(friendlyError(response.error.message));
+      markSetupStatusUnavailable(response.error.message);
     }
     setBusy("");
   }
@@ -838,8 +858,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     setBusy("cancel-setup");
     const response = await computerControlApi.cancelSetup();
     if (response.ok) {
-      setSetup(response.result);
-      setSetupPollError("");
+      applySetupStatus(response.result);
       setMessage("Windows-MCP 安装已取消");
     } else setMessage(friendlyError(response.error.message));
     setBusy("");

@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { DropOverlay } from "./components/DropOverlay";
 const AppModals = lazy(() => import("./components/AppModals").then((m) => ({ default: m.AppModals })));
 import { DoneHubLoginGate } from "./components/DoneHubLoginGate";
@@ -23,7 +23,7 @@ import { useAppTabState } from "./hooks/useAppTabState";
 import * as api from "./services/api";
 import { getEffectiveComposerDestGroupId } from "./stores/useComposerStore";
 import { getChatSession } from "./stores/useUIStore";
-import { computerControlApi } from "./services/api/computerControl";
+import { computerControlApi, type ComputerControlAvailability } from "./services/api/computerControl";
 import { buildReplyComposerState } from "./utils/chatReply";
 import { subscribeCapabilityChanged } from "./utils/capabilityEvents";
 import { filterVisibleRuntimeActors } from "./utils/runtimeVisibility";
@@ -131,6 +131,8 @@ export default function App() {
   const refreshDoneHub = useDoneHubStore((state) => state.refresh);
   const doneHubHasSession = Boolean(doneHubSession);
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
+  const [computerControlAvailability, setComputerControlAvailability] =
+    useState<ComputerControlAvailability | null>(null);
 
   const {
     activeGroupId,
@@ -436,14 +438,27 @@ export default function App() {
     };
   }, [doneHubHasSession, doneHubInitialized, refreshDoneHub]);
 
-  // Warm Windows-MCP in the background as soon as the main application is
-  // usable. The computer-control page still owns visible diagnostics and
-  // recovery actions, but opening that page is no longer required to start
-  // installation.
   React.useEffect(() => {
     if (!doneHubInitialized || (!doneHubConnected && !doneHubHasSession)) return;
-    void computerControlApi.ensureInBackground().catch(() => undefined);
+    let cancelled = false;
+    void computerControlApi.availability().then((response) => {
+      if (cancelled) return;
+      setComputerControlAvailability(
+        response.ok
+          ? response.result
+          : { supported: false, platform: "unknown", reason: "availability_unavailable" },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [doneHubConnected, doneHubHasSession, doneHubInitialized]);
+
+  // Warm Windows-MCP only after the server confirms the host is Windows.
+  React.useEffect(() => {
+    if (!computerControlAvailability?.supported) return;
+    void computerControlApi.ensureInBackground().catch(() => undefined);
+  }, [computerControlAvailability?.supported]);
 
   const doneHub = useMemo(() => ({
     status: doneHubStatus,
@@ -480,6 +495,7 @@ export default function App() {
         activeTab={activeTab}
         busy={busy}
         doneHub={doneHub}
+        computerControlAvailability={computerControlAvailability}
         isTransitioning={isTransitioning}
         sidebarOpen={sidebarOpen}
         sidebarCollapsed={sidebarCollapsed}

@@ -10,6 +10,17 @@ import pytest
 _SESSION_HOME: tempfile.TemporaryDirectory | None = None
 
 
+@pytest.fixture(autouse=True)
+def _computer_control_tests_use_windows_platform(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """Core computer-control tests exercise the Windows-only implementation on any CI host."""
+
+    if not Path(str(request.path)).name.startswith("test_computer_control"):
+        return
+    from no1.computer_control import platform_support
+
+    monkeypatch.setattr(platform_support, "_platform_name", lambda: "win32")
+
+
 def pytest_configure(config: pytest.Config) -> None:
     configured = str(os.environ.get("ONECOLLEAGUE_HOME") or os.environ.get("CCCC_HOME") or "").strip()
     if not configured:

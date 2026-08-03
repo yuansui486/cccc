@@ -1255,6 +1255,47 @@ else:
         self.assertFalse(response.ok)
         self.assertEqual(response.error.code, "computer_control_not_ready")
 
+    def test_non_windows_daemon_rejects_computer_control_before_service_access(self) -> None:
+        with patch(
+            "no1.computer_control.platform_support._platform_name",
+            return_value="darwin",
+        ), patch(
+            "no1.daemon.computer_control_ops.get_services",
+        ) as get_service:
+            response, _ = try_handle_computer_control_op(
+                "computer_control",
+                {
+                    "command": "catalog",
+                    "group_id": "g",
+                    "actor_id": "user",
+                    "caller_surface": "local_web",
+                },
+            )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(
+            response.error.code,
+            "computer_control_platform_unsupported",
+        )
+        self.assertEqual(response.error.details["platform"], "darwin")
+        self.assertFalse(response.error.details["retryable"])
+        get_service.assert_not_called()
+
+    def test_non_windows_daemon_skips_computer_control_startup(self) -> None:
+        from no1.daemon.computer_control_ops import start_daemon_computer_control
+
+        lock = Mock()
+        with patch(
+            "no1.computer_control.platform_support._platform_name",
+            return_value="linux",
+        ), patch(
+            "no1.daemon.computer_control_ops.start_daemon_services",
+        ) as start_services:
+            self.assertIsNone(
+                start_daemon_computer_control(Path("/tmp/home"), lock_handle=lock)
+            )
+        start_services.assert_not_called()
+
     def test_startup_failure_keeps_owner_for_later_ready_retry(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)

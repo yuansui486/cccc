@@ -732,7 +732,20 @@ class DerivedAuthorityStore:
         return revoked
 
     def persisted_record(self, group_id: str, resource_id: str) -> Dict[str, Any]:
+        record = self.persisted_record_snapshot(group_id, resource_id)
+        return dict(record or {})
+
+    def persisted_record_snapshot(
+        self,
+        group_id: str,
+        resource_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Return None only when the authority file does not exist."""
+
         group = self._required_identity(group_id, "group_id")
         resource = self._required_identity(resource_id, "resource_id")
         with self._locked(group):
-            return dict(self._read(self._path(group, "recording", resource)))
+            path = self._path(group, "recording", resource)
+            if not path.is_file():
+                return None
+            return dict(self._read(path))

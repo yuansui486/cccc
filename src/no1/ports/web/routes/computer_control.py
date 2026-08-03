@@ -24,6 +24,7 @@ from ....computer_control.models import (
 from ....computer_control.services import ComputerControlServices, get_services
 from ....computer_control.storage import RevisionConflict, WorkflowNotFound
 from ....computer_control.models import WorkflowDefinition
+from ....computer_control.platform_support import computer_control_availability
 from ....computer_control.audit import audit
 from ....computer_control.risk import annotate_catalog
 from ....computer_control.mcp import validate_workflow_tools
@@ -69,8 +70,36 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     def require_local_admin(request: Request) -> Any:
         return _require_local_computer_control_admin(ctx, request)
 
-    global_router = APIRouter(prefix="/api/v1/computer-control", dependencies=[Depends(require_local_admin)])
-    group_router = APIRouter(prefix="/api/v1/groups/{group_id}/computer-control", dependencies=[Depends(require_local_admin)])
+    def require_supported_platform() -> None:
+        availability = computer_control_availability()
+        if not availability["supported"]:
+            raise _error(
+                "computer_control_platform_unsupported",
+                "Computer control is only supported on Windows",
+                409,
+                availability,
+            )
+
+    availability_router = APIRouter(
+        prefix="/api/v1/computer-control",
+        dependencies=[Depends(require_local_admin)],
+    )
+    supported_dependencies = [
+        Depends(require_local_admin),
+        Depends(require_supported_platform),
+    ]
+    global_router = APIRouter(
+        prefix="/api/v1/computer-control",
+        dependencies=supported_dependencies,
+    )
+    group_router = APIRouter(
+        prefix="/api/v1/groups/{group_id}/computer-control",
+        dependencies=supported_dependencies,
+    )
+
+    @availability_router.get("/availability")
+    async def availability() -> Dict[str, Any]:
+        return {"ok": True, "result": computer_control_availability()}
 
     async def daemon_control(command: str, **payload: Any) -> Any:
         response = await asyncio.to_thread(
@@ -1357,7 +1386,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         # "测试定位" action.
         return await validate_locator(group_id, locator)
 
-    return [global_router, group_router]
+    return [availability_router, global_router, group_router]
 
 
 def _extract_elements(result: Dict[str, Any]) -> list[Dict[str, Any]]:
