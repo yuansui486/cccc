@@ -981,7 +981,6 @@ export function patchGroupRuntimeStatus(
       running: !!runtimeStatus.runtime_running,
       state: String(runtimeStatus.lifecycle_state || group.state || "active") as GroupMeta["state"],
       runtime_status: runtimeStatus,
-      control_state: undefined,
     };
   });
   return changed ? next : groups;

@@ -8,6 +8,7 @@ the daemon operation boundary.
 from __future__ import annotations
 
 import json
+import copy
 from typing import Any, Dict, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -19,6 +20,9 @@ from ....contracts.v1.group_bridge import (
     GroupBridgeSessionMessage,
     GroupBridgeSignedMessageEnvelope,
 )
+from ....daemon.group_bridge.identity import get_group_bridge_identity
+from ....kernel.group_bridge.pairing import get_local_identity, list_pairing_requests, list_trusts
+from ....kernel.group_bridge.registration import list_registrations
 from ..middleware import get_access_token_cookie
 from ..schemas import RouteContext, check_group, require_user
 
@@ -178,6 +182,26 @@ def _management_args(request: Request, values: Dict[str, Any]) -> Dict[str, Any]
     return args
 
 
+_PUBLIC_REGISTRATION_FIELDS = (
+    "registration_id",
+    "registration_fingerprint",
+    "group_id",
+    "url",
+    "transport",
+    "remote_group_id",
+    "remote_peer_id",
+    "multiaddrs",
+    "status",
+    "created_at",
+    "updated_at",
+    "last_sync_at",
+)
+
+
+def _public_registration(record: Dict[str, Any]) -> Dict[str, Any]:
+    return {field: copy.deepcopy(record[field]) for field in _PUBLIC_REGISTRATION_FIELDS if field in record}
+
+
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     management_router = APIRouter(
         prefix="/api/group-bridge",
@@ -245,13 +269,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         group_id: str = Query(..., min_length=1, max_length=256),
     ) -> Dict[str, Any]:
         check_group(request, group_id)
-        response = await ctx.daemon(
-            {
-                "op": "group_bridge_management_identity",
-                "args": _management_args(request, {"group_id": group_id}),
-            }
-        )
-        return {"ok": True, "result": _unwrap_daemon(response)}
+        identity = get_group_bridge_identity(home=ctx.home).public_dict()
+        identity.update(get_local_identity(home=ctx.home))
+        return {"ok": True, "result": {"identity": identity}}
 
     @management_router.get("/registrations")
     async def group_bridge_management_registrations(
@@ -259,13 +279,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         group_id: str = Query(..., min_length=1, max_length=256),
     ) -> Dict[str, Any]:
         check_group(request, group_id)
-        response = await ctx.daemon(
-            {
-                "op": "group_bridge_management_registrations",
-                "args": _management_args(request, {"group_id": group_id}),
-            }
-        )
-        return {"ok": True, "result": _unwrap_daemon(response)}
+        registrations = [
+            _public_registration(item)
+            for item in list_registrations(home=ctx.home)
+            if item.get("group_id") == group_id and item.get("status") == "active"
+        ]
+        return {"ok": True, "result": {"registrations": registrations}}
 
     @management_router.get("/trusts")
     async def group_bridge_management_trusts(
@@ -273,13 +292,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         group_id: str = Query(..., min_length=1, max_length=256),
     ) -> Dict[str, Any]:
         check_group(request, group_id)
-        response = await ctx.daemon(
-            {
-                "op": "group_bridge_management_trusts",
-                "args": _management_args(request, {"group_id": group_id}),
-            }
-        )
-        return {"ok": True, "result": _unwrap_daemon(response)}
+        trusts = [trust for trust in list_trusts(group_id=group_id, home=ctx.home) if trust.get("status") == "active"]
+        return {"ok": True, "result": {"trusts": trusts}}
 
     @management_router.get("/pairing/requests")
     async def group_bridge_management_pairing_requests(
@@ -287,13 +301,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         group_id: str = Query(..., min_length=1, max_length=256),
     ) -> Dict[str, Any]:
         check_group(request, group_id)
-        response = await ctx.daemon(
-            {
-                "op": "group_bridge_management_pairing_requests",
-                "args": _management_args(request, {"group_id": group_id}),
-            }
-        )
-        return {"ok": True, "result": _unwrap_daemon(response)}
+        return {"ok": True, "result": {"requests": list_pairing_requests(group_id=group_id, home=ctx.home)}}
 
     @management_router.post("/pairing/invites")
     async def group_bridge_management_pairing_invite(

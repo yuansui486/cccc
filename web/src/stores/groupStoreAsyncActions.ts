@@ -186,7 +186,6 @@ export function createGroupStoreAsyncActions(
                 running: runtimeStatus.runtime_running,
                 state: runtimeStatus.lifecycle_state as GroupDoc["state"],
                 runtime_status: runtimeStatus,
-                control_state: undefined,
               }
             : undefined;
           saveGroupView(gid, { actors: nextActors, groupDoc: nextGroupDoc });

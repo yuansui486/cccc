@@ -14,6 +14,19 @@ export function useGroupActions() {
 
   const { setBusy, showError } = useUIStore();
 
+  const syncSelectedGroupControlState = useCallback(async () => {
+    const gid = String(useGroupStore.getState().selectedGroupId || "").trim();
+    if (!gid) return;
+    const resp = await api.fetchGroupControlState(gid, { noCache: true });
+    if (!resp.ok) return;
+    const currentDoc = useGroupStore.getState().groupDoc;
+    if (!currentDoc || String(currentDoc.group_id || "").trim() !== gid) return;
+    setGroupDoc({
+      ...currentDoc,
+      control_state: resp.result.control_state,
+    });
+  }, [setGroupDoc]);
+
   // Start group
   const handleStartGroup = useCallback(async () => {
     if (!selectedGroupId) return;
@@ -24,12 +37,13 @@ export function useGroupActions() {
         showError(`${resp.error.code}: ${resp.error.message}`);
         return;
       }
+      await syncSelectedGroupControlState();
       await refreshActors();
       await refreshGroups();
     } finally {
       setBusy("");
     }
-  }, [selectedGroupId, setBusy, showError, refreshActors, refreshGroups]);
+  }, [selectedGroupId, setBusy, showError, refreshActors, refreshGroups, syncSelectedGroupControlState]);
 
   // Stop group
   const handleStopGroup = useCallback(async () => {
@@ -41,12 +55,13 @@ export function useGroupActions() {
         showError(`${resp.error.code}: ${resp.error.message}`);
         return;
       }
+      await syncSelectedGroupControlState();
       await refreshActors();
       await refreshGroups();
     } finally {
       setBusy("");
     }
-  }, [selectedGroupId, setBusy, showError, refreshActors, refreshGroups]);
+  }, [selectedGroupId, setBusy, showError, refreshActors, refreshGroups, syncSelectedGroupControlState]);
 
   // Set group state
   const handleSetGroupState = useCallback(
@@ -59,18 +74,7 @@ export function useGroupActions() {
           showError(`${resp.error.code}: ${resp.error.message}`);
           return;
         }
-        setGroupDoc(groupDoc ? {
-          ...groupDoc,
-          state: s,
-          runtime_status: {
-            runtime_running: groupDoc.runtime_status?.runtime_running ?? false,
-            running_actor_count: groupDoc.runtime_status?.running_actor_count ?? 0,
-            has_running_foreman: groupDoc.runtime_status?.has_running_foreman ?? false,
-            ...groupDoc.runtime_status,
-            lifecycle_state: s,
-          },
-          control_state: undefined,
-        } : null);
+        await syncSelectedGroupControlState();
         // When resuming to active and no actors are running, also start
         // the group so processes get relaunched (not just the state flag).
         if (s === "active" && groupDoc && !groupDoc.running) {
@@ -79,13 +83,14 @@ export function useGroupActions() {
             showError(`${startResp.error.code}: ${startResp.error.message}`);
           }
           await refreshActors();
+          await syncSelectedGroupControlState();
         }
         await refreshGroups();
       } finally {
         setBusy("");
       }
     },
-    [selectedGroupId, groupDoc, setBusy, showError, setGroupDoc, refreshGroups, refreshActors]
+    [selectedGroupId, groupDoc, setBusy, showError, refreshGroups, refreshActors, syncSelectedGroupControlState]
   );
 
   return {

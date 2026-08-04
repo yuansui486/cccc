@@ -110,7 +110,7 @@ class TestGroupBridgeManagementDaemon(unittest.TestCase):
 
 
 class TestGroupBridgeManagementWeb(unittest.TestCase):
-    def _client(self, calls: list[dict[str, object]]) -> TestClient:
+    def _client(self, calls: list[dict[str, object]], home: Path | None = None) -> TestClient:
         from no1.ports.web.routes.group_bridge import create_routers
         from no1.ports.web.schemas import RouteContext
 
@@ -119,7 +119,7 @@ class TestGroupBridgeManagementWeb(unittest.TestCase):
             return {"ok": True, "result": {"identity": {"peer_id": "peer"}}}
 
         ctx = RouteContext(
-            home=Path(tempfile.gettempdir()),
+            home=home or Path(tempfile.gettempdir()),
             version="test",
             web_mode="normal",
             read_only=False,
@@ -135,24 +135,52 @@ class TestGroupBridgeManagementWeb(unittest.TestCase):
             app.include_router(router)
         return TestClient(app)
 
-    def test_management_routes_delegate_and_never_project_token(self) -> None:
+    def test_management_read_routes_project_locally_without_token(self) -> None:
+        calls: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory() as td:
+            client = self._client(calls, Path(td))
+            response = client.get("/api/group-bridge/identity", params={"group_id": "local-group"})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("identity", response.json()["result"])
+
+            response = client.get("/api/group-bridge/registrations", params={"group_id": "local-group"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["result"]["registrations"], [])
+
+            response = client.get("/api/group-bridge/trusts", params={"group_id": "local-group"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["result"]["trusts"], [])
+
+            response = client.get("/api/group-bridge/pairing/requests", params={"group_id": "local-group"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["result"]["requests"], [])
+
+        self.assertEqual(calls, [])
+
+    def test_management_routes_delegate_writes_to_daemon(self) -> None:
         calls: list[dict[str, object]] = []
         client = self._client(calls)
-        response = client.get(
-            "/api/group-bridge/identity",
-            params={"group_id": "local-group", "token": "opaque-token"},
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(calls[0]["op"], "group_bridge_management_identity")
-        self.assertEqual(calls[0]["args"], {"group_id": "local-group", "access_token": "opaque-token"})
-        self.assertNotIn("opaque-token", response.text)
-
         response = client.post(
             "/api/group-bridge/pairing/invites",
-            json={"group_id": "local-group", "ttl_seconds": 600, "unexpected": True},
+            json={
+                "group_id": "local-group",
+                "expected_remote_group_id": "remote-group",
+                "expected_remote_peer_id": "remote-peer",
+                "multiaddrs": [],
+                "ttl_seconds": 600,
+            },
+            params={"token": "opaque-token"},
         )
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(calls[0]["op"], "group_bridge_management_pairing_invite")
+        self.assertEqual(calls[0]["args"], {
+            "group_id": "local-group",
+            "expected_remote_group_id": "remote-group",
+            "expected_remote_peer_id": "remote-peer",
+            "multiaddrs": [],
+            "ttl_seconds": 600,
+            "access_token": "opaque-token",
+        })
 
     def test_management_routes_require_group_scope_when_tokens_are_enabled(self) -> None:
         calls: list[dict[str, object]] = []
