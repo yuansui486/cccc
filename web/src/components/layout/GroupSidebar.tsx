@@ -20,8 +20,7 @@ import { classNames } from "../../utils/classNames";
 import { getAppBrandName, getAppLogoPath } from "../../utils/displayText";
 import { getActorDisplayWorkingState } from "../../utils/terminalWorkingState";
 import { getRuntimeIndicatorState } from "../../utils/statusIndicators";
-import { getGroupStatusFromSource } from "../../utils/groupStatus";
-import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } from "../../utils/groupControls";
+import { getGroupControlState, reportGroupControlStateIssues } from "../../utils/groupControlState";
 import { updateGroup } from "../../services/api";
 import {
   useBrandingStore,
@@ -210,38 +209,37 @@ export function GroupSidebar({
   );
   const autoArchivedOpen = selectedArchived || (orderedGroups.length > 0 && workingGroups.length === 0 && archivedGroups.length > 0);
   const archivedPanelOpen = archivedOpen || autoArchivedOpen;
-  const selectedStatus = selectedGroupId ? getGroupStatusFromSource({
-    running: selectedGroupRunning,
-    state: (selectedGroupRuntimeStatus?.lifecycle_state as GroupDoc["state"] | undefined) || groupDoc?.state,
-    runtime_status: selectedGroupRuntimeStatus || undefined,
-  }) : null;
-  const selectedStatusKey = selectedStatus?.key ?? null;
+  const groupControlState = useMemo(
+    () => getGroupControlState({
+      selectedGroupId,
+      selectedGroupRunning,
+      selectedGroupRuntimeStatus,
+      groupDoc,
+      groupMeta: selectedGroup,
+      actors,
+      busy,
+    }),
+    [actors, busy, groupDoc, selectedGroup, selectedGroupId, selectedGroupRunning, selectedGroupRuntimeStatus]
+  );
+  const selectedStatusKey = groupControlState.statusKey;
+  const selectedStatus = groupControlState.status;
   const currentGroupTitle = String(selectedGroup?.title || groupDoc?.title || selectedGroupId || "").trim();
   const currentGroupTopic = String(groupDoc?.topic || selectedGroup?.topic || "").trim();
-  const launchMode = getLaunchControlMode(selectedStatusKey);
-  const launchControl = getGroupControlVisual(selectedStatusKey, "launch", busy);
-  const pauseControl = getGroupControlVisual(selectedStatusKey, "pause", busy);
-  const stopControl = getGroupControlVisual(selectedStatusKey, "stop", busy);
   const {
-    launchHardUnavailable,
-    pauseHardUnavailable,
-    stopHardUnavailable,
+    launchMode,
+    stopControl,
     launchDisabled,
     pauseDisabled,
     stopDisabled,
-  } = resolveGroupControls({
-    selectedGroupId,
-    actorCount: actors.length,
-    statusKey: selectedStatusKey,
-    busy,
-  });
-  const deliveryToggleIsPause = selectedStatusKey === "run";
-  const deliveryToggleControl = deliveryToggleIsPause ? pauseControl : launchControl;
-  const deliveryToggleDisabled = deliveryToggleIsPause ? pauseDisabled : launchDisabled;
-  const deliveryToggleHardUnavailable = deliveryToggleIsPause ? pauseHardUnavailable : launchHardUnavailable;
-  const deliveryToggleTitle = deliveryToggleIsPause
+    stopHardUnavailable,
+    deliveryToggleIsPause,
+    deliveryToggleControl,
+    deliveryToggleDisabled,
+    deliveryToggleHardUnavailable,
+  } = groupControlState;
+  const deliveryToggleTitle = groupControlState.deliveryToggleKind === "pause"
     ? t("pauseDelivery")
-    : launchMode === "activate"
+    : groupControlState.deliveryToggleKind === "resume"
       ? t("resumeDelivery")
       : t("launchAllAgents");
   const activeTaskCount = useMemo(() => {
@@ -250,6 +248,10 @@ export function GroupSidebar({
     const tasks = Array.isArray(groupContext?.coordination?.tasks) ? groupContext.coordination.tasks : [];
     return tasks.filter((task) => String(task?.status || "").trim().toLowerCase() === "active").length;
   }, [groupContext]);
+
+  useEffect(() => {
+    reportGroupControlStateIssues("GroupSidebar", groupControlState);
+  }, [groupControlState]);
 
   useEffect(() => {
     if (!isRenamingGroupTitle) return;

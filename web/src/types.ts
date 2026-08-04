@@ -11,6 +11,28 @@ export type GroupRuntimeStatus = {
   has_running_foreman: boolean;
 };
 
+export type GroupControlIssue = {
+  code: string;
+  severity: "info" | "warning" | "error" | string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+export type GroupServerControlState = {
+  status_key: "run" | "paused" | "idle" | "stop" | string;
+  lifecycle_state: "active" | "idle" | "paused" | "stopped" | string;
+  runtime_running: boolean;
+  primary_action: "pause" | "resume" | "start" | string;
+  can_start: boolean;
+  can_pause: boolean;
+  can_stop: boolean;
+  actor_count: number;
+  running_actor_count: number;
+  has_running_foreman: boolean;
+  booting?: boolean;
+  issues?: GroupControlIssue[];
+};
+
 export type GroupMeta = {
   group_id: string;
   title?: string;
@@ -20,6 +42,7 @@ export type GroupMeta = {
   running?: boolean;
   state?: "active" | "idle" | "paused" | "stopped";
   runtime_status?: GroupRuntimeStatus;
+  control_state?: GroupServerControlState;
 };
 
 export type GroupDoc = {
@@ -31,6 +54,7 @@ export type GroupDoc = {
   running?: boolean;
   state?: "active" | "idle" | "paused" | "stopped";
   runtime_status?: GroupRuntimeStatus;
+  control_state?: GroupServerControlState;
 };
 
 // Server-backed attachment metadata carried by canonical ledger events.

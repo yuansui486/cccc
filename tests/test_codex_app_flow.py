@@ -4239,7 +4239,7 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertEqual(listen_index, app_server_index + 1)
             listen_url = str(command[listen_index + 1])
             self.assertTrue(listen_url.startswith("ws://127.0.0.1:"))
-            self.assertIn("mcp_servers.windows-mcp.enabled=false", command)
+            self.assertNotIn("mcp_servers.windows-mcp.enabled=false", command)
             connect_ws.assert_called_once()
             self.assertEqual([item[0] for item in requests], ["initialize"])
             stored = read_runtime_session("g_test", "peer1")

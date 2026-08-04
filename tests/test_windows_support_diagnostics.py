@@ -254,14 +254,14 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
 
         self.assertEqual(writes, [b"\x1b[?1;2c"])
 
-    def test_codex_windows_command_still_gets_env_inherit_flag(self) -> None:
+    def test_codex_windows_command_still_gets_env_inherit_flag_without_synthetic_windows_mcp(self) -> None:
         from no1.daemon import server as daemon_server
 
         cmd = daemon_server._normalize_runtime_command("codex", [r"C:\Tools\codex.cmd", "--search"])
 
         self.assertEqual(cmd[0], r"C:\Tools\codex.cmd")
         config_values = [cmd[index + 1] for index, value in enumerate(cmd[:-1]) if value in {"-c", "--config"}]
-        self.assertIn("mcp_servers.windows-mcp.enabled=false", config_values)
+        self.assertNotIn("mcp_servers.windows-mcp.enabled=false", config_values)
         self.assertIn("shell_environment_policy.inherit=all", config_values)
         self.assertEqual(cmd[-1], "--search")
 

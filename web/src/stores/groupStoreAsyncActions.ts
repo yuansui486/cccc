@@ -117,6 +117,7 @@ export function createGroupStoreAsyncActions(
               if (typeof meta.title === "string" && meta.title !== doc.title) patch.title = meta.title;
               if (typeof meta.topic === "string" && meta.topic !== doc.topic) patch.topic = meta.topic;
               if (typeof meta.running === "boolean" && meta.running !== doc.running) patch.running = meta.running;
+              if (meta.control_state && meta.control_state !== doc.control_state) patch.control_state = meta.control_state;
               if (meta.runtime_status) {
                 const curRT = doc.runtime_status;
                 if (
@@ -185,6 +186,7 @@ export function createGroupStoreAsyncActions(
                 running: runtimeStatus.runtime_running,
                 state: runtimeStatus.lifecycle_state as GroupDoc["state"],
                 runtime_status: runtimeStatus,
+                control_state: undefined,
               }
             : undefined;
           saveGroupView(gid, { actors: nextActors, groupDoc: nextGroupDoc });

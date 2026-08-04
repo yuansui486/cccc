@@ -171,8 +171,6 @@ command = "windows_mcp"
                 "mcp_servers.custom_alias.enabled=false",
                 "-c",
                 'mcp_servers."quoted.alias".enabled=false',
-                "-c",
-                "mcp_servers.windows-mcp.enabled=false",
             ],
         )
 

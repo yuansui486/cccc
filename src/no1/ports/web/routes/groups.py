@@ -710,6 +710,51 @@ def _group_runtime_status_local(group: Any) -> Dict[str, Any]:
     }
 
 
+def _group_control_status_key(runtime_status: Dict[str, Any]) -> str:
+    lifecycle_state = str(runtime_status.get("lifecycle_state") or "").strip().lower()
+    if lifecycle_state == "paused":
+        return "paused"
+    if lifecycle_state == "stopped":
+        return "stop"
+    if bool(runtime_status.get("runtime_running")):
+        return "run"
+    if lifecycle_state == "idle":
+        return "idle"
+    return "stop"
+
+
+def _group_control_primary_action(status_key: str) -> str:
+    if status_key == "run":
+        return "pause"
+    if status_key in ("paused", "idle"):
+        return "resume"
+    return "start"
+
+
+def _group_control_state_local(group: Any, runtime_status: Dict[str, Any], *, group_id: str = "") -> Dict[str, Any]:
+    gid = str(getattr(group, "group_id", "") or group_id or "").strip()
+    actors = group.doc.get("actors") if group is not None and isinstance(group.doc.get("actors"), list) else []
+    actor_count = len(actors)
+    status_key = _group_control_status_key(runtime_status)
+    can_start = bool(gid and actor_count > 0)
+    can_pause = bool(gid and actor_count > 0 and status_key != "stop")
+    can_stop = bool(gid)
+    return {
+        "status_key": status_key,
+        "lifecycle_state": str(runtime_status.get("lifecycle_state") or "active"),
+        "runtime_running": bool(runtime_status.get("runtime_running")),
+        "primary_action": _group_control_primary_action(status_key),
+        "can_start": can_start,
+        "can_pause": can_pause,
+        "can_stop": can_stop,
+        "actor_count": actor_count,
+        "running_actor_count": int(runtime_status.get("running_actor_count") or 0),
+        "has_running_foreman": bool(runtime_status.get("has_running_foreman")),
+        "booting": bool(runtime_status.get("booting")),
+        "issues": [],
+    }
+
+
 def _read_groups_local() -> Dict[str, Any]:
     projection = get_groups_projection()
     groups = projection.get("groups") if isinstance(projection.get("groups"), list) else []
@@ -724,6 +769,7 @@ def _read_groups_local() -> Dict[str, Any]:
         row["state"] = str(runtime_status.get("lifecycle_state") or row.get("state") or "active")
         row["running"] = bool(runtime_status.get("runtime_running"))
         row["runtime_status"] = runtime_status
+        row["control_state"] = _group_control_state_local(group, runtime_status, group_id=gid)
         out.append(row)
     return {
         "ok": True,
@@ -746,12 +792,30 @@ def _read_group_local(group_id: str) -> Dict[str, Any]:
     doc["state"] = str(runtime_status.get("lifecycle_state") or doc.get("state") or "active")
     doc["running"] = bool(runtime_status.get("runtime_running"))
     doc["runtime_status"] = runtime_status
+    doc["control_state"] = _group_control_state_local(group, runtime_status, group_id=gid)
     im = doc.get("im")
     if isinstance(im, dict):
         im.pop("token", None)
         im.pop("bot_token", None)
         im.pop("app_token", None)
     return {"ok": True, "result": {"group": doc}}
+
+
+def _read_group_control_state_local(group_id: str) -> Dict[str, Any]:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return {"ok": False, "error": {"code": "missing_group_id", "message": "missing group_id"}}
+    group = load_group(gid)
+    if group is None:
+        return {"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {gid}"}}
+    runtime_status = _group_runtime_status_local(group)
+    return {
+        "ok": True,
+        "result": {
+            "group_id": gid,
+            "control_state": _group_control_state_local(group, runtime_status, group_id=gid),
+        },
+    }
 
 
 def _read_headless_snapshot(group: Any, *, limit: int = 400) -> Dict[str, Any]:
@@ -1397,6 +1461,10 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         ttl = max(0.0, min(5.0, ctx.exhibit_cache_ttl_s))
         return await ctx.cached_json(f"group:{gid}", ttl, _fetch)
+
+    @group_router.get("/control_state")
+    async def group_control_state(group_id: str) -> Dict[str, Any]:
+        return await run_in_threadpool(_read_group_control_state_local, group_id)
 
     @group_router.put("")
     async def group_update(group_id: str, req: GroupUpdateRequest) -> Dict[str, Any]:

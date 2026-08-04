@@ -32,9 +32,6 @@ def codex_windows_mcp_server_names(env: Dict[str, Any]) -> List[str]:
         identity = " ".join([command, *(str(item) for item in args)]).lower()
         if "windows-mcp" in identity or "windows_mcp" in identity:
             names.append(str(name))
-    # This is the upstream server's conventional name and is harmless when absent.
-    if "windows-mcp" not in names:
-        names.append("windows-mcp")
     return names
 
 

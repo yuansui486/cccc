@@ -58,6 +58,13 @@ export async function fetchGroup(groupId: string, init?: RequestInit & { noCache
   return apiJson<{ group: GroupDoc }>(`/api/v1/groups/${encodeURIComponent(groupId)}`, init);
 }
 
+export async function fetchGroupControlState(groupId: string, init?: RequestInit & { noCache?: boolean }) {
+  return apiJson<{ group_id: string; control_state: NonNullable<GroupDoc["control_state"]> }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/control_state`,
+    init,
+  );
+}
+
 export function assistantStateRequestKey(groupId: string): string {
   return `assistants:${String(groupId || "").trim()}`;
 }

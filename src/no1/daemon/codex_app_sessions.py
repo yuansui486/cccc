@@ -157,6 +157,36 @@ def _terminate_codex_app_server_process(proc: Any) -> None:
             pass
 
 
+def _collect_exited_process_output(proc: Any, *, limit: int = 2000) -> str:
+    if proc is None:
+        return ""
+    try:
+        returncode = proc.poll()
+    except Exception:
+        return ""
+    if returncode is None:
+        return ""
+    stdout = ""
+    stderr = ""
+    try:
+        stdout, stderr = proc.communicate(timeout=0.2)
+    except Exception:
+        pass
+    parts: list[str] = []
+    err_text = str(stderr or "").strip()
+    out_text = str(stdout or "").strip()
+    if err_text:
+        parts.append(f"stderr: {err_text}")
+    if out_text:
+        parts.append(f"stdout: {out_text}")
+    if returncode is not None:
+        parts.append(f"exit_code: {returncode}")
+    detail = "; ".join(parts).strip()
+    if len(detail) > limit:
+        return detail[: max(0, limit - 1)].rstrip() + "…"
+    return detail
+
+
 def _is_websocket_idle_timeout(exc: BaseException) -> bool:
     if isinstance(exc, (TimeoutError, socket.timeout)):
         return True
@@ -738,8 +768,10 @@ class CodexAppSession:
                     last_exc = exc
                     time.sleep(0.1)
             if last_exc is not None:
+                startup_detail = _collect_exited_process_output(self._proc)
                 self.stop()
-                raise RuntimeError(f"failed to connect codex app-server websocket: {last_exc}") from last_exc
+                detail_suffix = f"; app-server startup output: {startup_detail}" if startup_detail else ""
+                raise RuntimeError(f"failed to connect codex app-server websocket: {last_exc}{detail_suffix}") from last_exc
             self._ws_thread = threading.Thread(target=self._websocket_loop, name=f"onecolleague-codex-ws:{self.group_id}:{self.actor_id}", daemon=True)
         else:
             self._stdout_thread = threading.Thread(target=self._stdout_loop, name=f"onecolleague-codex-out:{self.group_id}:{self.actor_id}", daemon=True)

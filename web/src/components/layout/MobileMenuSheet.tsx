@@ -1,7 +1,7 @@
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Actor, DoneHubStatus, GroupDoc, GroupRuntimeStatus, TextScale, Theme } from "../../types";
-import { getGroupStatusFromSource } from "../../utils/groupStatus";
-import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } from "../../utils/groupControls";
+import { getGroupControlState, reportGroupControlStateIssues } from "../../utils/groupControlState";
 import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { TextScaleSwitcher } from "../TextScaleSwitcher";
@@ -74,29 +74,31 @@ export function MobileMenuSheet({
 }: MobileMenuSheetProps) {
   const { modalRef } = useModalA11y(isOpen, onClose);
   const { t } = useTranslation("layout");
-  const selectedStatus = selectedGroupId ? getGroupStatusFromSource({
-    running: selectedGroupRunning,
-    state: (selectedGroupRuntimeStatus?.lifecycle_state as GroupDoc["state"] | undefined) || groupDoc?.state,
-    runtime_status: selectedGroupRuntimeStatus || groupDoc?.runtime_status,
-  }) : null;
-  const selectedStatusKey = selectedStatus?.key ?? null;
-  const launchMode = getLaunchControlMode(selectedStatusKey);
-  const launchControl = getGroupControlVisual(selectedStatusKey, "launch", busy);
-  const pauseControl = getGroupControlVisual(selectedStatusKey, "pause", busy);
-  const stopControl = getGroupControlVisual(selectedStatusKey, "stop", busy);
+  const groupControlState = useMemo(
+    () => getGroupControlState({
+      selectedGroupId,
+      selectedGroupRunning,
+      selectedGroupRuntimeStatus,
+      groupDoc,
+      actors,
+      busy,
+    }),
+    [actors, busy, groupDoc, selectedGroupId, selectedGroupRunning, selectedGroupRuntimeStatus]
+  );
+  const selectedStatus = groupControlState.status;
+  const selectedStatusKey = groupControlState.statusKey;
   const {
+    launchMode,
+    launchControl,
+    pauseControl,
+    stopControl,
     launchHardUnavailable,
     pauseHardUnavailable,
     stopHardUnavailable,
     launchDisabled,
     pauseDisabled,
     stopDisabled,
-  } = resolveGroupControls({
-    selectedGroupId,
-    actorCount: actors.length,
-    statusKey: selectedStatusKey,
-    busy,
-  });
+  } = groupControlState;
   const themeLabel = theme === "system" ? t("themeSystem") : theme === "dark" ? t("themeDark") : t("themeLight");
   const ThemeIcon = theme === "system" ? MonitorIcon : theme === "dark" ? MoonIcon : SunIcon;
   const nextTheme: Theme = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
@@ -111,6 +113,10 @@ export function MobileMenuSheet({
   const sectionTitleClass = "px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]";
   const rowButtonClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3.5 py-3 text-sm transition-all text-[var(--color-text-primary)] hover:bg-black/5 disabled:opacity-45 dark:hover:bg-white/6";
 
+  useEffect(() => {
+    if (!isOpen) return;
+    reportGroupControlStateIssues("MobileMenuSheet", groupControlState);
+  }, [groupControlState, isOpen]);
 
   const handleLaunchClick = () => {
     if (launchDisabled || selectedStatusKey === "run") return;

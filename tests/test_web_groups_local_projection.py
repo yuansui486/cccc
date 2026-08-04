@@ -78,6 +78,66 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
             match = next(item for item in groups if str(item.get("group_id") or "") == gid)
             self.assertTrue(bool(match.get("running")))
             self.assertTrue(bool(((match.get("runtime_status") or {}).get("runtime_running"))))
+            control_state = match.get("control_state") or {}
+            self.assertEqual(control_state.get("status_key"), "run")
+            self.assertEqual(control_state.get("primary_action"), "pause")
+            self.assertTrue(bool(control_state.get("can_pause")))
+        finally:
+            cleanup()
+
+    def test_group_show_includes_canonical_control_state(self) -> None:
+        cleanup = self._with_home()
+        try:
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import create_group, load_group
+            from no1.kernel.registry import load_registry
+
+            reg = load_registry()
+            gid = create_group(reg, title="control-state", topic="").group_id
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="headless")  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            with self._client() as client:
+                resp = client.get(f"/api/v1/groups/{gid}")
+
+            self.assertEqual(resp.status_code, 200)
+            doc = resp.json()["result"]["group"]
+            control_state = doc.get("control_state") or {}
+            self.assertEqual(control_state.get("status_key"), "stop")
+            self.assertEqual(control_state.get("primary_action"), "start")
+            self.assertTrue(bool(control_state.get("can_start")))
+            self.assertFalse(bool(control_state.get("can_pause")))
+            self.assertTrue(bool(control_state.get("can_stop")))
+            self.assertEqual(control_state.get("actor_count"), 1)
+        finally:
+            cleanup()
+
+    def test_group_control_state_route_reads_uncached_canonical_state(self) -> None:
+        cleanup = self._with_home()
+        try:
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import create_group, load_group
+            from no1.kernel.registry import load_registry
+
+            reg = load_registry()
+            gid = create_group(reg, title="control-state-route", topic="").group_id
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="headless")  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            with self._client() as client:
+                resp = client.get(f"/api/v1/groups/{gid}/control_state?fresh=1")
+
+            self.assertEqual(resp.status_code, 200)
+            result = resp.json()["result"]
+            self.assertEqual(result.get("group_id"), gid)
+            control_state = result.get("control_state") or {}
+            self.assertEqual(control_state.get("status_key"), "stop")
+            self.assertEqual(control_state.get("primary_action"), "start")
+            self.assertTrue(bool(control_state.get("can_start")))
         finally:
             cleanup()
 

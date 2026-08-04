@@ -1,6 +1,7 @@
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { DoneHubStatus, GroupDoc, GroupRuntimeStatus, TextScale, Theme } from "../../types";
-import { getGroupStatusFromSource } from "../../utils/groupStatus";
+import { getGroupControlState } from "../../utils/groupControlState";
 import { classNames } from "../../utils/classNames";
 import {
   EditIcon,
@@ -70,11 +71,17 @@ export function AppHeader({
   const { t } = useTranslation("layout");
   const headerIconButtonBaseClass =
     "flex items-center justify-center w-11 h-11 rounded-xl transition-all shrink-0";
-  const selectedStatus = selectedGroupId ? getGroupStatusFromSource({
-    running: selectedGroupRunning,
-    state: (selectedGroupRuntimeStatus?.lifecycle_state as GroupDoc["state"] | undefined) || groupDoc?.state,
-    runtime_status: selectedGroupRuntimeStatus || undefined,
-  }) : null;
+  const groupControlState = useMemo(
+    () => getGroupControlState({
+      selectedGroupId,
+      selectedGroupRunning,
+      selectedGroupRuntimeStatus,
+      groupDoc,
+      busy: _busy,
+    }),
+    [_busy, groupDoc, selectedGroupId, selectedGroupRunning, selectedGroupRuntimeStatus]
+  );
+  const selectedStatus = groupControlState.status;
 
   return (
     <header className="flex-shrink-0 z-20 px-4 h-14 flex items-center justify-between gap-3 glass-header">

@@ -69,6 +69,7 @@ export function useGroupActions() {
             ...groupDoc.runtime_status,
             lifecycle_state: s,
           },
+          control_state: undefined,
         } : null);
         // When resuming to active and no actors are running, also start
         // the group so processes get relaunched (not just the state flag).

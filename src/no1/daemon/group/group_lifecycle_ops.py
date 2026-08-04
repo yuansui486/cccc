@@ -74,6 +74,7 @@ def handle_group_start(
             "missing project root for group (no active scope)",
             details={"hint": "Attach a project root first (e.g. onecolleague attach <path> --group <id>)"},
         )
+    started: list[str] = []
     try:
         require_group_permission(group, by=by, action="group.start")
         resolve_before_start = lambda grp, aid, caller_id="", is_admin=False: resolve_linked_actor_before_start(
@@ -192,9 +193,9 @@ def handle_group_start(
                 raise
             start_specs.append(launch_spec)
 
-        started: list[str] = []
         for launch_spec in start_specs:
-            aid = str(((launch_spec.get("actor") or {}).get("id") or "")).strip()
+            actor = launch_spec.get("actor") if isinstance(launch_spec.get("actor"), dict) else {}
+            aid = str((actor.get("id") or "")).strip()
             cwd = launch_spec["cwd"]
             runner_kind = str(launch_spec["runner"])
             runtime = str(launch_spec["runtime"])
@@ -303,6 +304,12 @@ def handle_group_start(
                 pass
             started.append(aid)
     except Exception as e:
+        if not started:
+            try:
+                group.doc["running"] = False
+                group.save()
+            except Exception:
+                pass
         msg = str(e)
         if "profile not found:" in msg:
             return _error("profile_not_found", msg)

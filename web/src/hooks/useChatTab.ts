@@ -3,6 +3,7 @@
 
 import { useMemo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import {
   useGroupStore,
   useUIStore,
@@ -825,8 +826,20 @@ export function useChatTab({
   const { t } = useTranslation(["chat", "common"]);
   const [forceStickToBottomToken, setForceStickToBottomToken] = useState(0);
   // ============ Stores ============
-  const { events, streamingEvents, chatWindow, hasMoreHistory, hasLoadedTail, isLoadingHistory, isChatWindowLoading } = useGroupStore(
-    useCallback((state) => selectChatBucketState(state, selectedGroupId), [selectedGroupId])
+  const { events, chatWindow, hasMoreHistory, hasLoadedTail, isLoadingHistory, isChatWindowLoading } = useGroupStore(
+    useShallow(
+      useCallback((state) => {
+        const bucket = selectChatBucketState(state, selectedGroupId);
+        return {
+          events: bucket.events,
+          chatWindow: bucket.chatWindow,
+          hasMoreHistory: bucket.hasMoreHistory,
+          hasLoadedTail: bucket.hasLoadedTail,
+          isLoadingHistory: bucket.isLoadingHistory,
+          isChatWindowLoading: bucket.isChatWindowLoading,
+        };
+      }, [selectedGroupId])
+    )
   );
   const appendEvent = useGroupStore((state) => state.appendEvent);
   const upsertStreamingEvent = useGroupStore((state) => state.upsertStreamingEvent);
@@ -1226,16 +1239,6 @@ export function useChatTab({
       next: 0,
     };
   }
-
-  const liveWorkEvents = useMemo(() => {
-    const all = events.filter((ev: LedgerEvent) => ev.kind === "chat.message");
-    return dropOrphanQueuedPlaceholders(
-      all,
-      collapseActorStreamingPlaceholders(
-        dedupeStreamingEvents(streamingEvents.filter((ev: LedgerEvent) => ev.kind === "chat.message"))
-      ),
-    );
-  }, [events, streamingEvents]);
 
   // Filtered live chat messages (canonical + optimistic pending merged)
   const liveChatMessages = useMemo(() => {
@@ -2070,7 +2073,6 @@ export function useChatTab({
   return {
     // Chat state
     chatMessages,
-    liveWorkEvents,
     hasAnyChatMessages,
     chatFilter,
     setChatFilter: updateChatFilter,

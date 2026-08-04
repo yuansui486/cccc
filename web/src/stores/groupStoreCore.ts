@@ -938,6 +938,7 @@ export function buildShellGroupDoc(groupId: string, groups: GroupMeta[], cached:
       running: typeof meta.running === "boolean" ? meta.running : cachedDoc.running,
       state: meta.state ?? cachedDoc.state,
       runtime_status: meta.runtime_status || cachedDoc.runtime_status,
+      control_state: meta.control_state || cachedDoc.control_state,
     };
   }
 
@@ -949,6 +950,7 @@ export function buildShellGroupDoc(groupId: string, groups: GroupMeta[], cached:
     running: meta.running,
     state: meta.state,
     runtime_status: meta.runtime_status,
+    control_state: meta.control_state,
   };
 }
 
@@ -979,6 +981,7 @@ export function patchGroupRuntimeStatus(
       running: !!runtimeStatus.runtime_running,
       state: String(runtimeStatus.lifecycle_state || group.state || "active") as GroupMeta["state"],
       runtime_status: runtimeStatus,
+      control_state: undefined,
     };
   });
   return changed ? next : groups;

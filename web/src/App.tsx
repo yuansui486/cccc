@@ -28,6 +28,7 @@ import { buildReplyComposerState } from "./utils/chatReply";
 import { subscribeCapabilityChanged } from "./utils/capabilityEvents";
 import { filterVisibleRuntimeActors } from "./utils/runtimeVisibility";
 import { CHAT_TAB, COMPUTER_CONTROL_TAB, computerControlGroupIdFromPath, isComputerControlPath } from "./utils/appTabs";
+import { installGroupControlStateDebugTools } from "./utils/groupControlStateDebug";
 import {
   useGroupStore,
   useUIStore,
@@ -39,6 +40,8 @@ import {
 } from "./stores";
 import { useChatOutboxStore } from "./stores/chatOutboxStore";
 import type { CapabilityOverviewItem, CapabilityStateResult, LedgerEvent } from "./types";
+
+installGroupControlStateDebugTools();
 
 function cleanCapabilityId(value: unknown): string {
   return String(value || "").trim();
