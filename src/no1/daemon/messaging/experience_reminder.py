@@ -13,7 +13,8 @@ from ...util.fs import atomic_write_text, read_json
 
 EXPERIENCE_REMINDER_LINE = (
     "[onecolleague experience] Before handling this turn, read the project's shared experience with "
-    '`onecolleague_experience(action="read")`; apply relevant verified lessons, and append only new reusable findings.'
+    '`onecolleague_experience(action="read")`; apply relevant verified lessons and confirmed user preferences, '
+    "and append only new reusable findings or clearly evidenced stable preferences in the correct section."
 )
 
 _STATE_LOCK = threading.RLock()

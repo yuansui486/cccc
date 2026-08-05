@@ -136,6 +136,14 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 - Use `onecolleague_memory_admin(action="context_check"|"compact"|"daily_flush"|"index_sync", ...)` when context pressure or maintenance requires it.
 - Keep signal high and avoid duplicate writes.
 
+### Shared Project Experience and User Preferences
+
+- Before consequential work and when reminded, read `onecolleague_experience(action="read")`; apply relevant verified lessons and confirmed user preferences.
+- Store stable project lessons under Experience Entries and stable user preferences under User Preferences. If an older file lacks the preference section, create it only when the first qualifying preference is recorded.
+- A preference qualifies only when the user states it explicitly, repeats it, or direct evidence supports it. Do not persist guesses, one-off instructions, secrets, or full transcripts.
+- If a preference changes, read the latest revision and use `replace` with `expected_revision` to update the existing entry instead of appending a contradiction.
+- Keep transient working context in `onecolleague_agent_state`; `EXPERIENCE.md` is the shared source for stable project-level preferences.
+
 ## Capability
 
 ### Expansion Path

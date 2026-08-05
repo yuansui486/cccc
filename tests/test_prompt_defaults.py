@@ -39,13 +39,17 @@ class TestPromptDefaults(unittest.TestCase):
 
         body = str(load_builtin_help_markdown() or "")
         common_body = body.split("\n## Role Notes\n", 1)[0]
-        self.assertLessEqual(len(common_body.split()), 1700)
+        self.assertLessEqual(len(common_body.split()), 1900)
         self.assertIn("This is your working playbook for this group.", body)
         self.assertIn("## Working Stance", body)
         self.assertIn("## Communication Patterns", body)
         self.assertIn("## Core Routes", body)
         self.assertIn("## Control Plane", body)
         self.assertIn("## Memory and Recall", body)
+        self.assertIn("### Shared Project Experience and User Preferences", body)
+        self.assertIn('`onecolleague_experience(action="read")`', body)
+        self.assertIn("EXPERIENCE.md` is the shared source for stable project-level preferences", body)
+        self.assertIn("use `replace` with `expected_revision`", body)
         self.assertIn("## Capability", body)
         self.assertIn("search capability before inventing a new workflow", body)
         self.assertIn('`enable_hint="enable_now"`', body)

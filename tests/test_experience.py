@@ -36,7 +36,21 @@ class TestProjectExperience(unittest.TestCase):
             group = self._group(workspace)
             path = workspace / EXPERIENCE_FILENAME
             self.assertTrue(path.exists())
-            self.assertIn("# 项目经验", path.read_text(encoding="utf-8"))
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("# 项目经验", content)
+            self.assertIn("## 用户偏好", content)
+            self.assertLess(content.index("## 经验条目"), content.index("## 用户偏好"))
+            for field in (
+                "偏好类型",
+                "触发场景",
+                "用户更希望",
+                "用户不希望",
+                "执行准则",
+                "验收信号",
+                "置信度",
+                "来源证据",
+            ):
+                self.assertIn(f"- {field}：", content)
 
             path.write_text("# Existing\n\nKeep me.\n", encoding="utf-8")
             self._group(workspace, title="another-team")
@@ -166,8 +180,24 @@ class TestExperienceReminder(unittest.TestCase):
         third = plan_experience_reminder(self.group, actor_id="peer", messages=[self._message(3)])
         self.assertFalse(third.due)
 
+    def test_reminder_applies_verified_lessons_and_confirmed_preferences(self) -> None:
+        from no1.daemon.messaging.experience_reminder import EXPERIENCE_REMINDER_LINE
+
+        self.assertIn("verified lessons", EXPERIENCE_REMINDER_LINE)
+        self.assertIn("confirmed user preferences", EXPERIENCE_REMINDER_LINE)
+        self.assertIn("clearly evidenced stable preferences", EXPERIENCE_REMINDER_LINE)
+
 
 class TestExperienceMcpHandler(unittest.TestCase):
+    def test_toolspec_routes_preferences_to_shared_experience(self) -> None:
+        from no1.ports.mcp.toolspecs import MCP_TOOLS
+
+        spec = next(item for item in MCP_TOOLS if item.get("name") == "onecolleague_experience")
+        description = str(spec.get("description") or "")
+        self.assertIn("stable user preferences", description)
+        self.assertIn("under User Preferences", description)
+        self.assertIn("expected_revision", description)
+
     def test_handler_maps_actions_to_daemon_operations(self) -> None:
         from no1.ports.mcp.handlers.experience import _handle_experience_namespace
 

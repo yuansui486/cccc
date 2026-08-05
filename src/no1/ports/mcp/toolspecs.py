@@ -1405,8 +1405,10 @@ MCP_TOOLS = [
         "name": "onecolleague_experience",
         "description": (
             "Read and maintain the active project's shared EXPERIENCE.md. "
-            "Read before high-impact work or when reminded. Append only verified reusable lessons; "
-            "use replace with expected_revision to deduplicate or reorganize without overwriting concurrent edits."
+            "Read before high-impact work or when reminded, and apply both verified reusable lessons and clearly "
+            "evidenced stable user preferences. Append preferences under User Preferences, creating that section "
+            "when first needed. Use replace with expected_revision to deduplicate, reorganize, or update changed "
+            "preferences without overwriting concurrent edits."
         ),
         "inputSchema": _obj(
             {
