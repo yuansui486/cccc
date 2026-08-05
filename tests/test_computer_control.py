@@ -3573,6 +3573,18 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(calls[2], [str(installed), "--version"])
 
+    def test_uv_environments_ignore_explicit_user_config_file(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "no1.computer_control.mcp.os.environ",
+            {"UV_CONFIG_FILE": str(Path(td) / "broken-uv.toml"), "UV_NO_CONFIG": "0"},
+            clear=True,
+        ):
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+
+            for env in (setup._bootstrap_environment(), setup._uv_environment()):
+                self.assertNotIn("UV_CONFIG_FILE", env)
+                self.assertEqual(env["UV_NO_CONFIG"], "1")
+
     def test_package_index_prefers_explicit_https_configuration(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(
             "no1.computer_control.mcp.os.environ",

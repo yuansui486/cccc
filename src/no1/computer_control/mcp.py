@@ -1277,6 +1277,7 @@ class WindowsMCPSetup:
         self.tool_dir.mkdir(parents=True, exist_ok=True)
         self.bin_dir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
+        env.pop("UV_CONFIG_FILE", None)
         search_path = self._command_search_path()
         if search_path:
             env["PATH"] = search_path
@@ -1285,6 +1286,7 @@ class WindowsMCPSetup:
                 "UV_TOOL_DIR": str(self.tool_dir),
                 "UV_TOOL_BIN_DIR": str(self.bin_dir),
                 "UV_PYTHON_INSTALL_DIR": str(self.python_dir),
+                "UV_NO_CONFIG": "1",
                 "UV_NO_PROGRESS": "1",
                 "PYTHONUTF8": "1",
             }
@@ -1445,9 +1447,11 @@ class WindowsMCPSetup:
 
     def _bootstrap_environment(self) -> Dict[str, str]:
         env = dict(os.environ)
+        env.pop("UV_CONFIG_FILE", None)
         search_path = self._command_search_path()
         if search_path:
             env["PATH"] = search_path
+        env["UV_NO_CONFIG"] = "1"
         env["PYTHONUTF8"] = "1"
         env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
         return env
