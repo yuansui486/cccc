@@ -1804,10 +1804,14 @@ class TestComputerControl(unittest.TestCase):
                 encoding="utf-8",
             )
             original = config.read_text(encoding="utf-8")
-            args = codex_windows_mcp_disable_args({"CODEX_HOME": str(root)})
+            with patch("no1.computer_control.isolation._windows_mcp_supported_platform", return_value=False):
+                args = codex_windows_mcp_disable_args({"CODEX_HOME": str(root)})
             self.assertIn("mcp_servers.windows-mcp.enabled=false", args)
             self.assertNotIn("mcp_servers.other.enabled=false", args)
             self.assertEqual(config.read_text(encoding="utf-8"), original)
+
+            with patch("no1.computer_control.isolation._windows_mcp_supported_platform", return_value=True):
+                self.assertEqual(codex_windows_mcp_disable_args({"CODEX_HOME": str(root)}), [])
 
     def test_store_revision_trust_and_lease_isolation(self):
         with tempfile.TemporaryDirectory() as td, _canonical_home_env(td):

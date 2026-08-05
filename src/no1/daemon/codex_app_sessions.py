@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import logging
 import ntpath
 import os
 import queue
+import re
 import shutil
 import socket
 import subprocess
@@ -13,6 +15,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 from ..kernel.actors import find_actor
 from ..kernel.blobs import resolve_blob_attachment_path
@@ -57,6 +60,13 @@ logger = logging.getLogger(__name__)
 _TURN_STALL_SECONDS = 45.0
 _TURN_WAIT_POLL_SECONDS = 5.0
 _WEBSOCKET_CLOSE_TIMEOUT_SECONDS = 0.2
+_CODEX_APP_SERVER_START_TIMEOUT_SECONDS = 60.0
+_STARTUP_OUTPUT_LIMIT = 8000
+
+_STARTUP_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|authorization|secret|password)\b[\"']?\s*[:=]\s*[\"']?)([^\s\"',;]+)"
+)
+_STARTUP_BEARER_RE = re.compile(r"(?i)\bbearer\s+[^\s\"',;]+")
 
 
 def _free_loopback_ws_url() -> str:
@@ -69,17 +79,101 @@ def _free_loopback_ws_url() -> str:
         sock.close()
 
 
+def _is_loopback_host(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return bool(ipaddress.ip_address(normalized).is_loopback)
+    except ValueError:
+        return False
+
+
 def _connect_websocket(url: str, *, timeout: float):
     try:
         from websocket import create_connection
     except Exception as exc:  # pragma: no cover - dependency is declared, this is defensive.
         raise RuntimeError("websocket-client is required for codex app-server websocket transport") from exc
-    ws = create_connection(str(url), timeout=float(timeout), suppress_origin=True)
+
+    raw_url = str(url)
+    parsed = urlsplit(raw_url)
+    direct_socket: Any = None
+    options: dict[str, Any] = {"timeout": float(timeout), "suppress_origin": True}
+    if parsed.scheme == "ws" and parsed.hostname and parsed.port and _is_loopback_host(parsed.hostname):
+        # websocket-client consults HTTP_PROXY unless NO_PROXY is configured. Supplying an
+        # already-connected loopback socket guarantees that local app-server traffic is direct.
+        direct_socket = socket.create_connection((parsed.hostname, int(parsed.port)), timeout=float(timeout))
+        options["socket"] = direct_socket
+    try:
+        ws = create_connection(raw_url, **options)
+    except Exception:
+        if direct_socket is not None:
+            try:
+                direct_socket.close()
+            except Exception:
+                pass
+        raise
     try:
         ws.settimeout(None)
     except Exception:
         pass
     return ws
+
+
+def _redact_startup_text(value: Any) -> str:
+    text = str(value or "")
+    text = _STARTUP_BEARER_RE.sub("Bearer [REDACTED]", text)
+    return _STARTUP_SECRET_RE.sub(r"\1[REDACTED]", text)
+
+
+class _StartupOutput:
+    def __init__(self, *, limit: int = _STARTUP_OUTPUT_LIMIT) -> None:
+        self._limit = max(512, int(limit or _STARTUP_OUTPUT_LIMIT))
+        self._lock = threading.Lock()
+        self._text = ""
+
+    def append(self, source: str, line: Any) -> str:
+        safe_line = _redact_startup_text(line).rstrip()
+        if not safe_line:
+            return ""
+        entry = f"{str(source or 'output').strip()}: {safe_line}"
+        with self._lock:
+            self._text = f"{self._text}\n{entry}".strip()
+            if len(self._text) > self._limit:
+                self._text = self._text[-self._limit :].lstrip()
+        return safe_line
+
+    def snapshot(self) -> str:
+        with self._lock:
+            return str(self._text)
+
+
+def _process_returncode(proc: Any) -> Optional[int]:
+    if proc is None:
+        return None
+    try:
+        value = proc.poll()
+    except Exception:
+        return None
+    return int(value) if value is not None else None
+
+
+def _wait_for_websocket(proc: Any, url: str, *, timeout: float):
+    started_at = time.monotonic()
+    deadline = started_at + max(0.1, float(timeout))
+    last_exc: BaseException = TimeoutError("startup deadline exceeded")
+    while True:
+        returncode = _process_returncode(proc)
+        if returncode is not None:
+            raise RuntimeError(f"codex app-server exited before websocket was ready (exit_code={returncode})")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"codex app-server websocket was not ready after {float(timeout):.1f}s: {last_exc}") from last_exc
+        try:
+            return _connect_websocket(url, timeout=min(1.0, remaining))
+        except Exception as exc:
+            last_exc = exc
+        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
 
 
 def _close_websocket_bounded(ws: Any) -> None:
@@ -157,34 +251,69 @@ def _terminate_codex_app_server_process(proc: Any) -> None:
             pass
 
 
-def _collect_exited_process_output(proc: Any, *, limit: int = 2000) -> str:
-    if proc is None:
-        return ""
-    try:
-        returncode = proc.poll()
-    except Exception:
-        return ""
-    if returncode is None:
-        return ""
-    stdout = ""
-    stderr = ""
-    try:
-        stdout, stderr = proc.communicate(timeout=0.2)
-    except Exception:
-        pass
-    parts: list[str] = []
-    err_text = str(stderr or "").strip()
-    out_text = str(stdout or "").strip()
-    if err_text:
-        parts.append(f"stderr: {err_text}")
-    if out_text:
-        parts.append(f"stdout: {out_text}")
-    if returncode is not None:
-        parts.append(f"exit_code: {returncode}")
-    detail = "; ".join(parts).strip()
-    if len(detail) > limit:
-        return detail[: max(0, limit - 1)].rstrip() + "…"
-    return detail
+def _spawn_codex_app_server_process(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: Dict[str, str],
+) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(cwd),
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        **windowless_subprocess_popen_kwargs(),
+    )
+
+
+def _proxy_env_names(env: Dict[str, str]) -> list[str]:
+    names = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+    return [name for name in names if str((env or {}).get(name) or (env or {}).get(name.lower()) or "").strip()]
+
+
+def _startup_failure_message(
+    *,
+    exc: BaseException,
+    proc: Any,
+    command: list[str],
+    cwd: Path,
+    listen_url: str,
+    env: Dict[str, str],
+    elapsed: float,
+    output: _StartupOutput,
+    process_was_running: bool = False,
+    phase: str = "connect",
+) -> str:
+    returncode = _process_returncode(proc)
+    if process_was_running and returncode is not None:
+        process_state = f"running_at_failure->exited({returncode})"
+    else:
+        process_state = f"exited({returncode})" if returncode is not None else "running"
+    proxy_names = _proxy_env_names(env)
+    failure_prefix = (
+        "failed to connect codex app-server websocket"
+        if str(phase or "").strip().lower() == "connect"
+        else f"failed to {str(phase or 'start').strip()} codex app-server"
+    )
+    parts = [
+        f"{failure_prefix}: {exc}",
+        f"codex={str(command[0] if command else 'codex')}",
+        f"cwd={cwd}",
+        f"listen={listen_url}",
+        f"elapsed={max(0.0, float(elapsed)):.1f}s",
+        f"process={process_state}",
+        f"proxy_env={','.join(proxy_names) if proxy_names else 'none'}",
+    ]
+    startup_output = output.snapshot().strip()
+    if startup_output:
+        parts.append(f"startup_output={startup_output}")
+    return "; ".join(parts)
 
 
 def _is_websocket_idle_timeout(exc: BaseException) -> bool:
@@ -272,6 +401,132 @@ def _is_missing_codex_cli_error(exc: BaseException) -> bool:
 
 def _codex_cli_available(env: Dict[str, str]) -> bool:
     return bool(shutil.which("codex", path=str((env or {}).get("PATH") or os.environ.get("PATH") or "")))
+
+
+def _drain_probe_stream(stream: Any, source: str, output: _StartupOutput) -> None:
+    if stream is None:
+        return
+    try:
+        for raw_line in stream:
+            output.append(source, raw_line)
+    except Exception as exc:
+        if not _is_closed_stream_logging_error(exc):
+            output.append(source, f"stream read failed: {exc}")
+
+
+def _probe_initialize(ws: Any, *, timeout: float) -> None:
+    request_id = 1
+    ws.send(
+        json.dumps(
+            {
+                "id": request_id,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {"name": "onecolleague-doctor", "version": "1.0"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            }
+        )
+    )
+    deadline = time.monotonic() + max(0.1, float(timeout))
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("codex app-server initialize timed out")
+        try:
+            ws.settimeout(min(1.0, remaining))
+        except Exception:
+            pass
+        try:
+            raw_message = ws.recv()
+        except Exception as exc:
+            if _is_websocket_idle_timeout(exc):
+                continue
+            raise
+        if not raw_message:
+            continue
+        try:
+            message = json.loads(str(raw_message))
+        except Exception:
+            continue
+        if not isinstance(message, dict) or int(message.get("id") or 0) != request_id:
+            continue
+        error = message.get("error")
+        if error:
+            raise RuntimeError(f"codex app-server initialize failed: {_redact_startup_text(error)}")
+        return
+
+
+def probe_codex_app_server(*, cwd: Path, timeout: float = _CODEX_APP_SERVER_START_TIMEOUT_SECONDS) -> Dict[str, Any]:
+    """Start and initialize a temporary Codex app-server without changing MCP configuration."""
+    probe_cwd = Path(cwd).resolve()
+    if not probe_cwd.is_dir():
+        raise RuntimeError(f"probe working directory does not exist: {probe_cwd}")
+    env = with_node_deprecation_warnings_suppressed(os.environ.copy())
+    if not _codex_cli_available(env):
+        raise RuntimeError("codex CLI not found")
+
+    from ..computer_control.isolation import codex_windows_mcp_disable_args
+
+    listen_url = _free_loopback_ws_url()
+    runtime_command = ["codex", *codex_windows_mcp_disable_args(env), "app-server", "--listen", listen_url]
+    command = resolve_subprocess_argv(runtime_command)
+    output = _StartupOutput()
+    proc = _spawn_codex_app_server_process(command, cwd=probe_cwd, env=env)
+    readers = [
+        threading.Thread(target=_drain_probe_stream, args=(proc.stdout, "stdout", output), daemon=True),
+        threading.Thread(target=_drain_probe_stream, args=(proc.stderr, "stderr", output), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    ws: Any = None
+    started_at = time.monotonic()
+    phase = "connect"
+    try:
+        ws = _wait_for_websocket(proc, listen_url, timeout=float(timeout))
+        elapsed = time.monotonic() - started_at
+        phase = "initialize"
+        _probe_initialize(ws, timeout=max(0.1, float(timeout) - elapsed))
+        return {
+            "ok": True,
+            "codex": str(command[0] if command else "codex"),
+            "cwd": str(probe_cwd),
+            "listen": listen_url,
+            "elapsed_seconds": round(time.monotonic() - started_at, 3),
+            "proxy_env": _proxy_env_names(env),
+            "startup_output": output.snapshot(),
+        }
+    except Exception as exc:
+        process_was_running = _process_returncode(proc) is None
+        _terminate_codex_app_server_process(proc)
+        for reader in readers:
+            try:
+                reader.join(timeout=0.2)
+            except Exception:
+                pass
+        raise RuntimeError(
+            _startup_failure_message(
+                exc=exc,
+                proc=proc,
+                command=command,
+                cwd=probe_cwd,
+                listen_url=listen_url,
+                env=env,
+                elapsed=time.monotonic() - started_at,
+                output=output,
+                process_was_running=process_was_running,
+                phase=phase,
+            )
+        ) from exc
+    finally:
+        _close_websocket_bounded(ws)
+        _terminate_codex_app_server_process(proc)
+        for reader in readers:
+            try:
+                reader.join(timeout=0.5)
+            except Exception:
+                pass
 
 
 def _is_closed_stream_logging_error(exc: BaseException) -> bool:
@@ -398,6 +653,7 @@ class CodexAppSession:
         start_remote_tui: bool = False,
         remote_tui_base_command: Optional[list[str]] = None,
         max_backlog_bytes: int = 2_000_000,
+        startup_timeout: float = _CODEX_APP_SERVER_START_TIMEOUT_SECONDS,
     ) -> None:
         self.group_id = str(group_id or "").strip()
         self.actor_id = str(actor_id or "").strip()
@@ -410,6 +666,7 @@ class CodexAppSession:
         self.start_remote_tui = bool(start_remote_tui)
         self.remote_tui_base_command = list(remote_tui_base_command or [])
         self.max_backlog_bytes = int(max_backlog_bytes or 0) or 2_000_000
+        self.startup_timeout = max(0.1, float(startup_timeout or _CODEX_APP_SERVER_START_TIMEOUT_SECONDS))
         self._proc: Optional[subprocess.Popen[str]] = None
         self._ws: Any = None
         self._pty_session: Any = None
@@ -442,6 +699,7 @@ class CodexAppSession:
         self._last_turn_event_monotonic = 0.0
         self._active_stalled_emitted = False
         self._runtime_command: list[str] = []
+        self._startup_output = _StartupOutput()
 
     def request_stop(self) -> None:
         """Mark this session as intentionally stopping before transports close."""
@@ -728,6 +986,7 @@ class CodexAppSession:
             if self._running:
                 return
             self._stop_requested = False
+            self._startup_output = _StartupOutput()
             env = os.environ.copy()
             env.update(self.env)
             resolved_home = str(env.get("ONECOLLEAGUE_HOME") or env.get("CCCC_HOME") or ensure_home())
@@ -744,44 +1003,59 @@ class CodexAppSession:
 
             self._runtime_command = ["codex", *codex_windows_mcp_disable_args(env), "app-server", "--listen", self.listen_url]
             popen_command = resolve_subprocess_argv(self._runtime_command)
-            self._proc = subprocess.Popen(
-                popen_command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.cwd),
-                env=env,
-                text=True,
-                bufsize=1,
-                **windowless_subprocess_popen_kwargs(),
-            )
+            self._proc = _spawn_codex_app_server_process(popen_command, cwd=self.cwd, env=env)
             self._running = True
 
+        self._stderr_thread = threading.Thread(
+            target=self._stderr_loop,
+            name=f"onecolleague-codex-err:{self.group_id}:{self.actor_id}",
+            daemon=True,
+        )
         if self.transport == "websocket":
-            last_exc: Optional[Exception] = None
-            for _ in range(50):
-                try:
-                    self._ws = _connect_websocket(self.listen_url, timeout=1.0)
-                    last_exc = None
-                    break
-                except Exception as exc:
-                    last_exc = exc
-                    time.sleep(0.1)
-            if last_exc is not None:
-                startup_detail = _collect_exited_process_output(self._proc)
-                self.stop()
-                detail_suffix = f"; app-server startup output: {startup_detail}" if startup_detail else ""
-                raise RuntimeError(f"failed to connect codex app-server websocket: {last_exc}{detail_suffix}") from last_exc
-            self._ws_thread = threading.Thread(target=self._websocket_loop, name=f"onecolleague-codex-ws:{self.group_id}:{self.actor_id}", daemon=True)
+            self._stdout_thread = threading.Thread(
+                target=self._websocket_stdout_loop,
+                name=f"onecolleague-codex-out:{self.group_id}:{self.actor_id}",
+                daemon=True,
+            )
         else:
-            self._stdout_thread = threading.Thread(target=self._stdout_loop, name=f"onecolleague-codex-out:{self.group_id}:{self.actor_id}", daemon=True)
-        self._stderr_thread = threading.Thread(target=self._stderr_loop, name=f"onecolleague-codex-err:{self.group_id}:{self.actor_id}", daemon=True)
+            self._stdout_thread = threading.Thread(
+                target=self._stdout_loop,
+                name=f"onecolleague-codex-out:{self.group_id}:{self.actor_id}",
+                daemon=True,
+            )
+        self._stderr_thread.start()
+        self._stdout_thread.start()
+
+        if self.transport == "websocket":
+            startup_started_at = time.monotonic()
+            try:
+                self._ws = _wait_for_websocket(self._proc, self.listen_url, timeout=self.startup_timeout)
+            except Exception as exc:
+                failed_proc = self._proc
+                process_was_running = _process_returncode(failed_proc) is None
+                self.stop()
+                for reader in (self._stdout_thread, self._stderr_thread):
+                    if reader is not None:
+                        try:
+                            reader.join(timeout=0.2)
+                        except Exception:
+                            pass
+                message = _startup_failure_message(
+                    exc=exc,
+                    proc=failed_proc,
+                    command=popen_command,
+                    cwd=self.cwd,
+                    listen_url=self.listen_url,
+                    env=env,
+                    elapsed=time.monotonic() - startup_started_at,
+                    output=self._startup_output,
+                    process_was_running=process_was_running,
+                )
+                raise RuntimeError(message) from exc
+            self._ws_thread = threading.Thread(target=self._websocket_loop, name=f"onecolleague-codex-ws:{self.group_id}:{self.actor_id}", daemon=True)
         self._turn_thread = threading.Thread(target=self._turn_loop, name=f"onecolleague-codex-turn:{self.group_id}:{self.actor_id}", daemon=True)
-        if self._stdout_thread is not None:
-            self._stdout_thread.start()
         if self._ws_thread is not None:
             self._ws_thread.start()
-        self._stderr_thread.start()
         try:
             self._request(
                 "initialize",
@@ -1194,6 +1468,20 @@ class CodexAppSession:
                 persist_actor_stopped = not self._stop_requested
             self.stop(persist_actor_stopped=persist_actor_stopped)
 
+    def _websocket_stdout_loop(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            return
+        try:
+            for raw_line in proc.stdout:
+                safe_line = self._startup_output.append("stdout", raw_line)
+                if safe_line:
+                    _safe_logger_call("info", "[codex-app %s/%s stdout] %s", self.group_id, self.actor_id, safe_line)
+        except Exception as exc:
+            if _is_closed_stream_logging_error(exc):
+                return
+            _safe_logger_call("exception", "codex websocket stdout loop failed: %s/%s", self.group_id, self.actor_id)
+
     def _websocket_loop(self) -> None:
         while self.is_running():
             ws = self._ws
@@ -1238,7 +1526,8 @@ class CodexAppSession:
             for raw_line in proc.stderr:
                 line = str(raw_line or "").rstrip()
                 if line:
-                    _safe_logger_call("info", "[codex-app %s/%s] %s", self.group_id, self.actor_id, line)
+                    safe_line = self._startup_output.append("stderr", line)
+                    _safe_logger_call("info", "[codex-app %s/%s] %s", self.group_id, self.actor_id, safe_line)
                     if _is_codex_app_server_auth_failure_line(line):
                         with self._lock:
                             stop_requested = bool(self._stop_requested)

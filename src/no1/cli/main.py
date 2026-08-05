@@ -406,6 +406,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return a non-zero status when the Windows native element picker is unavailable",
     )
+    p_doctor.add_argument(
+        "--probe-codex-app-server",
+        action="store_true",
+        help="Start and initialize a temporary Codex app-server using the packaged runtime path",
+    )
+    p_doctor.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="Codex app-server probe timeout in seconds (default: 60)",
+    )
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_runtime = sub.add_parser("runtime", help="Manage agent runtimes")

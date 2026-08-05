@@ -7,6 +7,15 @@ from unittest.mock import patch
 
 
 class TestCliMain(unittest.TestCase):
+    def test_doctor_accepts_codex_app_server_probe_options(self) -> None:
+        cli_main = importlib.import_module("no1.cli.main")
+
+        args = cli_main.build_parser().parse_args(["doctor", "--probe-codex-app-server", "--timeout", "12.5"])
+
+        self.assertTrue(args.probe_codex_app_server)
+        self.assertEqual(args.timeout, 12.5)
+        self.assertIs(args.func, cli_main.cmd_doctor)
+
     def test_main_uses_default_entry_when_no_subcommand(self) -> None:
         cli_main = importlib.import_module("no1.cli.main")
 

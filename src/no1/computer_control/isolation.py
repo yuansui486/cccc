@@ -35,7 +35,13 @@ def codex_windows_mcp_server_names(env: Dict[str, Any]) -> List[str]:
     return names
 
 
+def _windows_mcp_supported_platform() -> bool:
+    return os.name == "nt"
+
+
 def codex_windows_mcp_disable_args(env: Dict[str, Any]) -> List[str]:
+    if _windows_mcp_supported_platform():
+        return []
     args: List[str] = []
     for name in codex_windows_mcp_server_names(env):
         key = name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else '"' + name.replace('"', '\\"') + '"'

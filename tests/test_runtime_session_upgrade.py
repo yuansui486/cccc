@@ -163,7 +163,8 @@ command = "windows_mcp"
 """.strip(),
             encoding="utf-8",
         )
-        disable_args = codex_windows_mcp_disable_args({"CODEX_HOME": str(codex_home)})
+        with patch("no1.computer_control.isolation._windows_mcp_supported_platform", return_value=False):
+            disable_args = codex_windows_mcp_disable_args({"CODEX_HOME": str(codex_home)})
         self.assertEqual(
             disable_args,
             [

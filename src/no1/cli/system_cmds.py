@@ -394,7 +394,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("  onecolleague actor add my-agent --runtime <name>")
         print("  onecolleague")
     
-    if bool(getattr(args, "require_native_picker", False)) and native_picker_failed:
+    codex_probe_failed = False
+    if bool(getattr(args, "probe_codex_app_server", False)):
+        from ..daemon.codex_app_sessions import probe_codex_app_server
+
+        print()
+        print("Codex app-server probe:")
+        try:
+            result = probe_codex_app_server(cwd=Path.cwd(), timeout=float(getattr(args, "timeout", 60.0) or 60.0))
+            print(f"  [OK] initialized in {float(result.get('elapsed_seconds') or 0.0):.3f}s")
+            print(f"  Codex: {result.get('codex')}")
+            print(f"  Listen: {result.get('listen')}")
+            proxy_env = result.get("proxy_env") if isinstance(result.get("proxy_env"), list) else []
+            print(f"  Proxy env present: {', '.join(str(item) for item in proxy_env) if proxy_env else 'none'}")
+            startup_output = str(result.get("startup_output") or "").strip()
+            if startup_output:
+                print("  Startup output:")
+                for line in startup_output.splitlines():
+                    print(f"    {line}")
+        except Exception as exc:
+            codex_probe_failed = True
+            print(f"  [FAILED] {exc}")
+
+    if (bool(getattr(args, "require_native_picker", False)) and native_picker_failed) or codex_probe_failed:
         return 2
     return 0
 

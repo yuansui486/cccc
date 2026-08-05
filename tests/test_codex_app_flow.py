@@ -45,6 +45,62 @@ class TestCodexAppFlow(unittest.TestCase):
                     events.append(obj)
         return events
 
+    def test_codex_loopback_websocket_uses_direct_socket_even_with_proxy_env(self) -> None:
+        from no1.daemon.codex_app_sessions import _connect_websocket
+
+        direct_socket = unittest.mock.Mock()
+        websocket = unittest.mock.Mock()
+        with patch("no1.daemon.codex_app_sessions.socket.create_connection", return_value=direct_socket) as connect_tcp, patch(
+            "websocket.create_connection", return_value=websocket
+        ) as connect_ws, patch.dict(os.environ, {"HTTP_PROXY": "http://proxy.invalid:8080"}):
+            result = _connect_websocket("ws://127.0.0.1:43210", timeout=1.5)
+
+        self.assertIs(result, websocket)
+        connect_tcp.assert_called_once_with(("127.0.0.1", 43210), timeout=1.5)
+        self.assertIs(connect_ws.call_args.kwargs.get("socket"), direct_socket)
+        self.assertTrue(bool(connect_ws.call_args.kwargs.get("suppress_origin")))
+
+    def test_codex_startup_diagnostics_redact_secrets_for_running_process(self) -> None:
+        from no1.daemon.codex_app_sessions import _StartupOutput, _startup_failure_message
+
+        class LiveProc:
+            def poll(self):
+                return None
+
+        output = _StartupOutput()
+        output.append("stderr", "API_KEY=super-secret Authorization: Bearer access-token")
+        message = _startup_failure_message(
+            exc=TimeoutError("timed out"),
+            proc=LiveProc(),
+            command=[r"C:\Tools\codex.cmd", "app-server"],
+            cwd=Path(r"C:\work"),
+            listen_url="ws://127.0.0.1:43210",
+            env={"HTTP_PROXY": "http://user:password@proxy.invalid:8080"},
+            elapsed=60.0,
+            output=output,
+        )
+
+        self.assertIn("process=running", message)
+        self.assertIn("proxy_env=HTTP_PROXY", message)
+        self.assertIn("[REDACTED]", message)
+        self.assertNotIn("super-secret", message)
+        self.assertNotIn("access-token", message)
+        self.assertNotIn("proxy.invalid", message)
+
+    def test_codex_websocket_wait_fails_immediately_when_process_exits(self) -> None:
+        from no1.daemon.codex_app_sessions import _wait_for_websocket
+
+        class ExitedProc:
+            def poll(self):
+                return 7
+
+        with patch("no1.daemon.codex_app_sessions._connect_websocket") as connect_ws, self.assertRaisesRegex(
+            RuntimeError, "exit_code=7"
+        ):
+            _wait_for_websocket(ExitedProc(), "ws://127.0.0.1:43210", timeout=60.0)
+
+        connect_ws.assert_not_called()
+
     def test_claude_app_session_persists_start_state_outside_lock(self) -> None:
         from no1.daemon.claude_app_sessions import ClaudeAppSession
 
@@ -4234,6 +4290,8 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(session._turn_queue.empty())
             command = list(popen.call_args.args[0])
             self.assertEqual(command[0], r"C:\Tools\codex.cmd")
+            self.assertEqual(popen.call_args.kwargs.get("encoding"), "utf-8")
+            self.assertEqual(popen.call_args.kwargs.get("errors"), "replace")
             app_server_index = command.index("app-server")
             listen_index = command.index("--listen")
             self.assertEqual(listen_index, app_server_index + 1)
