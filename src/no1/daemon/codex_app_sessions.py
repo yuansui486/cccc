@@ -302,7 +302,7 @@ def _startup_failure_message(
         else f"failed to {str(phase or 'start').strip()} codex app-server"
     )
     parts = [
-        f"{failure_prefix}: {exc}",
+        f"{failure_prefix}: {_redact_startup_text(exc)}",
         f"codex={str(command[0] if command else 'codex')}",
         f"cwd={cwd}",
         f"listen={listen_url}",

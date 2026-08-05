@@ -70,7 +70,7 @@ class TestCodexAppFlow(unittest.TestCase):
         output = _StartupOutput()
         output.append("stderr", "API_KEY=super-secret Authorization: Bearer access-token")
         message = _startup_failure_message(
-            exc=TimeoutError("timed out"),
+            exc=TimeoutError("Authorization: Bearer failure-token"),
             proc=LiveProc(),
             command=[r"C:\Tools\codex.cmd", "app-server"],
             cwd=Path(r"C:\work"),
@@ -85,6 +85,7 @@ class TestCodexAppFlow(unittest.TestCase):
         self.assertIn("[REDACTED]", message)
         self.assertNotIn("super-secret", message)
         self.assertNotIn("access-token", message)
+        self.assertNotIn("failure-token", message)
         self.assertNotIn("proxy.invalid", message)
 
     def test_codex_websocket_wait_fails_immediately_when_process_exits(self) -> None:
