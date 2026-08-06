@@ -24,6 +24,7 @@ import {
 import { ActorAvatar } from "./ActorAvatar";
 import {
     formatEventLine,
+    getActorAccentBorderClass,
     getMessageBubbleMotionClass,
     mayContainMarkdown,
 } from "./messageBubble/helpers";
@@ -936,7 +937,11 @@ export const MessageBubble = memo(function MessageBubble({
                         bubbleMotionClass,
                         isUserMessage
                             ? "glass-bubble w-auto min-w-[min(18rem,70vw)] rounded-[22px] rounded-tr-md"
-                            : "w-full rounded-[22px] rounded-tl-md border border-[var(--glass-border-subtle)] text-[var(--color-text-primary)] shadow-[0_10px_28px_rgba(15,23,42,0.06)]"
+                            : classNames(
+                                "w-full rounded-[22px] rounded-tl-md border-y border-r border-l-4 text-[var(--color-text-primary)] shadow-[0_10px_28px_rgba(15,23,42,0.06)]",
+                                "border-y-[var(--glass-border-subtle)] border-r-[var(--glass-border-subtle)]",
+                                getActorAccentBorderClass(senderAccent?.text)
+                            )
                         ,
                         isAttention ? "ring-1 ring-amber-400/40 dark:ring-amber-500/40" : ""
                         ,

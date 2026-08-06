@@ -1,5 +1,29 @@
 import type { ChatMessageData, LedgerEvent, StreamingActivity } from "../../types";
 
+const ACTOR_ACCENT_BORDER_CLASSES: Record<string, string> = {
+  "text-sky-300": "border-l-sky-400/80",
+  "text-indigo-300": "border-l-indigo-400/80",
+  "text-violet-300": "border-l-violet-400/80",
+  "text-fuchsia-300": "border-l-fuchsia-400/80",
+  "text-cyan-300": "border-l-cyan-400/80",
+  "text-teal-300": "border-l-teal-400/80",
+  "text-emerald-300": "border-l-emerald-400/80",
+  "text-amber-300": "border-l-amber-400/80",
+  "text-sky-700": "border-l-sky-500",
+  "text-indigo-700": "border-l-indigo-500",
+  "text-violet-700": "border-l-violet-500",
+  "text-fuchsia-700": "border-l-fuchsia-500",
+  "text-cyan-700": "border-l-cyan-500",
+  "text-teal-700": "border-l-teal-500",
+  "text-emerald-700": "border-l-emerald-500",
+  "text-amber-700": "border-l-amber-500",
+};
+
+export function getActorAccentBorderClass(accentTextClass?: string | null): string {
+  return ACTOR_ACCENT_BORDER_CLASSES[String(accentTextClass || "").trim()]
+    || "border-l-[var(--glass-border-subtle)]";
+}
+
 function isMarkdownTableSeparatorCell(cell: string): boolean {
   return /^:?-{3,}:?$/.test(String(cell || "").trim());
 }
