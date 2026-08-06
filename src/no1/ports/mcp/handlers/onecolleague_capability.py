@@ -6,11 +6,14 @@ import os
 import re
 from typing import Any, Dict, Optional
 
+from ....kernel.capabilities import LOCAL_COMPUTER_CONTROL_TOOLS
 from ..common import MCPError, _call_daemon_or_raise
 from ..ownership import is_canonical_mcp_tool, resolve_mcp_tool_owner
 from ..toolspecs import canonical_mcp_tool_name
 
 _EXT_TOOL_NAME_RE = re.compile(r"^onecolleague_ext_[a-f0-9]{8}_(.+)$")
+_LOCAL_COMPUTER_CONTROL_CAPABILITY_ID = "pack:computer-control-local"
+_LOCAL_COMPUTER_CONTROL_TOOLS = frozenset(LOCAL_COMPUTER_CONTROL_TOOLS)
 
 
 def _skill_runtime_contract_fields(capability_id: str) -> Dict[str, Any]:
@@ -377,6 +380,49 @@ def capability_use(
     call_tool = canonical_mcp_tool_name(str(tool_name or "").strip())
     tool_args = dict(tool_arguments) if isinstance(tool_arguments, dict) else {}
     primary_owner = resolve_mcp_tool_owner(call_tool) if call_tool else None
+
+    if call_tool in _LOCAL_COMPUTER_CONTROL_TOOLS:
+        if cap_id != _LOCAL_COMPUTER_CONTROL_CAPABILITY_ID:
+            raise MCPError(
+                code="capability_tool_not_found",
+                message=f"tool requires exact capability {_LOCAL_COMPUTER_CONTROL_CAPABILITY_ID}: {call_tool}",
+                details={"capability_id": cap_id, "tool_name": call_tool},
+            )
+        requested_scope = str(scope or "session").strip().lower()
+        if requested_scope != "session":
+            raise MCPError(
+                code="capability_use_invalid_scope",
+                message="local computer control can only be used with session scope",
+                details={"capability_id": cap_id, "scope": requested_scope},
+            )
+        # Bind the nested call to the authenticated wrapper target. Caller
+        # supplied values must not redirect an authorized desktop operation.
+        tool_args["group_id"] = group_id
+        tool_args["by"] = by
+        tool_args["actor_id"] = target_actor
+
+        # This pack is an ephemeral admission route, not persisted capability
+        # state. The nested dispatcher still applies the local actor, platform,
+        # and exact turn-grant checks used by the product handler.
+        from ..server import capability_use_nested_builtin_call_scope, handle_tool_call
+
+        with capability_use_nested_builtin_call_scope(cap_id):
+            tool_result = handle_tool_call(call_tool, tool_args)
+        return {
+            "group_id": group_id,
+            "actor_id": target_actor,
+            "capability_id": cap_id,
+            "scope": "session",
+            "requested_scope": "session",
+            "enabled": True,
+            "state": "verified",
+            "refresh_required": False,
+            "verification_source": "tool_call",
+            "ephemeral": True,
+            "tool_called": True,
+            "tool_name": call_tool,
+            "tool_result": tool_result,
+        }
 
     if primary_owner is not None and primary_owner.kind in {"product", "disabled"}:
         raise MCPError(

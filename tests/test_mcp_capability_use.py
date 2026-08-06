@@ -400,7 +400,16 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
                 self.assertEqual(applied, ["pack:diagnostics", "pack:group-runtime"])
 
-                state_result = mcp_server.handle_tool_call("onecolleague_capability_state", {})
+                state_response, _ = handle_request(
+                    DaemonRequest.model_validate(
+                        {
+                            "op": "capability_state",
+                            "args": {"group_id": group_id, "actor_id": "peer-1", "by": "peer-1"},
+                        }
+                    )
+                )
+                self.assertTrue(state_response.ok, getattr(state_response, "error", None))
+                state_result = state_response.result or {}
                 enabled = set(state_result.get("enabled_capabilities") or [])
                 self.assertIn("skill:onecolleague:runtime-bootstrap", enabled)
                 self.assertIn("pack:diagnostics", enabled)
@@ -756,7 +765,6 @@ class TestMcpCapabilityUse(unittest.TestCase):
 
         cases = {
             "onecolleague_group_bridge_session_send": "pack:group_bridge",
-            "onecolleague_computer_run": "pack:computer-control-local",
             "onecolleague_repo_edit": "core",
             "onecolleague_runtime_complete_turn": "core",
             "onecolleague_voice_secretary_request": "core",
@@ -781,6 +789,179 @@ class TestMcpCapabilityUse(unittest.TestCase):
                     )
                 self.assertEqual(caught.exception.code, "capability_tool_not_found")
         handle_tool_call.assert_not_called()
+
+    def test_local_computer_control_uses_ephemeral_exact_nested_route(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        runtime = SimpleNamespace(group_id="g1", actor_id="peer-1", source="local_mcp")
+        receipt = {"attempt_id": "turnattempt_1", "authorization_secret": "s" * 32}
+        daemon_calls = []
+
+        def call_daemon(request, *, timeout_s=None):
+            daemon_calls.append((request, timeout_s))
+            return {"ok": True, "result": {"run_id": "run-1"}}
+
+        with patch("no1.ports.mcp.server.sys.platform", "win32"), patch.object(
+            mcp_server, "_runtime_context", return_value=runtime
+        ), patch.object(mcp_server, "load_group", return_value=object()), patch.object(
+            mcp_server,
+            "find_actor",
+            return_value={"id": "peer-1", "runtime": "codex"},
+        ), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
+            side_effect=AssertionError("ephemeral route must not read capability state"),
+        ), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            side_effect=AssertionError("ephemeral route must not persist capability state"),
+        ), patch.object(mcp_server, "_call_daemon_or_raise", side_effect=call_daemon), patch.object(
+            mcp_server,
+            "_attach_computer_artifacts",
+            side_effect=lambda value, **_kwargs: value,
+        ):
+            result = mcp_server.capability_use(
+                group_id="g1",
+                by="peer-1",
+                actor_id="peer-1",
+                capability_id="pack:computer-control-local",
+                scope="session",
+                tool_name="onecolleague_computer_run",
+                tool_arguments={
+                    "action": "status",
+                    "run_id": "run-1",
+                    "turn_grant_receipt": receipt,
+                },
+            )
+
+        self.assertTrue(result.get("ephemeral"))
+        self.assertTrue(result.get("tool_called"))
+        self.assertFalse(result.get("refresh_required"))
+        self.assertNotIn("enable_result", result)
+        self.assertEqual(len(daemon_calls), 1)
+        request, timeout_s = daemon_calls[0]
+        self.assertIsNone(timeout_s)
+        args = request.get("args") or {}
+        self.assertEqual(args.get("command"), "run")
+        self.assertEqual(args.get("caller_surface"), "local_mcp")
+        self.assertEqual(args.get("group_id"), "g1")
+        self.assertEqual(args.get("actor_id"), "peer-1")
+        self.assertIs(args.get("turn_grant_receipt"), receipt)
+
+    def test_local_computer_control_requires_exact_pack_and_session_scope(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        with patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
+            side_effect=AssertionError("invalid route must not read capability state"),
+        ), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            side_effect=AssertionError("invalid route must not enable capability"),
+        ), patch.object(mcp_server, "handle_tool_call") as nested_call:
+            for capability_id, scope, expected_code in (
+                ("", "session", "capability_tool_not_found"),
+                ("pack:computer-control", "session", "capability_tool_not_found"),
+                ("pack:computer-control-local", "actor", "capability_use_invalid_scope"),
+                ("pack:computer-control-local", "group", "capability_use_invalid_scope"),
+            ):
+                with self.subTest(capability_id=capability_id, scope=scope), self.assertRaises(
+                    mcp_server.MCPError
+                ) as caught:
+                    mcp_server.capability_use(
+                        group_id="g1",
+                        by="peer-1",
+                        actor_id="peer-1",
+                        capability_id=capability_id,
+                        scope=scope,
+                        tool_name="onecolleague_computer_run",
+                        tool_arguments={"action": "status"},
+                    )
+                self.assertEqual(caught.exception.code, expected_code)
+        nested_call.assert_not_called()
+
+    def test_local_computer_control_is_not_directly_callable(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        runtime = SimpleNamespace(group_id="g1", actor_id="peer-1", source="local_mcp")
+        with patch("no1.ports.mcp.server.sys.platform", "win32"), patch.object(
+            mcp_server, "_runtime_context", return_value=runtime
+        ), patch.object(mcp_server, "load_group", return_value=object()), patch.object(
+            mcp_server,
+            "find_actor",
+            return_value={"id": "peer-1", "runtime": "codex"},
+        ), patch.object(mcp_server, "_call_daemon_or_raise") as daemon_call:
+            with self.assertRaises(mcp_server.MCPError) as caught:
+                mcp_server.handle_tool_call(
+                    "onecolleague_computer_run",
+                    {"action": "status", "run_id": "run-1"},
+                )
+        self.assertEqual(caught.exception.code, "permission_denied")
+        daemon_call.assert_not_called()
+
+    def test_local_computer_control_nested_route_rejects_remote_and_non_windows(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        actor = {"id": "peer-1", "runtime": "codex"}
+        for source, platform, expected_code, message in (
+            ("remote", "win32", "permission_denied", "trusted local MCP actors"),
+            ("local_mcp", "darwin", "unsupported_platform", "only available on Windows"),
+        ):
+            runtime = SimpleNamespace(group_id="g1", actor_id="peer-1", source=source)
+            with self.subTest(source=source, platform=platform), patch(
+                "no1.ports.mcp.server.sys.platform", platform
+            ), patch.object(mcp_server, "_runtime_context", return_value=runtime), patch.object(
+                mcp_server, "load_group", return_value=object()
+            ), patch.object(mcp_server, "find_actor", return_value=actor), patch.object(
+                mcp_server, "_call_daemon_or_raise"
+            ) as daemon_call:
+                with self.assertRaisesRegex(mcp_server.MCPError, message) as caught:
+                    mcp_server.capability_use(
+                        group_id="g1",
+                        by="peer-1",
+                        actor_id="peer-1",
+                        capability_id="pack:computer-control-local",
+                        scope="session",
+                        tool_name="onecolleague_computer_run",
+                        tool_arguments={"action": "status"},
+                    )
+                self.assertEqual(caught.exception.code, expected_code)
+            daemon_call.assert_not_called()
+
+    def test_local_computer_control_wrapper_overrides_nested_identity(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        runtime = SimpleNamespace(group_id="g1", actor_id="peer-1", source="local_mcp")
+        daemon_calls = []
+
+        def call_daemon(request, *, timeout_s=None):
+            daemon_calls.append((request, timeout_s))
+            return {"ok": True, "result": {}}
+
+        with patch("no1.ports.mcp.server.sys.platform", "win32"), patch.object(
+            mcp_server, "_runtime_context", return_value=runtime
+        ), patch.object(mcp_server, "load_group", return_value=object()), patch.object(
+            mcp_server, "find_actor", return_value={"id": "peer-1", "runtime": "codex"}
+        ), patch.object(mcp_server, "_call_daemon_or_raise", side_effect=call_daemon), patch.object(
+            mcp_server,
+            "_attach_computer_artifacts",
+            side_effect=lambda value, **_kwargs: value,
+        ):
+            mcp_server.capability_use(
+                group_id="g1",
+                by="peer-1",
+                actor_id="peer-1",
+                capability_id="pack:computer-control-local",
+                scope="session",
+                tool_name="onecolleague_computer_workflow",
+                tool_arguments={
+                    "action": "list",
+                    "group_id": "other-group",
+                    "actor_id": "other-actor",
+                    "by": "other-actor",
+                },
+            )
+
+        args = daemon_calls[0][0].get("args") or {}
+        self.assertEqual(args.get("group_id"), "g1")
+        self.assertEqual(args.get("actor_id"), "peer-1")
 
     def test_capability_use_dispatch_rejects_product_before_target_caller_policy(self) -> None:
         from no1.ports.mcp import server as mcp_server

@@ -177,6 +177,25 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         props = ((search.get("inputSchema") or {}).get("properties") or {}) if isinstance(search, dict) else {}
         self.assertEqual((props.get("include_external") or {}).get("default"), False)
 
+    def test_capability_use_describes_nested_computer_control_authority(self) -> None:
+        use = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_capability_use"), None)
+        self.assertIsInstance(use, dict)
+        desc = str(use.get("description") or "") if isinstance(use, dict) else ""
+        self.assertIn("capability_id=pack:computer-control-local", desc)
+        self.assertIn("turn_grant_receipt inside tool_arguments", desc)
+        props = ((use.get("inputSchema") or {}).get("properties") or {}) if isinstance(use, dict) else {}
+        tool_arguments = props.get("tool_arguments") if isinstance(props, dict) else {}
+        self.assertEqual((tool_arguments or {}).get("type"), "object")
+        self.assertIn("complete current turn_grant_receipt", str((tool_arguments or {}).get("description") or ""))
+
+    def test_bootstrap_describes_pack_owned_project_info_route(self) -> None:
+        bootstrap = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_bootstrap"), None)
+        self.assertIsInstance(bootstrap, dict)
+        desc = str(bootstrap.get("description") or "") if isinstance(bootstrap, dict) else ""
+        self.assertIn("onecolleague_project_info is pack-owned", desc)
+        self.assertIn("onecolleague_capability_use(capability_id=pack:context-advanced", desc)
+        self.assertIn("tool_name=onecolleague_project_info", desc)
+
     def test_web_model_local_power_tools_are_not_generic_core_tools(self) -> None:
         from no1.kernel.capabilities import (
             CORE_BASIC_TOOLS,

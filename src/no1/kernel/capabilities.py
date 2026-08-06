@@ -19,25 +19,17 @@ LEGACY_BUILTIN_SKILL_NAMESPACE = "cccc"
 CORE_BASIC_TOOLS: Tuple[str, ...] = (
     "onecolleague_help",
     "onecolleague_bootstrap",
-    "onecolleague_project_info",
     "onecolleague_capability_search",
-    "onecolleague_capability_state",
-    "onecolleague_capability_enable",
-    "onecolleague_capability_install",
     "onecolleague_capability_use",
     "onecolleague_inbox_list",
     "onecolleague_inbox_mark_read",
     "onecolleague_message_send",
-    "onecolleague_tracked_send",
     "onecolleague_message_reply",
     "onecolleague_file",
-    "onecolleague_repo",
-    "onecolleague_presentation",
     "onecolleague_context_get",
     "onecolleague_coordination",
     "onecolleague_task",
     "onecolleague_agent_state",
-    "onecolleague_memory",
     "onecolleague_experience",
 )
 
@@ -90,6 +82,12 @@ WEB_MODEL_DENIED_CAPABILITY_TOOLS: Tuple[str, ...] = (
 WEB_MODEL_CORE_TOOLS: Tuple[str, ...] = tuple(
     name for name in CORE_BASIC_TOOLS if name not in WEB_MODEL_DENIED_CAPABILITY_TOOLS
 ) + (
+    "onecolleague_project_info",
+    "onecolleague_capability_state",
+    "onecolleague_tracked_send",
+    "onecolleague_repo",
+    "onecolleague_presentation",
+    "onecolleague_memory",
     "onecolleague_runtime_wait_next_turn",
     "onecolleague_runtime_complete_turn",
     "onecolleague_repo_edit",
@@ -173,13 +171,16 @@ BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
         "tags": ("computer-control", "local-only", "high-risk"),
     },
     "pack:context-advanced": {
-        "title": "Context Advanced",
-        "description": "Low-level context batch sync and memory admin operations.",
+        "title": "Extended Context + Delegation",
+        "description": "Project context, tracked delegation, low-level context sync, and memory operations.",
         "tool_names": (
+            "onecolleague_project_info",
+            "onecolleague_tracked_send",
             "onecolleague_context_sync",
+            "onecolleague_memory",
             "onecolleague_memory_admin",
         ),
-        "tags": ("context", "memory", "admin"),
+        "tags": ("context", "delegation", "memory"),
     },
     "pack:headless-notify": {
         "title": "Headless + Notify",
@@ -191,19 +192,25 @@ BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
         "tags": ("headless", "notify", "runner"),
     },
     "pack:diagnostics": {
-        "title": "Terminal Debug",
-        "description": "Terminal transcript and local debug diagnostics.",
+        "title": "Workspace Utilities",
+        "description": "Repository inspection, presentation rendering, terminal transcript, and debug diagnostics.",
         "tool_names": (
+            "onecolleague_repo",
+            "onecolleague_presentation",
             "onecolleague_terminal",
             "onecolleague_debug",
         ),
-        "tags": ("terminal", "debug", "diagnostics"),
+        "tags": ("workspace", "repo", "presentation", "diagnostics"),
     },
     "pack:capability-admin": {
         "title": "Capability Admin",
-        "description": "Foreman/admin capability governance: import, block, and uninstall capability records.",
-        "tool_names": CAPABILITY_ADMIN_TOOLS,
-        "tags": ("capability", "admin", "governance"),
+        "description": "Capability state, enablement, installation, and governance operations.",
+        "tool_names": (
+            "onecolleague_capability_state",
+            "onecolleague_capability_enable",
+            "onecolleague_capability_install",
+        ) + CAPABILITY_ADMIN_TOOLS,
+        "tags": ("capability", "install", "admin", "governance"),
     },
 }
 

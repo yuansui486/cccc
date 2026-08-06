@@ -25,6 +25,7 @@ import base64
 import json
 import os
 import secrets
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -310,11 +311,23 @@ def _normalize_to_arg(raw: Any) -> Optional[List[str]]:
 
 
 _BUILTIN_MCP_TOOL_NAMES = frozenset(str(spec.get("name") or "") for spec in CANONICAL_MCP_TOOLS if isinstance(spec, dict))
+_LOCAL_COMPUTER_CONTROL_TOOLS = frozenset(LOCAL_COMPUTER_CONTROL_TOOLS)
+_LOCAL_COMPUTER_CONTROL_CAPABILITY_ID = "pack:computer-control-local"
 _WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES = frozenset(
     web_model_advertised_tool_names(_BUILTIN_MCP_TOOL_NAMES, actor_role="peer")
 )
 _WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES = frozenset(
     web_model_advertised_tool_names(_BUILTIN_MCP_TOOL_NAMES, actor_role="foreman")
+)
+_WEB_MODEL_FIXED_PACK_TOOL_NAMES = frozenset(
+    {
+        "onecolleague_project_info",
+        "onecolleague_capability_state",
+        "onecolleague_tracked_send",
+        "onecolleague_repo",
+        "onecolleague_presentation",
+        "onecolleague_memory",
+    }
 )
 _WEB_MODEL_PEER_ALLOWED_TOOL_NAMES = frozenset(WEB_MODEL_CORE_TOOLS)
 _WEB_MODEL_HARD_DENIED_TOOLS = frozenset(WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS) | frozenset(
@@ -379,6 +392,15 @@ def _authorize_builtin_capability_tool_call(name: str) -> tuple[str, str]:
         code = "capability_tool_not_found" if nested_capability_id is not None else "permission_denied"
         raise MCPError(code=code, message=f"tool is disabled: {name}")
     if owner.kind == "product":
+        if name in _LOCAL_COMPUTER_CONTROL_TOOLS:
+            if nested_capability_id != _LOCAL_COMPUTER_CONTROL_CAPABILITY_ID:
+                raise MCPError(
+                    code="capability_tool_not_found" if nested_capability_id is not None else "permission_denied",
+                    message=f"tool requires nested capability {_LOCAL_COMPUTER_CONTROL_CAPABILITY_ID}: {name}",
+                    details={"capability_id": nested_capability_id or "", "tool_name": name},
+                )
+            _authorize_local_computer_control_tool_call(name)
+            return f"product:{owner.owner_id}", f"product:{owner.owner_id}"
         if nested_capability_id is not None:
             raise MCPError(code="capability_tool_not_found", message=f"tool is not a capability target: {name}")
         return f"product:{owner.owner_id}", f"product:{owner.owner_id}"
@@ -390,6 +412,14 @@ def _authorize_builtin_capability_tool_call(name: str) -> tuple[str, str]:
             message=f"capability does not grant core tool: {name}",
             details={"capability_id": nested_capability_id, "tool_name": name},
         )
+    if nested_capability_id is None and name in _WEB_MODEL_FIXED_PACK_TOOL_NAMES:
+        runtime_ctx = _runtime_context()
+        gid = str(runtime_ctx.group_id or "").strip()
+        aid = str(runtime_ctx.actor_id or "").strip()
+        group = load_group(gid) if gid and aid and aid != "user" else None
+        actor = find_actor(group, aid) if group is not None else None
+        if isinstance(actor, dict) and str(actor.get("runtime") or "").strip().lower() == "web_model":
+            return "web-model-fixed", "web-model-fixed"
     state, revision = _current_capability_state(name)
     raw_grants = state.get("builtin_tool_grants") if isinstance(state, dict) else {}
     granted = {
@@ -489,9 +519,6 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
     )
 
 
-_LOCAL_COMPUTER_CONTROL_TOOLS = frozenset(LOCAL_COMPUTER_CONTROL_TOOLS)
-
-
 def _local_computer_control_actor_allowed(runtime_ctx: Any, actor: Any) -> bool:
     return bool(
         str(getattr(runtime_ctx, "source", "") or "").strip().lower() == "local_mcp"
@@ -506,6 +533,12 @@ def _local_computer_control_actor_allowed(runtime_ctx: Any, actor: Any) -> bool:
 def _authorize_local_computer_control_tool_call(name: str) -> tuple[str, str]:
     if name not in _LOCAL_COMPUTER_CONTROL_TOOLS:
         raise MCPError(code="permission_denied", message="unknown computer-control tool")
+    if sys.platform != "win32":
+        raise MCPError(
+            code="unsupported_platform",
+            message="computer control is only available on Windows",
+            details={"platform": sys.platform, "tool_name": name},
+        )
     runtime_ctx = _runtime_context()
     gid = str(runtime_ctx.group_id or "").strip()
     aid = str(runtime_ctx.actor_id or "").strip()
@@ -1904,7 +1937,7 @@ def _product_tool_is_listable(
     if policy == "local_group_bridge":
         return runtime_source == "local_mcp"
     if policy == "local_computer_control":
-        return local_computer_control_allowed
+        return False
     if policy in {"web_model_actor", "runtime_turn"}:
         return actor_is_web_model
     if policy == "voice_secretary":
@@ -1970,6 +2003,7 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                 and owner.kind != "disabled"
                 and (
                     owner.kind == "core"
+                    or (owner.kind == "pack" and name in _WEB_MODEL_FIXED_PACK_TOOL_NAMES)
                     or (
                         owner.kind == "product"
                         and _product_tool_is_listable(

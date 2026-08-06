@@ -198,8 +198,9 @@ MCP_TOOLS = [
         "name": "onecolleague_bootstrap",
         "description": (
             "Cold-start bootstrap: session + recovery + inbox_preview + context_hygiene + memory_recall_gate + next_calls. "
-            "Use it first on cold start or resume; usually follow with onecolleague_help once, then pull "
-            "onecolleague_project_info / onecolleague_context_get only when colder detail is needed."
+            "Use it first on cold start or resume; usually follow with onecolleague_help once, then pull onecolleague_context_get "
+            "when colder detail is needed. onecolleague_project_info is pack-owned; if hidden, call "
+            "onecolleague_capability_use(capability_id=pack:context-advanced, tool_name=onecolleague_project_info, tool_arguments={})."
         ),
         "inputSchema": _obj(
             {
@@ -1117,6 +1118,8 @@ MCP_TOOLS = [
         "description": (
             "Use an existing capability: enable it and optionally call one target tool. "
             "This is the preferred path for built-in capability pack tools that may be hidden from tools/list. "
+            "For computer-control targets, use capability_id=pack:computer-control-local and put the complete current "
+            "turn_grant_receipt inside tool_arguments; target arguments and receipts must not be placed at this wrapper's top level. "
             "For skill:* capabilities this activates the runtime capsule, not a local package install. "
             "Use scope=session for temporary activation and scope=actor for reuse by the selected actor; group scope requires foreman. "
             "If enable returns activation_pending, relist/reconnect before claiming success; inspect diagnostics/resolution_plan for blockers."
@@ -1128,7 +1131,14 @@ MCP_TOOLS = [
                 "actor_id": {"type": "string"},
                 "capability_id": {"type": "string", "default": ""},
                 "tool_name": {"type": "string", "default": ""},
-                "tool_arguments": {"type": "object", "default": {}},
+                "tool_arguments": {
+                    "type": "object",
+                    "default": {},
+                    "description": (
+                        "Arguments passed verbatim to tool_name. For computer-control targets this object must contain "
+                        "the complete current turn_grant_receipt object."
+                    ),
+                },
                 "scope": {"type": "string", "enum": ["session", "actor", "group"], "default": "session"},
                 "ttl_seconds": {"type": "integer", "default": 3600, "minimum": 60, "maximum": 86400},
                 "reason": {"type": "string", "default": ""},

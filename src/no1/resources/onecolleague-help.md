@@ -43,7 +43,7 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 - Reply with `onecolleague_message_reply`; start new threads with `onecolleague_message_send`. Terminal output is not delivered.
 - At key transitions, sync `onecolleague_coordination` / `onecolleague_task` and refresh `onecolleague_agent_state`.
 - For strategy questions, align before implementation.
-- For recall, read `memory_recall_gate`, then local `onecolleague_memory`; use `onecolleague_space(..., lane="memory")` only as deeper fallback.
+- For recall, read `memory_recall_gate`, then use local `onecolleague_memory` through `pack:context-advanced`; use `onecolleague_space(..., lane="memory")` through `pack:space` only as deeper fallback.
 - For capabilities, try `onecolleague_capability_use(...)` before escalating blockers.
 
 ## Common Work Loops
@@ -92,7 +92,7 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 ### PROJECT.md
 
 - `PROJECT.md` is a cold background artifact, not the hot control plane.
-- Use `onecolleague_project_info` when you need the full document.
+- When you need the full document, call `onecolleague_capability_use(capability_id="pack:context-advanced", tool_name="onecolleague_project_info", tool_arguments={})`.
 - Keep only the hot digest inside `coordination.brief.project_brief`.
 
 ### Inbox
@@ -114,7 +114,7 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 
 ### Information Routing
 
-- For missing facts, check `onecolleague_bootstrap`, `onecolleague_context_get`, `onecolleague_project_info`, `onecolleague_inbox_list`, and local memory before asking the user or browsing.
+- For missing facts, check `onecolleague_bootstrap`, `onecolleague_context_get`, `onecolleague_inbox_list`, and local memory before asking the user or browsing; request hidden `onecolleague_project_info` through `pack:context-advanced` as shown above.
 
 ### Planning and Scope Gates
 
@@ -127,13 +127,13 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 
 - Long-term memory lives in `state/memory/MEMORY.md` and `state/memory/daily/*.md`.
 - Start with `onecolleague_bootstrap().memory_recall_gate` on cold start or resume.
-- Recall path: `onecolleague_memory(action="search", ...)` then `onecolleague_memory(action="get", ...)`.
+- Recall path: call `onecolleague_memory` through `pack:context-advanced`, first with `action="search"`, then `action="get"`.
 - Keep transient execution status in `onecolleague_agent_state`; write only stable reusable outcomes to memory files.
 
 ### Local Memory Writes and Maintenance
 
-- Write durable notes with `onecolleague_memory(action="write", target="daily"|"memory", ...)`.
-- Use `onecolleague_memory_admin(action="context_check"|"compact"|"daily_flush"|"index_sync", ...)` when context pressure or maintenance requires it.
+- Write durable notes through `pack:context-advanced` with `onecolleague_memory(action="write", target="daily"|"memory", ...)`.
+- Use that pack's `onecolleague_memory_admin` for context pressure or maintenance.
 - Keep signal high and avoid duplicate writes.
 
 ### Shared Project Experience and User Preferences
@@ -149,6 +149,8 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 ### Expansion Path
 
 - Fast path: `onecolleague_capability_use(...)`.
+- Hidden pack tools use `onecolleague_capability_use(capability_id="<pack id>", tool_name="<target>", tool_arguments={<target args>})`; target arguments never belong at wrapper top level.
+- Common mappings: group/actor -> `pack:group-runtime`; project/tracked-send/memory -> `pack:context-advanced`; repo/diagnostics -> `pack:diagnostics`; capability administration -> `pack:capability-admin`.
 - Discovery path: `onecolleague_capability_search(kind="mcp_toolpack"|"skill", query=...)`; treat search as a hint layer, not proof of absence.
 - For specialized work such as review, debugging, UI, docs, reports, tests, artifacts, security, or product planning, search capability before inventing a new workflow.
 - If search returns a relevant lightweight skill with `enable_hint="enable_now"`, enable/use it for the current scope and then continue the task.
@@ -163,19 +165,10 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 
 ### Computer Control Workflows
 
-- Analyze observations, actions, side effects, and success signals first. Read the compact `onecolleague_computer_control_catalog`, then query one tool by name for its full schema only when needed.
-- For create-and-run requests, start `onecolleague_computer_recording`. Observe with `call(record=false)`, execute one action at a time, and record only successful actions.
-- An idle recording is suspended instead of discarded. Use `action="resume"` with the same actor and request, then call `Snapshot` before any action. Recordings expire permanently after 30 minutes.
-- Confirm the target window and focus before Click or Type. Prefer App, Process, Screenshot/Snapshot, Click, and Type; use PowerShell only after native tools are proven insufficient.
-- Route every formal observation and action through OneColleague computer-control tools. Never bypass recording, the desktop lease, or audit with bare `windows-mcp.*` calls.
-- Record the final verification Snapshot with `record=true` as the workflow's last action so replay produces inspectable evidence.
-- Commit the recording once, replay the entire permanent workflow, inspect final evidence, then call `onecolleague_computer_run(action="verify")`.
-- A transport error or `outcome_unknown` is infrastructure state: do not submit speculative parameter recovery and do not bypass the proxy with side-effectful bare tools.
-- A create-and-run task is not done until commit, full replay, and verify succeed. On infrastructure failure keep it incomplete with `waiting_on=external` and report the blocker.
-- A workflow definition uses `nodes` for steps and top-level `edges: [{"source":"start","target":"step"}]` for routing. Never put `next` on a node.
-- Node types are `start|action|condition|wait|loop|approval|end`. Action nodes require `tool`; wait nodes use `duration_seconds`; loop nodes require `max_iterations`.
-- Action argument references must be exact strings such as `${inputs.message}` or `${steps.snapshot.value}`; `{{inputs.message}}` is not supported.
-- Successful replay enters `awaiting_verification`; successful verification automatically publishes and trusts when authorized.
+- Computer-control tools use `capability_id="pack:computer-control-local"`. Copy the current `turn_grant_receipt` object into the target tool's inner `tool_arguments` on every call; never put it at the `onecolleague_capability_use` top level.
+- Exact wrappers for catalog, recording, workflow, and run are in the Appendix.
+- Observe through catalog/recording, record only successful actions, commit once, replay fully, inspect evidence, then verify. Never bypass the lease or audit with bare `windows-mcp.*` calls.
+- A transport error or `outcome_unknown` is infrastructure state. Do not guess-retry side effects; keep the task incomplete with `waiting_on=external`.
 
 ### Skill Evolution Proposals
 
@@ -250,6 +243,15 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 - Do not become a second foreman or normal peer: do not edit project code, run risky commands, submit commits, deploy, or assign work as authority.
 
 ## Appendix
+
+### Computer-Control Capability Wrappers
+
+- Catalog: `onecolleague_capability_use(capability_id="pack:computer-control-local", tool_name="onecolleague_computer_control_catalog", tool_arguments={"turn_grant_receipt": <current turn_grant_receipt object>})`.
+- Recording: `onecolleague_capability_use(capability_id="pack:computer-control-local", tool_name="onecolleague_computer_recording", tool_arguments={"action":"start", "request_id":"<request_id>", "turn_grant_receipt": <current turn_grant_receipt object>})`.
+- Workflow: `onecolleague_capability_use(capability_id="pack:computer-control-local", tool_name="onecolleague_computer_workflow", tool_arguments={"action":"get", "workflow_id":"<workflow_id>", "turn_grant_receipt": <current turn_grant_receipt object>})`.
+- Run: `onecolleague_capability_use(capability_id="pack:computer-control-local", tool_name="onecolleague_computer_run", tool_arguments={"action":"start", "workflow_id":"<workflow_id>", "request_id":"<request_id>", "turn_grant_receipt": <current turn_grant_receipt object>})`.
+
+Analyze observations, actions, side effects, and success signals first. Query a tool's full schema through catalog only when needed. Resume suspended recordings with the same actor/request and take a fresh Snapshot before acting; recordings expire after 30 minutes. Confirm the foreground window and a fresh UI element before Click/Type, prefer native App/Process/Snapshot tools, and use PowerShell only after native tools prove insufficient. Record the final verification Snapshot as the last action. Workflow routing belongs in top-level `edges`; references use `${inputs.name}` or `${steps.node.field}`. Successful replay enters `awaiting_verification`; successful verification publishes/trusts only when authorized.
 
 ### Group State
 

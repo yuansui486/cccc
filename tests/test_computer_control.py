@@ -44,6 +44,7 @@ from no1.ports.mcp.server import (
     _attach_computer_artifacts,
     _authorize_local_computer_control_tool_call,
     _handle_onecolleague_namespace,
+    capability_use,
     handle_tool_call,
     list_tools_for_caller,
 )
@@ -440,7 +441,7 @@ class TestComputerControl(unittest.TestCase):
     def test_computer_control_mcp_rejects_remote_and_web_model_contexts(self):
         tool = "onecolleague_computer_run"
         for source in ("bridge", "remote", "web_model", "im", ""):
-            with self.subTest(source=source), patch(
+            with self.subTest(source=source), patch("no1.ports.mcp.server.sys.platform", "win32"), patch(
                 "no1.ports.mcp.server._runtime_context",
                 return_value=Mock(group_id="g", actor_id="peer", source=source),
             ):
@@ -448,25 +449,30 @@ class TestComputerControl(unittest.TestCase):
                     _authorize_local_computer_control_tool_call(tool)
         for group_id, actor_id in (("", "peer"), ("g", ""), ("g", "user")):
             with self.subTest(group_id=group_id, actor_id=actor_id), patch(
+                "no1.ports.mcp.server.sys.platform", "win32"
+            ), patch(
                 "no1.ports.mcp.server._runtime_context",
                 return_value=Mock(group_id=group_id, actor_id=actor_id, source="local_mcp"),
             ):
                 with self.assertRaisesRegex(Exception, "bound local actor"):
                     _authorize_local_computer_control_tool_call(tool)
-        with patch(
+        with patch("no1.ports.mcp.server.sys.platform", "win32"), patch(
             "no1.ports.mcp.server._runtime_context",
             return_value=Mock(group_id="g", actor_id="peer", source="local_mcp"),
         ), patch("no1.ports.mcp.server.load_group", return_value=Mock()), patch(
             "no1.ports.mcp.server.find_actor", return_value={"id": "peer", "runtime": "codex"}
         ):
             self.assertEqual(_authorize_local_computer_control_tool_call(tool), ("g", "peer"))
-        with patch(
+        with patch("no1.ports.mcp.server.sys.platform", "win32"), patch(
             "no1.ports.mcp.server._runtime_context",
             return_value=Mock(group_id="g", actor_id="peer", source="local_mcp"),
         ), patch("no1.ports.mcp.server.load_group", return_value=Mock()), patch(
             "no1.ports.mcp.server.find_actor", return_value={"id": "peer", "runtime": "web_model"}
         ):
             with self.assertRaisesRegex(Exception, "Web Model"):
+                _authorize_local_computer_control_tool_call(tool)
+        with patch("no1.ports.mcp.server.sys.platform", "darwin"):
+            with self.assertRaisesRegex(Exception, "only available on Windows"):
                 _authorize_local_computer_control_tool_call(tool)
 
     def test_computer_control_mcp_daemon_failure_has_no_direct_service_fallback(self):
@@ -481,13 +487,18 @@ class TestComputerControl(unittest.TestCase):
             side_effect=RuntimeError("daemon unavailable"),
         ), patch("no1.computer_control.services.get_services") as get_services:
             with self.assertRaisesRegex(RuntimeError, "daemon unavailable"):
-                handle_tool_call(
-                    "onecolleague_computer_run",
-                    {"action": "status", "run_id": "run"},
+                capability_use(
+                    group_id="g",
+                    by="actor",
+                    actor_id="actor",
+                    capability_id="pack:computer-control-local",
+                    scope="session",
+                    tool_name="onecolleague_computer_run",
+                    tool_arguments={"action": "status", "run_id": "run"},
                 )
         get_services.assert_not_called()
 
-    def test_list_tools_exposes_computer_control_only_to_bound_local_standard_actor(self):
+    def test_computer_control_tools_are_hidden_and_only_nested_use_can_call_them(self):
         from no1.kernel.actors import add_actor
         from no1.kernel.group import load_group
 
@@ -504,12 +515,6 @@ class TestComputerControl(unittest.TestCase):
             assert group is not None
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
-            daemon_lock = acquire_lockfile(
-                Path(td) / "daemon" / "onecolleagued.lock",
-                blocking=False,
-            )
-            self.addCleanup(release_lockfile, daemon_lock)
-            start_daemon_services(Path(td), lock_handle=daemon_lock)
 
             with patch(
                 "no1.ports.mcp.server._call_daemon_or_raise",
@@ -519,24 +524,31 @@ class TestComputerControl(unittest.TestCase):
                 return_value=Mock(group_id=group_id, actor_id="peer", source="local_mcp"),
             ):
                 names = {str(item.get("name") or "") for item in list_tools_for_caller()}
-            self.assertTrue(computer_tools.issubset(names))
+            self.assertTrue(computer_tools.isdisjoint(names))
 
             def call_computer_control_daemon(request, *, timeout_s=None):
-                response, _ = try_handle_computer_control_op(request.get("op"), request.get("args") or {})
-                self.assertTrue(response.ok, getattr(response, "error", None))
-                return response.result or {}
+                self.assertEqual(request.get("op"), "computer_control")
+                self.assertEqual((request.get("args") or {}).get("command"), "workflow")
+                self.assertIsNone(timeout_s)
+                return {"ok": True, "result": {"workflows": []}}
 
-            with patch(
+            with patch("no1.ports.mcp.server.sys.platform", "win32"), patch(
                 "no1.ports.mcp.server._runtime_context",
                 return_value=Mock(group_id=group_id, actor_id="peer", source="local_mcp"),
             ), patch(
                 "no1.ports.mcp.server._call_daemon_or_raise",
                 side_effect=call_computer_control_daemon,
             ):
-                workflow_list = handle_tool_call(
-                    "onecolleague_computer_workflow",
-                    {"action": "list"},
+                workflow_use = capability_use(
+                    group_id=group_id,
+                    by="peer",
+                    actor_id="peer",
+                    capability_id="pack:computer-control-local",
+                    scope="session",
+                    tool_name="onecolleague_computer_workflow",
+                    tool_arguments={"action": "list"},
                 )
+            workflow_list = workflow_use.get("tool_result") or {}
             self.assertTrue(workflow_list.get("ok"))
             self.assertEqual((workflow_list.get("result") or {}).get("workflows"), [])
 
@@ -608,12 +620,20 @@ class TestComputerControl(unittest.TestCase):
                 ("onecolleague_computer_workflow", {"action": "list"}),
                 ("onecolleague_computer_run", {"action": "status", "run_id": "run"}),
             )
-            with patch(
+            with patch("no1.ports.mcp.server.sys.platform", "win32"), patch(
                 "no1.ports.mcp.server._runtime_context",
                 return_value=Mock(group_id=group.group_id, actor_id="peer", source="local_mcp"),
             ), patch("no1.ports.mcp.server._call_daemon_or_raise", side_effect=call_daemon):
                 for tool_name, arguments in cases:
-                    handle_tool_call(tool_name, {**arguments, "turn_grant_receipt": receipt})
+                    capability_use(
+                        group_id=group.group_id,
+                        by="peer",
+                        actor_id="peer",
+                        capability_id="pack:computer-control-local",
+                        scope="session",
+                        tool_name=tool_name,
+                        tool_arguments={**arguments, "turn_grant_receipt": receipt},
+                    )
 
             self.assertEqual(len(calls), len(cases))
             for request, timeout_s in calls:
@@ -1381,7 +1401,7 @@ class TestComputerControl(unittest.TestCase):
                 self.assertTrue(response.ok, getattr(response, "error", None))
                 return response.result or {}
 
-            with patch(
+            with patch("no1.ports.mcp.server.sys.platform", "win32"), patch(
                 "no1.ports.mcp.server._runtime_context",
                 return_value=Mock(group_id=group.group_id, actor_id="peer", source="local_mcp"),
             ), patch(
@@ -1391,9 +1411,14 @@ class TestComputerControl(unittest.TestCase):
                 "no1.daemon.computer_control_ops.get_services",
                 return_value=fake,
             ):
-                result = handle_tool_call(
-                    "onecolleague_computer_run",
-                    {
+                use_result = capability_use(
+                    group_id=group.group_id,
+                    by="peer",
+                    actor_id="peer",
+                    capability_id="pack:computer-control-local",
+                    scope="session",
+                    tool_name="onecolleague_computer_run",
+                    tool_arguments={
                         "action": "start",
                         "workflow_id": workflow_id,
                         "version": 1,
@@ -1402,6 +1427,7 @@ class TestComputerControl(unittest.TestCase):
                         "turn_grant_receipt": receipt,
                     },
                 )
+                result = use_result.get("tool_result") or {}
 
             self.assertTrue(result.get("ok"))
             self.assertEqual((result.get("result") or {}).get("run_id"), "run-untrusted")
@@ -1892,7 +1918,17 @@ class TestComputerControl(unittest.TestCase):
         self.assertIn("请整理桌面文件", rendered)
         self.assertIn("电脑控制执行契约", rendered)
         self.assertIn("完整电脑权限", rendered)
-        self.assertIn("onecolleague_computer_recording", rendered)
+        self.assertIn('capability_id="pack:computer-control-local"', rendered)
+        for tool_name in (
+            "onecolleague_computer_control_catalog",
+            "onecolleague_computer_recording",
+            "onecolleague_computer_workflow",
+            "onecolleague_computer_run",
+        ):
+            self.assertIn(f'tool_name="{tool_name}"', rendered)
+        self.assertIn('tool_arguments={"turn_grant_receipt": <当前 turn_grant_receipt 对象>}', rendered)
+        self.assertIn('"turn_grant_receipt": <当前 turn_grant_receipt 对象>', rendered)
+        self.assertIn("禁止放在 onecolleague_capability_use 顶层", rendered)
         self.assertIn("禁止用裸 windows-mcp.*", rendered)
         self.assertIn("record=true", rendered)
         self.assertIn("不得将任务标记 done", rendered)

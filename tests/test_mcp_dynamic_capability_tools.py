@@ -424,7 +424,7 @@ class TestMcpDynamicCapabilityTools(unittest.TestCase):
         self.assertEqual(set(MCP_TOOL_PRIMARY_OWNERS), set(CANONICAL_MCP_TOOL_NAMES))
         self.assertEqual(
             Counter(owner.kind for owner in MCP_TOOL_PRIMARY_OWNERS.values()),
-            {"core": 22, "pack": 16, "product": 14, "disabled": 6},
+            {"core": 14, "pack": 24, "product": 14, "disabled": 6},
         )
         overlap = {
             name
@@ -466,19 +466,64 @@ class TestMcpDynamicCapabilityTools(unittest.TestCase):
             side_effect=AssertionError("product ownership must not read capability state"),
         ):
             for name, owner in sorted(product_tools.items()):
+                is_computer_control = name.startswith("onecolleague_computer_")
                 with self.subTest(path="direct", tool=name):
-                    certificate = mcp_server._issue_tool_call_certificate(name, name, {})
-                    self.assertEqual(certificate.grant, f"product:{owner.owner_id}")
+                    if is_computer_control:
+                        with self.assertRaises(MCPError) as caught:
+                            mcp_server._issue_tool_call_certificate(name, name, {})
+                        self.assertEqual(caught.exception.code, "permission_denied")
+                    else:
+                        certificate = mcp_server._issue_tool_call_certificate(name, name, {})
+                        self.assertEqual(certificate.grant, f"product:{owner.owner_id}")
                 product_guard.assert_called_once_with(name)
                 product_guard.reset_mock()
 
+                nested_capability = "pack:computer-control-local" if is_computer_control else "pack:group_bridge"
                 with self.subTest(path="nested", tool=name), mcp_server.capability_use_nested_builtin_call_scope(
-                    "pack:group_bridge"
+                    nested_capability
                 ):
-                    with self.assertRaises(MCPError) as caught:
-                        mcp_server._issue_tool_call_certificate(name, name, {})
-                self.assertEqual(caught.exception.code, "capability_tool_not_found")
+                    if is_computer_control:
+                        with patch.object(
+                            mcp_server,
+                            "_authorize_local_computer_control_tool_call",
+                            return_value=("g1", "peer-1"),
+                        ):
+                            certificate = mcp_server._issue_tool_call_certificate(name, name, {})
+                        self.assertEqual(certificate.grant, f"product:{owner.owner_id}")
+                    else:
+                        with self.assertRaises(MCPError) as caught:
+                            mcp_server._issue_tool_call_certificate(name, name, {})
+                        self.assertEqual(caught.exception.code, "capability_tool_not_found")
                 product_guard.assert_not_called()
+
+    def test_web_model_fixed_pack_fallbacks_list_and_call_without_pack_grants(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        fixed = {
+            "onecolleague_project_info",
+            "onecolleague_capability_state",
+            "onecolleague_tracked_send",
+            "onecolleague_repo",
+            "onecolleague_presentation",
+            "onecolleague_memory",
+        }
+        runtime = SimpleNamespace(group_id="g1", actor_id="web-peer", source="remote")
+        actor = {"id": "web-peer", "runtime": "web_model"}
+        with patch.object(mcp_server, "_runtime_context", return_value=runtime), patch.object(
+            mcp_server, "load_group", return_value=object()
+        ), patch.object(mcp_server, "find_actor", return_value=actor), patch.object(
+            mcp_server, "get_effective_role", return_value="peer"
+        ), patch.object(
+            mcp_server,
+            "_call_daemon_or_raise",
+            side_effect=AssertionError("fixed Web Model fallbacks must not require capability grants"),
+        ):
+            names = {str(item.get("name") or "") for item in mcp_server.list_tools_for_caller()}
+            self.assertTrue(fixed <= names)
+            for name in fixed:
+                with self.subTest(tool=name):
+                    certificate = mcp_server._issue_tool_call_certificate(name, name, {})
+                    self.assertEqual(certificate.grant, "web-model-fixed")
 
     def test_web_model_group_bridge_direct_call_is_rejected_before_product_or_daemon_probe(self) -> None:
         from no1.ports.mcp import server as mcp_server
