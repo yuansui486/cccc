@@ -8,6 +8,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 
+from ....daemon.opencode_provider import cache_opencode_model_catalog
 from ..schemas import DoneHubLoginRequest, DoneHubSelfRequest, DoneHubTeamPresetRequest, RouteContext
 
 _DONE_HUB_TIMEOUT = 15.0
@@ -584,6 +585,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             return {"ok": False, "error": {"code": "done_hub_models_failed", "message": str(exc)}}
 
         items = _normalize_available_model_rows(payload)
+        cache_opencode_model_catalog(items)
         return {"ok": True, "result": {"items": items, "models": [item["model"] for item in items]}}
 
     return [router]

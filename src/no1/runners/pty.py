@@ -22,6 +22,7 @@ from ..kernel.working_state import derive_pty_terminal_override
 from .pty_lifecycle import LifecycleGate
 from .pty_snapshot import PtyBacklogSnapshot, PtyBacklogSnapshotCache
 from .pty_attach import PtyAttachBusyError, PtyAttachReservation
+from .terminal_queries import terminal_query_responses
 
 PTY_SUPPORTED = True
 TERMINAL_SIGNAL_BUFFER_CHARS = 4096
@@ -731,32 +732,25 @@ class PtySession:
             self._mode_tail = data[-keep:] if keep > 0 else b""
 
     def _maybe_reply_to_terminal_queries(self, chunk: bytes) -> None:
-        """Best-effort responses for programs that expect a terminal emulator.
-
-        Our PTY runner is usually driven by a browser terminal (xterm.js). When no terminal client
-        is attached, TUI programs that rely on Device Status Reports (DSR) can hang or exit.
-
-        We only emulate a tiny subset of queries to keep headless operation workable.
-        """
         if not chunk:
             return
         with self._lock:
-            # If a real terminal is attached, let it handle DSR replies (avoid duplicate responses).
-            if self._writer_fd is not None:
-                return
-            data = (self._query_tail or b"") + chunk
-
-            # DSR: "Report Cursor Position" (CPR). Reply "ESC[{row};{col}R".
-            # We do not attempt to track an actual cursor; a stable 1;1 is enough to unblock many TUIs.
-            query = b"\x1b[6n"
-            if query in data:
-                try:
-                    os.write(self._master_fd, b"\x1b[1;1R")
-                except Exception:
-                    pass
-
-            keep = len(query) - 1
-            self._query_tail = data[-keep:] if keep > 0 else b""
+            clients = getattr(self, "_clients", None)
+            if clients is None:
+                # Compatibility for restored/legacy sessions that predate the
+                # explicit client registry. New sessions use the active check.
+                active_writer = self._writer_fd is not None
+            else:
+                client = clients.get(self._writer_fd) if self._writer_fd is not None else None
+                active_writer = bool(client is not None and client.active and client.writer)
+            self._query_tail, responses = terminal_query_responses(
+                self._query_tail,
+                chunk,
+                runtime=self._runtime,
+                active_writer=active_writer,
+            )
+        for response in responses:
+            self.write_input(response)
 
     def _on_cmd_readable(self) -> None:
         try:

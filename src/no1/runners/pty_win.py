@@ -18,6 +18,7 @@ from .platform_support import load_winpty_process_class, pty_support_error_messa
 from .pty_lifecycle import LifecycleGate
 from .pty_snapshot import PtyBacklogSnapshot, PtyBacklogSnapshotCache
 from .pty_attach import PtyAttachBusyError, PtyAttachReservation
+from .terminal_queries import terminal_query_responses
 from ..util.process import terminate_pid
 
 _WINPTY_PROCESS = load_winpty_process_class()
@@ -399,33 +400,21 @@ class PtySession:
     def _maybe_reply_to_terminal_queries(self, chunk: bytes) -> None:
         if not chunk:
             return
-        query_responses = (
-            (b"\x1b[6n", b"\x1b[1;1R"),
-            (b"\x1b[c", b"\x1b[?1;2c"),
-            (b"\x1b[0c", b"\x1b[?1;2c"),
-            (b"\x1b[>c", b"\x1b[>0;0;0c"),
-            (b"\x1b[>0c", b"\x1b[>0;0;0c"),
-        )
-        responses: list[bytes] = []
         with self._lock:
-            data = (self._query_tail or b"") + chunk
-            writer_attached = self._writer_fd is not None
-            runtime = str(self._runtime or "").strip().lower()
-            backend_handles_device_attributes = runtime in {"gemini", "droid", "neovate"}
-            for query, response in query_responses:
-                if query not in data:
-                    continue
-                if query == b"\x1b[6n" and writer_attached:
-                    continue
-                if query != b"\x1b[6n" and writer_attached and not backend_handles_device_attributes:
-                    continue
-                responses.append(response)
-            self._query_tail = b""
-            for size in range(min(len(data), max(len(query) for query, _response in query_responses) - 1), 0, -1):
-                suffix = data[-size:]
-                if any(query.startswith(suffix) and len(suffix) < len(query) for query, _response in query_responses):
-                    self._query_tail = suffix
-                    break
+            clients = getattr(self, "_clients", None)
+            if clients is None:
+                # Compatibility for restored/legacy sessions that predate the
+                # explicit client registry. New sessions use the active check.
+                active_writer = self._writer_fd is not None
+            else:
+                client = clients.get(self._writer_fd) if self._writer_fd is not None else None
+                active_writer = bool(client is not None and client.active and client.writer)
+            self._query_tail, responses = terminal_query_responses(
+                self._query_tail,
+                chunk,
+                runtime=self._runtime,
+                active_writer=active_writer,
+            )
         for response in responses:
             self.write_input(response)
 

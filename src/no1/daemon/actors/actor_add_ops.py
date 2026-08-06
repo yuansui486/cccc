@@ -25,6 +25,34 @@ def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None)
     return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
 
 
+def _rollback_created_actor(
+    group: Any,
+    actor_id: str,
+    *,
+    runtime: str,
+    delete_actor_private_env: Callable[[str, str], None],
+) -> None:
+    effective_actor_id = str(actor_id or "").strip()
+    if not effective_actor_id:
+        return
+    try:
+        remove_actor(group, effective_actor_id)
+    except Exception:
+        pass
+    try:
+        delete_actor_private_env(group.group_id, effective_actor_id)
+    except Exception:
+        pass
+    if str(runtime or "").strip() == "web_model":
+        try:
+            clear_web_model_chatgpt_browser_actor_runtime(
+                group_id=group.group_id,
+                actor_id=effective_actor_id,
+            )
+        except Exception:
+            pass
+
+
 def handle_actor_add(
     args: Dict[str, Any],
     *,
@@ -67,6 +95,8 @@ def handle_actor_add(
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
     before_foreman = foreman_id(group)
+    created_actor_id = ""
+    created_runtime = ""
 
     try:
         require_actor_permission(group, by=by, action="actor.add")
@@ -233,6 +263,8 @@ def handle_actor_add(
         )
 
         effective_actor_id = str(actor.get("id") or actor_id).strip() or actor_id
+        created_actor_id = effective_actor_id
+        created_runtime = runtime
 
         if runtime == "web_model":
             try:
@@ -271,17 +303,16 @@ def handle_actor_add(
                     unset_keys=[],
                     clear=True,
                 )
-            except Exception:
-                try:
-                    remove_actor(group, effective_actor_id)
-                except Exception:
-                    pass
-                try:
-                    delete_actor_private_env(group.group_id, effective_actor_id)
-                except Exception:
-                    pass
-                raise RuntimeError("failed to store env_private")
+            except Exception as exc:
+                raise RuntimeError("failed to store env_private") from exc
     except Exception as e:
+        if created_actor_id:
+            _rollback_created_actor(
+                group,
+                created_actor_id,
+                runtime=created_runtime,
+                delete_actor_private_env=delete_actor_private_env,
+            )
         return _error("actor_add_failed", str(e))
 
     try:

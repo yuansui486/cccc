@@ -31,11 +31,23 @@ export const OPENCODE_FALLBACK_MODELS = [
   "kimi-k2.6",
 ] as const;
 
+function envTextHasAssignment(text: string, key: string): boolean {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*(?:export\\s+|set\\s+|\\$env:)?${escapedKey}\\s*=`, "im").test(String(text || ""));
+}
+
+export function needsDedicatedOneColleagueKey(runtime: string, secretsText: string): boolean {
+  const normalizedRuntime = String(runtime || "").trim().toLowerCase();
+  if (normalizedRuntime !== "codex" && normalizedRuntime !== "opencode") return false;
+  return envTextHasAssignment(secretsText, "OPENAI_API_KEY")
+    && !envTextHasAssignment(secretsText, "ONECOLLEAGUE_API_KEY");
+}
+
 const FALLBACK_RUNTIME_COMMANDS: Partial<Record<SupportedRuntime, string[]>> = {
   claude: ["claude", "--dangerously-skip-permissions"],
   codex: ["codex", "-c", "shell_environment_policy.inherit=all", "--dangerously-bypass-approvals-and-sandbox", "--search"],
   kimi: ["kimi", "--yolo"],
-  opencode: ["opencode"],
+  opencode: ["opencode", "--auto"],
 };
 
 export const RUNTIME_PRESETS: RuntimePreset[] = [
@@ -355,6 +367,7 @@ export function mergePresetSecrets(existing: string, preset: RuntimePreset, auth
     .split("\n")
     .filter((line) => {
       const key = line.match(/^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=/i)?.[1];
+      if (authKey === "ONECOLLEAGUE_API_KEY" && key === "OPENAI_API_KEY") return true;
       if (authKey && key === authKey && !shouldReplaceAuthToken) return true;
       return !key || !presetKeys.has(key);
     })
@@ -372,7 +385,6 @@ export function mergeRuntimeAuthSecret(existing: string, runtime: string, authTo
   if (!token) return current;
   const authText = `${authKey}=${quoteEnvValue(token)}`;
   const obsoleteKeys = new Set<string>([authKey]);
-  if (authKey === "ONECOLLEAGUE_API_KEY") obsoleteKeys.add("OPENAI_API_KEY");
   const kept = current
     .split("\n")
     .filter((line) => {

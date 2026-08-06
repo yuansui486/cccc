@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
@@ -79,19 +81,38 @@ def _coerce_string_env(raw: Any) -> Dict[str, str]:
     return out
 
 
-def _apply_runtime_env_compat(runtime: str, env: Dict[str, Any]) -> Dict[str, Any]:
-    out = dict(env or {})
-    if str(runtime or "").strip().lower() in {"codex", "opencode"}:
-        onecolleague_key = str(out.get("ONECOLLEAGUE_API_KEY") or "").strip()
-        openai_key = str(out.get("OPENAI_API_KEY") or "").strip()
-        if not onecolleague_key and openai_key:
-            out["ONECOLLEAGUE_API_KEY"] = openai_key
-    return out
-
-
 def _coerce_command(raw: Any, fallback: List[str]) -> List[str]:
     source = raw if isinstance(raw, list) else fallback
     return [str(item) for item in source if isinstance(item, str) and str(item).strip()]
+
+
+def _command_normalizer_env(actor_env: Dict[str, Any]) -> Dict[str, Any]:
+    env = dict(os.environ)
+    env.update(dict(actor_env or {}))
+    return env
+
+
+def _normalize_runtime_command_for_launch(
+    normalize_runtime_command: Callable[..., List[str]],
+    runtime: str,
+    command: List[str],
+    env: Dict[str, Any],
+) -> List[str]:
+    try:
+        signature = inspect.signature(normalize_runtime_command)
+    except (TypeError, ValueError):
+        return normalize_runtime_command(runtime, command)
+    params = signature.parameters
+    if "env" in params or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return normalize_runtime_command(runtime, command, env=env)
+    positional = [
+        param
+        for param in params.values()
+        if param.kind in {inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD}
+    ]
+    if any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in params.values()) or len(positional) >= 3:
+        return normalize_runtime_command(runtime, command, env)
+    return normalize_runtime_command(runtime, command)
 
 
 def resolve_actor_launch_config(
@@ -143,8 +164,6 @@ def resolve_actor_launch_config(
         merged_env.update(private_env)
     else:
         merged_env = dict(public_env)
-    merged_env = _apply_runtime_env_compat(resolved_runtime, merged_env)
-
     return {
         "actor": dict(actor),
         "runtime": resolved_runtime,
@@ -169,7 +188,7 @@ def resolve_actor_launch_spec(
     runtime: str,
     find_scope_url: Callable[[Any, str], str],
     effective_runner_kind: Callable[[str], str],
-    normalize_runtime_command: Callable[[str, List[str]], List[str]],
+    normalize_runtime_command: Callable[..., List[str]],
     supported_runtimes: tuple[str, ...] | list[str],
     caller_id: str = "",
     is_admin: bool = False,
@@ -208,7 +227,12 @@ def resolve_actor_launch_spec(
         raise ValueError(f"unsupported runtime: {launch_config['runtime']}")
 
     runtime = str(launch_config["runtime"] or "").strip()
-    effective_command = normalize_runtime_command(runtime, list(launch_config["command"] or []))
+    effective_command = _normalize_runtime_command_for_launch(
+        normalize_runtime_command,
+        runtime,
+        list(launch_config["command"] or []),
+        _command_normalizer_env(dict(launch_config["merged_env"] or {})),
+    )
     return {
         **launch_config,
         "scope_key": scope_key,
@@ -231,7 +255,7 @@ def start_actor_process(
     find_scope_url: Callable[[Any, str], str],
     effective_runner_kind: Callable[[str], str],
     merge_actor_env_with_private: Callable[[str, str, Dict[str, Any]], Dict[str, Any]],
-    normalize_runtime_command: Callable[[str, List[str]], List[str]],
+    normalize_runtime_command: Callable[..., List[str]],
     ensure_mcp_installed: Callable[..., bool],
     inject_actor_context_env: Callable[[Dict[str, Any], str, str], Dict[str, Any]],
     prepare_pty_env: Callable[[Dict[str, Any]], Dict[str, str]],
@@ -290,8 +314,10 @@ def start_actor_process(
         except Exception as e:
             return {"success": False, "error": f"failed to prepare Codex computer-control isolation: {e}"}
 
-    def _launch_env() -> Dict[str, str]:
-        return prepare_runtime_mcp_env(runtime, inject_actor_context_env(effective_env, group.group_id, actor_id))
+    launch_env = prepare_runtime_mcp_env(
+        runtime,
+        inject_actor_context_env(effective_env, group.group_id, actor_id),
+    )
 
     if effective_runner != "headless":
         if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):
@@ -302,7 +328,7 @@ def start_actor_process(
                 ensure_mcp_installed(
                     runtime,
                     cwd,
-                    env=_launch_env(),
+                    env=dict(launch_env),
                 )
             )
         except Exception as e:
@@ -338,7 +364,7 @@ def start_actor_process(
                 group_id=group.group_id,
                 actor_id=actor_id,
                 cwd=cwd,
-                env=_launch_env(),
+                env=dict(launch_env),
                 model=model_from_runtime_command(effective_cmd, effective_env),
                 remote_tui_base_command=list(effective_cmd),
                 max_backlog_bytes=pty_backlog_bytes(),
@@ -352,7 +378,7 @@ def start_actor_process(
                 group_id=group.group_id,
                 actor_id=actor_id,
                 cwd=cwd,
-                env=_launch_env(),
+                env=dict(launch_env),
                 model=model_from_runtime_command(effective_cmd, effective_env),
             )
         elif runtime == "claude" and effective_runner == "headless":
@@ -360,7 +386,7 @@ def start_actor_process(
                 group_id=group.group_id,
                 actor_id=actor_id,
                 cwd=cwd,
-                env=_launch_env(),
+                env=dict(launch_env),
                 model=model_from_runtime_command(effective_cmd, effective_env),
             )
         elif effective_runner == "headless":
@@ -368,7 +394,7 @@ def start_actor_process(
                 group_id=group.group_id,
                 actor_id=actor_id,
                 cwd=cwd,
-                env=_launch_env(),
+                env=dict(launch_env),
             )
             try:
                 write_headless_state(group.group_id, actor_id)
@@ -380,7 +406,7 @@ def start_actor_process(
                 actor_id=actor_id,
                 cwd=cwd,
                 base_command=effective_cmd,
-                env=prepare_pty_env(_launch_env()),
+                env=prepare_pty_env(dict(launch_env)),
                 runtime=runtime,
                 model=model_from_runtime_command(effective_cmd, effective_env),
                 max_backlog_bytes=pty_backlog_bytes(),

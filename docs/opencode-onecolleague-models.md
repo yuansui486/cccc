@@ -25,7 +25,8 @@ OneColleague 会在启动 OpenCode actor 时通过 `OPENCODE_CONFIG_CONTENT` 注
 模型目录来自 `https://peer.shierkeji.com/api/available_model`。服务器返回的模型都会加入
 OpenCode 的模型列表，包括 `locked: true` 的模型；不会按 `locked` 字段过滤。目录会在本机
 `ONECOLLEAGUE_HOME/state/cache`（未设置时使用 `CCCC_HOME/state/cache`）下短暂缓存，服务暂时
-不可访问时使用缓存或内置模型列表。
+不可访问时使用缓存或内置模型列表。智能体启动只读取本地缓存，不会在启动链中等待目录网络请求；
+创建或编辑智能体时的模型列表刷新会更新这份缓存。
 
 ## 密钥
 
@@ -36,6 +37,9 @@ actor 时会自动复用当前 token；也可以在 actor/profile 的私有环�
 ONECOLLEAGUE_API_KEY="your-key"
 ```
 
+`OPENAI_API_KEY` 属于其他 provider，不会自动转换成 `ONECOLLEAGUE_API_KEY`。已有智能体如果只
+配置了 `OPENAI_API_KEY`，需要显式增加上面的专用变量。
+
 真实密钥只保存在本地私有环境变量存储中，不会写入 OpenCode inline JSON、组账本或运行日志。
 
 ## 切换模型
@@ -43,9 +47,9 @@ ONECOLLEAGUE_API_KEY="your-key"
 在 OneColleague 的创建/编辑 actor 界面选择 OpenCode 模型预设，生成的命令类似：
 
 ```bash
-opencode -m onecolleague/gpt-5.4
-opencode -m onecolleague/deepseek-v4-pro
-opencode -m onecolleague/qwen3.6-plus
+opencode --auto -m onecolleague/gpt-5.4
+opencode --auto -m onecolleague/deepseek-v4-pro
+opencode --auto -m onecolleague/qwen3.6-plus
 ```
 
 也可以在 OpenCode 中运行 `/models`，或在命令字段中手工填写任意：

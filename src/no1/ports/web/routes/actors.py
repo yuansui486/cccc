@@ -64,6 +64,7 @@ _READONLY_ACTOR_GENERATION: Dict[str, int] = {}
 _READONLY_ACTOR_CACHE_LOCK = threading.Lock()
 _READONLY_ACTOR_TTL_S = 0.8
 _STANDARD_WEB_HEADLESS_RUNTIMES = frozenset({"codex", "claude", "web_model"})
+_TERMINAL_ATTACH_TIMEOUT_SECONDS = 10.0
 
 
 def _resolve_terminal_attach_mode(query_params: Any, *, read_only: bool) -> tuple[str, bool]:
@@ -1435,7 +1436,20 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 req["args"]["since"] = since
             writer.write((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
             await writer.drain()
-            line = await reader.readline()
+            try:
+                line = await asyncio.wait_for(reader.readline(), timeout=_TERMINAL_ATTACH_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                await websocket.send_json(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "terminal_attach_timeout",
+                            "message": "terminal attach timed out",
+                        },
+                    }
+                )
+                await websocket.close(code=1011)
+                return
             try:
                 resp = json.loads(line.decode("utf-8", errors="replace"))
             except Exception:

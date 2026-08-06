@@ -48,13 +48,18 @@ function getRecentNonEmptyLines(text: string, maxLines: number = 4): string[] {
   return result;
 }
 
+function isTerminalPromptLine(line: string): boolean {
+  return (
+    /^(?:>|›)\s+\S.*$/.test(line) ||
+    /^(?:\$|%|#|❯|➜|›)\s+.*$/.test(line) ||
+    /^[\w.@:/~-]+\s*(?:\$|%|#)\s*$/.test(line)
+  );
+}
+
 export function isTerminalPromptVisible(buffer: string): boolean {
   const lines = getRecentNonEmptyLines(buffer);
   for (const line of lines) {
-    if (/^(?:>|›)\s?.*/.test(line)) return true;
-    if (/^(?:\$|%|#|❯|➜|›)\s+.*$/.test(line)) return true;
-    if (/^[\w.@:/~-]+\s*(?:\$|%|#)\s*$/.test(line)) return true;
-    return false;
+    if (isTerminalPromptLine(line)) return true;
   }
   return false;
 }
@@ -66,6 +71,33 @@ export function isCodexWorkingBannerVisible(buffer: string): boolean {
 function tailWindowHasCodexWorkingBanner(text: string): boolean {
   const compact = String(text || "").replace(/\s+/g, " ");
   return /\bworking\s*\(/i.test(compact);
+}
+
+function lastTerminalPromptOffset(text: string): number {
+  let offset = 0;
+  let lastOffset = -1;
+  for (const rawLine of String(text || "").split(/(\n)/)) {
+    if (rawLine === "\n") {
+      offset += rawLine.length;
+      continue;
+    }
+    if (isTerminalPromptLine(rawLine.trim())) lastOffset = offset;
+    offset += rawLine.length;
+  }
+  return lastOffset;
+}
+
+function lastCodexWorkingBannerOffset(text: string): number {
+  let lastOffset = -1;
+  const pattern = /\bworking\s*\(/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(String(text || ""))) !== null) lastOffset = match.index;
+  return lastOffset;
+}
+
+function isCodexIdlePromptAfterWorkingBanner(buffer: string): boolean {
+  const promptOffset = lastTerminalPromptOffset(buffer);
+  return promptOffset >= 0 && promptOffset > lastCodexWorkingBannerOffset(buffer);
 }
 
 function getTailWindow(text: string, maxChars: number = CODEX_TERMINAL_SIGNAL_WINDOW_CHARS): string {
@@ -90,7 +122,7 @@ export function getTerminalSignalFromChunk(
   const nextBuffer = appendTerminalSignalBuffer(previousBuffer, chunk);
   const runtimeId = String(runtime || "").trim().toLowerCase();
   if (runtimeId === "codex") {
-    if (isTerminalPromptVisible(nextBuffer)) {
+    if (isCodexIdlePromptAfterWorkingBanner(nextBuffer)) {
       return { nextBuffer, signalKind: "idle_prompt" };
     }
     const tailWindow = getTailWindow(nextBuffer);

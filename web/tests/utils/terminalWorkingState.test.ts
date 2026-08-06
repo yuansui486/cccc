@@ -33,6 +33,18 @@ describe("terminalWorkingState", () => {
     expect(result.signalKind).toBe("idle_prompt");
   });
 
+  it("finds a recent prompt behind a terminal status footer", () => {
+    expect(
+      isTerminalPromptVisible(
+        "> Continue the task\nmodel: gpt-5.4 · ~/project\n",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat an empty Codex input marker as an idle prompt", () => {
+    expect(isTerminalPromptVisible("› \ngpt-5.5 medium · ~/project\n")).toBe(false);
+  });
+
   it("detects codex working banner lines", () => {
     expect(isCodexWorkingBannerVisible("◦ Working (6s • esc to interrupt)\n")).toBe(true);
   });

@@ -6,6 +6,7 @@ import { encodeTerminalInputFrame, parseTerminalBinaryFrame } from "../../src/ut
 const da1 = "\x1b[?1;2c";
 const color10 = "\x1b]10;rgb:1e1e/2929/3b3b\x1b\\";
 const color11 = "\x1b]11;rgb:fafa/fafa/fafa\x1b\\";
+const color4 = "\x1b]4;12;rgb:5c5c/5c5c/ffff\x07";
 
 describe("filterTerminalInputChunk", () => {
   it("filters concatenated device and color replies", () => {
@@ -32,6 +33,20 @@ describe("filterTerminalInputChunk", () => {
   it("preserves ordinary escape input and non-filtered runtimes", () => {
     expect(filterTerminalInputChunk("", "\x1b[A", "gemini")).toEqual({ data: "\x1b[A", pending: "" });
     expect(filterTerminalInputChunk("", da1, "bash")).toEqual({ data: da1, pending: "" });
+  });
+
+  it("filters OpenCode device and palette replies but preserves focus events", () => {
+    expect(filterTerminalInputChunk("", `${da1}${color4}`, "opencode")).toEqual({ data: "", pending: "" });
+    expect(filterTerminalInputChunk("", "\x1b[I", "opencode")).toEqual({ data: "\x1b[I", pending: "" });
+  });
+
+  it("preserves browser CPR and modified function keys for OpenCode", () => {
+    expect(filterTerminalInputChunk("", "\x1b[24;80R", "opencode")).toEqual({ data: "\x1b[24;80R", pending: "" });
+    expect(filterTerminalInputChunk("", "\x1b[1;2R", "opencode")).toEqual({ data: "\x1b[1;2R", pending: "" });
+  });
+
+  it("filters Codex terminal replies with the shared parser", () => {
+    expect(filterTerminalInputChunk("", `${da1}${color10}\x1b[O`, "codex")).toEqual({ data: "", pending: "" });
   });
 
   it("frames only bytes left after fragmented provider response filtering", () => {

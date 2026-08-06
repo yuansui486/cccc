@@ -14,20 +14,22 @@ import {
   isTerminalAttachNonRetryableErrorCode,
   isTerminalAttachStartupRaceErrorCode,
   parseTerminalBinaryFrame,
+  seedTerminalReplayCursor,
+  shouldMaintainTerminalConnection,
   shouldSuppressTerminalAttachErrorOutput,
+  terminalAttachRetryDelayMs,
 } from "../../utils/terminalConnection";
 
 export type AgentTerminalConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
 
 const TERMINAL_SHOW_DELAY_MS = 150;
+const TERMINAL_ATTACH_TIMEOUT_MS = 10000;
 const RECONNECT_BASE_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 30000;
 const MAX_RECONNECT_ATTEMPTS = 10;
-const STARTUP_RACE_RECONNECT_DELAY_MS = 750;
 
 export function useAgentTerminalConnection(args: {
   activated: boolean;
-  isVisible: boolean;
   isRunning: boolean;
   isHeadless: boolean;
   groupId: string;
@@ -44,7 +46,6 @@ export function useAgentTerminalConnection(args: {
 }) {
   const {
     activated,
-    isVisible,
     isRunning,
     isHeadless,
     groupId,
@@ -60,6 +61,8 @@ export function useAgentTerminalConnection(args: {
     setReconnectTrigger,
   } = args;
 
+  const terminalSessionKey = `${groupId}\u0000${actorId}\u0000${termEpoch}`;
+
   const [connectionStatus, setConnectionStatus] = useState<AgentTerminalConnectionStatus>("disconnected");
   const [terminalReady, setTerminalReady] = useState(false);
   const [terminalWritable, setTerminalWritable] = useState(false);
@@ -67,11 +70,17 @@ export function useAgentTerminalConnection(args: {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const terminalReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const terminalAttachTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outputFilterTailRef = useRef("");
   const terminalSignalBufferRef = useRef("");
   const terminalInputFilterPendingRef = useRef("");
   const terminalAttachNoRetryRef = useRef(false);
-  const terminalAttachStartupRaceRef = useRef(false);
+  const terminalAttachStartupRaceCodeRef = useRef("");
+  const terminalAttachStartupStartedAtRef = useRef(0);
+  const deliveredCursorRef = useRef<{ key: string; cursor: number | null }>({
+    key: terminalSessionKey,
+    cursor: null,
+  });
   const lastTermEpochRef = useRef(termEpoch);
 
   const isRunningRef = useRef(isRunning);
@@ -93,7 +102,7 @@ export function useAgentTerminalConnection(args: {
     clearTerminalSignalRef.current = clearTerminalSignal;
     if (isRunning) {
       terminalAttachNoRetryRef.current = false;
-      terminalAttachStartupRaceRef.current = false;
+      terminalAttachStartupRaceCodeRef.current = "";
     }
     if (!isRunning || isHeadless || !canControl) {
       const timer = window.setTimeout(() => setTerminalWritable(false), 0);
@@ -107,6 +116,12 @@ export function useAgentTerminalConnection(args: {
     terminalInputFilterPendingRef.current = "";
     clearTerminalSignalRef.current(groupId, actorId);
   }, [actorId, groupId, isHeadless, isRunning]);
+
+  useEffect(() => {
+    if (deliveredCursorRef.current.key === terminalSessionKey) return;
+    deliveredCursorRef.current = { key: terminalSessionKey, cursor: null };
+    terminalAttachStartupStartedAtRef.current = 0;
+  }, [terminalSessionKey]);
 
   const requestReconnect = useCallback(() => {
     reconnectAttemptRef.current = 0;
@@ -132,7 +147,16 @@ export function useAgentTerminalConnection(args: {
   });
 
   useEffect(() => {
-    if (!activated || !isVisible || !isRunning || isHeadless || !terminalRef.current) return;
+    if (
+      !shouldMaintainTerminalConnection({
+        activated,
+        isRunning,
+        isHeadless,
+        hasTerminal: Boolean(terminalRef.current),
+      })
+    ) {
+      return;
+    }
 
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -140,24 +164,44 @@ export function useAgentTerminalConnection(args: {
     }
     reconnectAttemptRef.current = 0;
     terminalAttachNoRetryRef.current = false;
-    terminalAttachStartupRaceRef.current = false;
+    terminalAttachStartupRaceCodeRef.current = "";
+    terminalAttachStartupStartedAtRef.current = 0;
 
     let disposed = false;
     let disposable: { dispose: () => void } | null = null;
     let resizeDisposable: { dispose: () => void } | null = null;
-    let deliveredCursor: number | null = null;
-
     const seedCursorFromAttach = (result: Record<string, unknown>): void => {
-      const replayCursor = Number(result.replay_cursor);
-      if (!Number.isFinite(replayCursor)) return;
-      if (deliveredCursor !== null && replayCursor > deliveredCursor) {
+      const seeded = seedTerminalReplayCursor(deliveredCursorRef.current.cursor, result.replay_cursor);
+      if (seeded.resetTerminal) {
         try {
           terminalRef.current?.reset();
         } catch {
           // Ignore terminal disposal races.
         }
       }
-      deliveredCursor = replayCursor;
+      deliveredCursorRef.current.cursor = seeded.cursor;
+    };
+
+    const advanceDeliveredCursor = (byteLength: number): void => {
+      const cursor = deliveredCursorRef.current.cursor;
+      if (cursor !== null) deliveredCursorRef.current.cursor = cursor + Math.max(0, byteLength);
+    };
+
+    const markAttached = (result: Record<string, unknown>): void => {
+      if (terminalAttachTimeoutRef.current) {
+        clearTimeout(terminalAttachTimeoutRef.current);
+        terminalAttachTimeoutRef.current = null;
+      }
+      seedCursorFromAttach(result);
+      setTerminalWritable(Boolean(result.terminal_writable));
+      setConnectionStatus("connected");
+      reconnectAttemptRef.current = 0;
+      terminalAttachStartupRaceCodeRef.current = "";
+      terminalAttachStartupStartedAtRef.current = 0;
+      if (terminalReadyTimeoutRef.current) clearTimeout(terminalReadyTimeoutRef.current);
+      terminalReadyTimeoutRef.current = setTimeout(() => {
+        if (!disposed) setTerminalReady(true);
+      }, TERMINAL_SHOW_DELAY_MS);
     };
 
     const connect = () => {
@@ -182,14 +226,15 @@ export function useAgentTerminalConnection(args: {
       }
 
       setConnectionStatus("connecting");
+      terminalAttachStartupRaceCodeRef.current = "";
 
-      const isFirstAttach = deliveredCursor === null;
+      const isFirstAttach = deliveredCursorRef.current.cursor === null;
       const wsUrl = buildTerminalWebSocketUrl({
         protocol: window.location.protocol,
         host: window.location.host,
         groupId,
         actorId,
-        since: isFirstAttach ? null : deliveredCursor,
+        since: isFirstAttach ? null : deliveredCursorRef.current.cursor,
         mode: canControlRef.current ? "control" : "viewer",
         takeover: canControlRef.current,
       });
@@ -203,9 +248,13 @@ export function useAgentTerminalConnection(args: {
           ws.close(1000, "Component unmounted during connection");
           return;
         }
-        setConnectionStatus("connected");
         setTerminalWritable(false);
-        reconnectAttemptRef.current = 0;
+        if (terminalAttachTimeoutRef.current) clearTimeout(terminalAttachTimeoutRef.current);
+        terminalAttachTimeoutRef.current = setTimeout(() => {
+          if (!disposed && wsRef.current === ws) {
+            ws.close(4000, "Terminal attach timed out");
+          }
+        }, TERMINAL_ATTACH_TIMEOUT_MS);
         outputFilterTailRef.current = "";
         terminalSignalBufferRef.current = "";
         terminalInputFilterPendingRef.current = "";
@@ -217,13 +266,8 @@ export function useAgentTerminalConnection(args: {
           }
         }
 
-        if (terminalReadyTimeoutRef.current) {
-          clearTimeout(terminalReadyTimeoutRef.current);
-        }
+        if (terminalReadyTimeoutRef.current) clearTimeout(terminalReadyTimeoutRef.current);
         setTerminalReady(false);
-        terminalReadyTimeoutRef.current = setTimeout(() => {
-          if (!disposed) setTerminalReady(true);
-        }, TERMINAL_SHOW_DELAY_MS);
 
         void fetchTerminalTail(groupId, actorId, 4000, true, true)
           .then((resp) => {
@@ -291,20 +335,19 @@ export function useAgentTerminalConnection(args: {
         if (event.data instanceof ArrayBuffer) {
           const frame = parseTerminalBinaryFrame(event.data);
           if (!frame) {
-            if (deliveredCursor !== null) deliveredCursor += event.data.byteLength;
+            advanceDeliveredCursor(event.data.byteLength);
             handleDecoded(new TextDecoder().decode(event.data));
             return;
           }
           if (frame.type === "output") {
-            if (deliveredCursor !== null) deliveredCursor += frame.payload.byteLength;
+            advanceDeliveredCursor(frame.payload.byteLength);
             handleDecoded(new TextDecoder().decode(frame.payload));
             return;
           }
           if (frame.type === "attach") {
             const result = decodeTerminalJsonFrame<Record<string, unknown>>(frame.payload) || {};
-            seedCursorFromAttach(result);
+            markAttached(result);
             const writable = Boolean(result.terminal_writable);
-            setTerminalWritable(writable);
             if (canControlRef.current && !writable) {
               handleDecoded("\r\n[terminal] read-only connection; reconnect to take control.\r\n");
             }
@@ -321,7 +364,7 @@ export function useAgentTerminalConnection(args: {
           void event.data.arrayBuffer().then((buf) => {
             const frame = parseTerminalBinaryFrame(buf);
             if (frame?.type === "output") {
-              if (deliveredCursor !== null) deliveredCursor += frame.payload.byteLength;
+              advanceDeliveredCursor(frame.payload.byteLength);
               handleDecoded(new TextDecoder().decode(frame.payload));
             }
           });
@@ -330,8 +373,7 @@ export function useAgentTerminalConnection(args: {
             const msg = JSON.parse(event.data);
             if (msg.type === "terminal.attach" && msg.ok === true) {
               const result = msg.result && typeof msg.result === "object" ? msg.result : {};
-              seedCursorFromAttach(result);
-              setTerminalWritable(Boolean(result.terminal_writable));
+              markAttached(result);
               return;
             }
             if (msg.type === "terminal.input_ack" && msg.ok === false) {
@@ -347,12 +389,15 @@ export function useAgentTerminalConnection(args: {
                 terminalAttachNoRetryRef.current = true;
               }
               if (isTerminalAttachStartupRaceErrorCode(code)) {
-                terminalAttachStartupRaceRef.current = true;
+                terminalAttachStartupRaceCodeRef.current = code;
+                if (code === "actor_not_running" && terminalAttachStartupStartedAtRef.current <= 0) {
+                  terminalAttachStartupStartedAtRef.current = Date.now();
+                }
               }
               onStatusChangeRef.current?.();
             }
           } catch {
-            if (deliveredCursor !== null) deliveredCursor += new TextEncoder().encode(event.data).length;
+            advanceDeliveredCursor(new TextEncoder().encode(event.data).length);
             handleDecoded(event.data);
           }
         }
@@ -360,28 +405,42 @@ export function useAgentTerminalConnection(args: {
 
       ws.onclose = (event) => {
         if (disposed) return;
+        if (terminalAttachTimeoutRef.current) {
+          clearTimeout(terminalAttachTimeoutRef.current);
+          terminalAttachTimeoutRef.current = null;
+        }
         wsRef.current = null;
         const noRetry = event.code === 1000 || event.code === 4401 || terminalAttachNoRetryRef.current;
 
-        if (!noRetry && isVisible && isRunningRef.current && !isHeadless) {
-          const startupRace = terminalAttachStartupRaceRef.current;
-          const attempt = startupRace ? 0 : reconnectAttemptRef.current;
-          if (!startupRace && attempt >= MAX_RECONNECT_ATTEMPTS) {
+        if (!noRetry && isRunningRef.current && !isHeadless) {
+          const startupRaceCode = terminalAttachStartupRaceCodeRef.current;
+          const attempt = reconnectAttemptRef.current;
+          const startupElapsedMs = terminalAttachStartupStartedAtRef.current > 0
+            ? Date.now() - terminalAttachStartupStartedAtRef.current
+            : 0;
+          const startupDelay = terminalAttachRetryDelayMs({
+            code: startupRaceCode,
+            attempt,
+            startupElapsedMs,
+          });
+          if (startupRaceCode && startupDelay === null) {
+            setConnectionStatus("disconnected");
+            return;
+          }
+          if (!startupRaceCode && attempt >= MAX_RECONNECT_ATTEMPTS) {
             setConnectionStatus("disconnected");
             return;
           }
 
-          const delay = startupRace
-            ? STARTUP_RACE_RECONNECT_DELAY_MS
-            : Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt), RECONNECT_MAX_DELAY_MS);
+          const delay = startupDelay
+            ?? Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt), RECONNECT_MAX_DELAY_MS);
           setConnectionStatus("reconnecting");
 
           reconnectTimeoutRef.current = setTimeout(() => {
-            if (startupRace) {
-              terminalAttachStartupRaceRef.current = false;
-            } else {
+            if (startupRaceCode !== "actor_not_running") {
               reconnectAttemptRef.current++;
             }
+            terminalAttachStartupRaceCodeRef.current = "";
             connect();
           }, delay);
         } else {
@@ -430,6 +489,10 @@ export function useAgentTerminalConnection(args: {
         clearTimeout(terminalReadyTimeoutRef.current);
         terminalReadyTimeoutRef.current = null;
       }
+      if (terminalAttachTimeoutRef.current) {
+        clearTimeout(terminalAttachTimeoutRef.current);
+        terminalAttachTimeoutRef.current = null;
+      }
       if (disposable) disposable.dispose();
       if (resizeDisposable) resizeDisposable.dispose();
       if (wsRef.current) {
@@ -450,17 +513,16 @@ export function useAgentTerminalConnection(args: {
     groupId,
     isHeadless,
     isRunning,
-    isVisible,
     terminalConnectionKey,
     terminalRef,
   ]);
 
   useEffect(() => {
-    if (!activated || !isVisible || isHeadless || !isRunning || !terminalRef.current) return;
+    if (!activated || isHeadless || !isRunning || !terminalRef.current) return;
     if (lastTermEpochRef.current === termEpoch) return;
     lastTermEpochRef.current = termEpoch;
     requestReconnect();
-  }, [activated, isHeadless, isRunning, isVisible, requestReconnect, termEpoch, terminalRef]);
+  }, [activated, isHeadless, isRunning, requestReconnect, termEpoch, terminalRef]);
 
   return {
     connectionStatus,

@@ -394,19 +394,17 @@ def handle_actor_restart(
         runner_effective = str(launch_spec["effective_runner"])
         runtime = str(launch_spec["runtime"])
         effective_env = dict(launch_spec["merged_env"])
-
-        def _launch_env() -> Dict[str, str]:
-            return prepare_runtime_mcp_env(
-                runtime,
-                inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id),
-            )
+        launch_env = prepare_runtime_mcp_env(
+            runtime,
+            inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id),
+        )
         if runner_effective != "headless":
             try:
                 mcp_ready = bool(
                     ensure_mcp_installed(
                         runtime,
                         cwd,
-                        env=_launch_env(),
+                        env=dict(launch_env),
                     )
                 )
             except Exception as e:
@@ -425,7 +423,7 @@ def handle_actor_restart(
                     group_id=group.group_id,
                     actor_id=actor_id,
                     cwd=cwd,
-                    env=_launch_env(),
+                    env=dict(launch_env),
                     model=model_from_runtime_command(launch_spec["effective_command"]),
                     remote_tui_base_command=list(launch_spec["effective_command"]),
                     max_backlog_bytes=pty_backlog_bytes(),
@@ -439,7 +437,7 @@ def handle_actor_restart(
                     group_id=group.group_id,
                     actor_id=actor_id,
                     cwd=cwd,
-                    env=_launch_env(),
+                    env=dict(launch_env),
                     model=model_from_runtime_command(launch_spec["effective_command"]),
                 )
             elif runtime == "claude" and runner_effective == "headless":
@@ -447,7 +445,7 @@ def handle_actor_restart(
                     group_id=group.group_id,
                     actor_id=actor_id,
                     cwd=cwd,
-                    env=_launch_env(),
+                    env=dict(launch_env),
                     model=model_from_runtime_command(launch_spec["effective_command"]),
                 )
             elif runner_effective == "headless":
@@ -455,7 +453,7 @@ def handle_actor_restart(
                     group_id=group.group_id,
                     actor_id=actor_id,
                     cwd=cwd,
-                    env=_launch_env(),
+                    env=dict(launch_env),
                 )
                 try:
                     write_headless_state(group.group_id, actor_id)
@@ -467,7 +465,7 @@ def handle_actor_restart(
                     actor_id=actor_id,
                     cwd=cwd,
                     base_command=launch_spec["effective_command"],
-                    env=prepare_pty_env(_launch_env()),
+                    env=prepare_pty_env(dict(launch_env)),
                     runtime=runtime,
                     model=model_from_runtime_command(launch_spec["effective_command"]),
                     max_backlog_bytes=pty_backlog_bytes(),

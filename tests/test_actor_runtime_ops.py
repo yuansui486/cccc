@@ -23,6 +23,84 @@ class TestActorRuntimeOps(unittest.TestCase):
             "gpt-5.5",
         )
 
+    def test_resolve_launch_spec_passes_effective_env_to_command_normalizer(self) -> None:
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_spec
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "os.environ",
+            {"OPENAI_BASE_URL": "https://daemon.example/v1"},
+            clear=False,
+        ):
+            group = SimpleNamespace(
+                group_id="g-test",
+                doc={
+                    "active_scope_key": "scope1",
+                    "actors": [
+                        {
+                            "id": "peer1",
+                            "default_scope_key": "scope1",
+                            "runner": "pty",
+                            "runtime": "codex",
+                            "command": ["codex"],
+                            "env": {"OPENAI_BASE_URL": "https://actor.example/v1"},
+                        }
+                    ],
+                },
+            )
+            spec = resolve_actor_launch_spec(
+                group,
+                "peer1",
+                command=[],
+                env={},
+                runner="pty",
+                runtime="codex",
+                find_scope_url=lambda _group, _scope_key: td,
+                effective_runner_kind=lambda runner: runner,
+                normalize_runtime_command=lambda _runtime, command, *, env: [*command, env["OPENAI_BASE_URL"]],
+                supported_runtimes=("codex",),
+            )
+
+        self.assertEqual(spec["effective_command"], ["codex", "https://actor.example/v1"])
+
+    def test_resolve_launch_spec_passes_daemon_env_to_command_normalizer(self) -> None:
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_spec
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "os.environ",
+            {"OPENAI_BASE_URL": "https://daemon.example/v1"},
+            clear=False,
+        ):
+            group = SimpleNamespace(
+                group_id="g-test",
+                doc={
+                    "active_scope_key": "scope1",
+                    "actors": [
+                        {
+                            "id": "peer1",
+                            "default_scope_key": "scope1",
+                            "runner": "pty",
+                            "runtime": "codex",
+                            "command": ["codex"],
+                            "env": {},
+                        }
+                    ],
+                },
+            )
+            spec = resolve_actor_launch_spec(
+                group,
+                "peer1",
+                command=[],
+                env={},
+                runner="pty",
+                runtime="codex",
+                find_scope_url=lambda _group, _scope_key: td,
+                effective_runner_kind=lambda runner: runner,
+                normalize_runtime_command=lambda _runtime, command, *, env: [*command, env["OPENAI_BASE_URL"]],
+                supported_runtimes=("codex",),
+            )
+
+        self.assertEqual(spec["effective_command"], ["codex", "https://daemon.example/v1"])
+
     def test_resolve_launch_spec_uses_user_hermes_home_by_default(self) -> None:
         import os
 
@@ -116,7 +194,7 @@ class TestActorRuntimeOps(unittest.TestCase):
         self.assertNotIn("HERMES_HOME", spec["merged_env"])
         self.assertEqual(spec["effective_command"], ["hermes", "--profile", "other", "--tui", "--yolo"])
 
-    def test_codex_launch_env_falls_back_to_openai_api_key_for_legacy_agents(self) -> None:
+    def test_codex_launch_env_does_not_reuse_openai_api_key(self) -> None:
         from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_config
 
         group = SimpleNamespace(
@@ -145,8 +223,40 @@ class TestActorRuntimeOps(unittest.TestCase):
             merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
         )
 
-        self.assertEqual(spec["merged_env"].get("ONECOLLEAGUE_API_KEY"), "legacy-key")
+        self.assertNotIn("ONECOLLEAGUE_API_KEY", spec["merged_env"])
         self.assertEqual(spec["merged_env"].get("OPENAI_API_KEY"), "legacy-key")
+
+    def test_opencode_launch_env_does_not_reuse_openai_api_key(self) -> None:
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_config
+
+        group = SimpleNamespace(
+            group_id="g-test",
+            doc={
+                "actors": [
+                    {
+                        "id": "opencode-1",
+                        "runner": "pty",
+                        "runtime": "opencode",
+                        "command": ["opencode", "--auto"],
+                        "env": {"OPENAI_API_KEY": "openai-key"},
+                    }
+                ],
+            },
+        )
+
+        spec = resolve_actor_launch_config(
+            group,
+            "opencode-1",
+            command=[],
+            env={},
+            runner="pty",
+            runtime="opencode",
+            effective_runner_kind=lambda runner: runner,
+            merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+        )
+
+        self.assertEqual(spec["merged_env"].get("OPENAI_API_KEY"), "openai-key")
+        self.assertNotIn("ONECOLLEAGUE_API_KEY", spec["merged_env"])
 
     def test_codex_launch_env_keeps_explicit_onecolleague_api_key(self) -> None:
         from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_config
@@ -284,6 +394,11 @@ class TestActorRuntimeOps(unittest.TestCase):
                 patch.object(actor_runtime_ops.pty_runner, "PTY_SUPPORTED", True),
                 patch.object(actor_runtime_ops, "runtime_start_preflight_error", return_value=""),
                 patch.object(actor_runtime_ops, "start_pty_actor_with_runtime_resume", side_effect=fake_start_pty_actor_with_runtime_resume),
+                patch.object(
+                    actor_runtime_ops,
+                    "prepare_runtime_mcp_env",
+                    wraps=actor_runtime_ops.prepare_runtime_mcp_env,
+                ) as prepare_launch_env,
                 patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]),
             ):
                 result = actor_runtime_ops.start_actor_process(
@@ -310,6 +425,7 @@ class TestActorRuntimeOps(unittest.TestCase):
                 )
 
         self.assertTrue(bool(result.get("success")), result.get("error"))
+        prepare_launch_env.assert_called_once()
         env = captured.get("env") if isinstance(captured.get("env"), dict) else {}
         doc = json.loads(str(env.get("OPENCODE_CONFIG_CONTENT") or "{}"))
         self.assertEqual(doc["mcp"]["other"]["command"], ["other"])

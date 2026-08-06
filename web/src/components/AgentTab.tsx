@@ -426,7 +426,6 @@ export function AgentTab({
     sendInterrupt,
   } = useAgentTerminalConnection({
     activated,
-    isVisible,
     isRunning,
     isHeadless,
     groupId,

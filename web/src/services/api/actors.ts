@@ -85,7 +85,7 @@ export async function addActor(
 ) {
   clearActorsReadOnlyRequest(groupId);
   clearGroupsReadRequest();
-  return apiJson<{ actor: Actor }>(`/api/v1/groups/${encodeURIComponent(groupId)}/actors`, {
+  return apiJson<{ actor: Actor; running?: boolean; start_error?: string }>(`/api/v1/groups/${encodeURIComponent(groupId)}/actors`, {
     method: "POST",
     body: JSON.stringify({
       actor_id: actorId,

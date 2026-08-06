@@ -25,6 +25,7 @@ import {
   defaultRuntimePresetFor,
   mergePresetSecrets,
   mergeRuntimeAuthSecret,
+  needsDedicatedOneColleagueKey,
   OPENCODE_FALLBACK_MODELS,
   runtimePresetById,
   runtimePresetIdFor,
@@ -83,11 +84,13 @@ export interface AddActorModalProps {
 
   addActorError: string;
   setAddActorError: (msg: string) => void;
+  createdActorId?: string;
 
   canAddActor: boolean;
   addActorDisabledReason: string;
 
   onAddActor: (avatarFile?: File | null) => Promise<boolean> | boolean;
+  onEditCreatedActor?: () => void;
   onSaveAsProfile: () => void;
   onClose: () => void;
   onCancelAndReset: () => void;
@@ -167,9 +170,11 @@ export function AddActorModal({
   setShowAdvancedActor,
   addActorError,
   setAddActorError,
+  createdActorId,
   canAddActor,
   addActorDisabledReason,
   onAddActor,
+  onEditCreatedActor,
   onSaveAsProfile,
   onClose,
   onCancelAndReset,
@@ -230,6 +235,8 @@ export function AddActorModal({
   const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
   const runtimeChoiceDescription = selectedRuntimePreset?.description || RUNTIME_INFO[newActorRuntime]?.desc || "";
   const newActorSecretsPlaceholder = secretsPlaceholderForRuntime(newActorRuntime);
+  const needsOneColleagueKey = !newActorUseProfile
+    && needsDedicatedOneColleagueKey(newActorRuntime, newActorSecretsSetText);
   const selectedProfile = actorProfiles.find((item) => actorProfileIdentityKey(item) === String(newActorProfileId || "").trim());
   const selectedProfileRuntime = String(selectedProfile?.runtime || "").trim() as SupportedRuntime;
   const selectedProfileCommand = commandPreview(selectedProfile?.command);
@@ -707,6 +714,11 @@ export function AddActorModal({
                       <div className="text-[10px] mt-1 text-[var(--color-text-muted)]">
                         {t("secretsFormat").replace(/<1>|<\/1>|<2>|<\/2>/g, "")}
                       </div>
+                      {needsOneColleagueKey ? (
+                        <div className="mt-1.5 text-[10px] text-amber-700 dark:text-amber-300" role="alert">
+                          {t("oneColleagueKeyRequired")}
+                        </div>
+                      ) : null}
                     </div>
                   </details>
 
@@ -767,6 +779,17 @@ export function AddActorModal({
                 {t("common:cancel")}
               </Button>
 
+            {createdActorId && onEditCreatedActor ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onEditCreatedActor}
+                disabled={busy === "actor-add"}
+              >
+                {t("editCreatedActor")}
+              </Button>
+            ) : null}
+
             <div className="flex-1 min-w-0">
               <Button
                 type="button"
@@ -776,7 +799,13 @@ export function AddActorModal({
                 }}
                 disabled={!canAddActor}
               >
-                {busy === "actor-add" ? t("adding") : newActorUseProfile ? t("createFromProfile") : t("addAgent")}
+                {busy === "actor-add"
+                  ? (createdActorId ? t("retryingStart") : t("adding"))
+                  : createdActorId
+                    ? t("retryStart")
+                    : newActorUseProfile
+                      ? t("createFromProfile")
+                      : t("addAgent")}
               </Button>
               {addActorDisabledReason ? (
                 <div className="text-[10px] text-amber-600 dark:text-amber-300 mt-1.5">{addActorDisabledReason}</div>

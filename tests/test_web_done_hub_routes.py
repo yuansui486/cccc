@@ -379,7 +379,9 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 calls,
             )
 
-        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory), patch(
+            "no1.ports.web.routes.done_hub.cache_opencode_model_catalog"
+        ) as cache_catalog:
             client = self._create_client()
             resp = client.get("/api/v1/done_hub/models")
 
@@ -391,6 +393,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         self.assertTrue(result["items"][0]["locked"])
         self.assertEqual(result["items"][2]["input"], 3.0)
         self.assertEqual(calls[0][0:2], ("GET", f"{base}/api/available_model"))
+        cache_catalog.assert_called_once_with(result["items"])
 
     def test_done_hub_team_presets_can_use_env_override(self) -> None:
         base = "https://peer.shierkeji.com"

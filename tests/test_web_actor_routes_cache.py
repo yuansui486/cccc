@@ -1061,6 +1061,52 @@ class TestWebActorRoutesCache(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_terminal_websocket_reports_daemon_attach_timeout(self) -> None:
+        import asyncio
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+
+            class Reader:
+                async def readline(self) -> bytes:
+                    raise asyncio.TimeoutError
+
+            class Writer:
+                def write(self, _data: bytes) -> None:
+                    return None
+
+                async def drain(self) -> None:
+                    return None
+
+                def close(self) -> None:
+                    return None
+
+                async def wait_closed(self) -> None:
+                    return None
+
+            async def open_connection(_path: str):
+                return Reader(), Writer()
+
+            with patch(
+                "no1.ports.web.routes.actors.get_daemon_endpoint",
+                return_value={"transport": "unix", "path": "/tmp/test.sock"},
+            ), patch(
+                "no1.ports.web.routes.actors.asyncio.open_unix_connection",
+                side_effect=open_connection,
+                create=True,
+            ):
+                with self._client() as client:
+                    with client.websocket_connect(
+                        f"/api/v1/groups/{group_id}/actors/peer-1/term?mode=viewer"
+                    ) as ws:
+                        response = ws.receive_json()
+
+            self.assertFalse(response["ok"])
+            self.assertEqual(response["error"]["code"], "terminal_attach_timeout")
+        finally:
+            cleanup()
+
     def test_terminal_websocket_current_and_stale_resize_leases(self) -> None:
         import asyncio
 

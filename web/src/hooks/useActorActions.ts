@@ -6,13 +6,19 @@ import type { Actor, SupportedRuntime } from "../types";
 import { formatCapabilityIdInput } from "../utils/capabilityAutoload";
 import { getEffectiveActorRunner } from "../utils/headlessRuntimeSupport";
 import { beginActorAction, endActorAction } from "./actorActionInFlight";
+import {
+  beginActionRequestEpoch,
+  isLatestActionRequestEpoch,
+} from "./actionRequestEpoch";
 
 const ACTOR_START_RECONCILE_DELAYS_MS = [1200, 3500] as const;
 
-function latestActorHasResumeFailure(actorId: string): boolean {
+function latestActorHasResumeFailure(groupId: string, actorId: string): boolean {
+  const gid = String(groupId || "").trim();
   const aid = String(actorId || "").trim();
-  if (!aid) return false;
-  const latest = useGroupStore.getState().actors.find((item) => String(item.id || "").trim() === aid);
+  const state = useGroupStore.getState();
+  if (!gid || !aid || String(state.selectedGroupId || "").trim() !== gid) return false;
+  const latest = state.actors.find((item) => String(item.id || "").trim() === aid);
   return String(latest?.runtime_session_status || "").trim().toLowerCase() === "resume_failed";
 }
 
@@ -22,8 +28,6 @@ export function useActorActions(groupId: string) {
     refreshGroups,
     loadGroup,
     clearStreamingEventsForActor,
-    updateActorActivity,
-    updateGroupRuntimeState,
   } = useGroupStore();
   const { setBusy, setActiveTab, showError } = useUIStore();
   const { openModal, setEditingActor } = useModalStore();
@@ -35,6 +39,21 @@ export function useActorActions(groupId: string) {
   const [termEpochByActor, setTermEpochByActor] = useState<Record<string, number>>({});
   const reconcileTimersRef = useRef<Record<string, number[]>>({});
   const actorActionInFlightRef = useRef<Set<string>>(new Set());
+  const actionEpochsRef = useRef(new Map<string, number>());
+  const busyEpochRef = useRef(0);
+
+  const beginBusy = useCallback((label: string) => {
+    busyEpochRef.current += 1;
+    const epoch = busyEpochRef.current;
+    setBusy(label);
+    return epoch;
+  }, [setBusy]);
+
+  const clearBusy = useCallback((label: string, epoch: number) => {
+    if (busyEpochRef.current !== epoch) return;
+    if (useUIStore.getState().busy !== label) return;
+    setBusy("");
+  }, [setBusy]);
 
   useEffect(() => {
     return () => {
@@ -48,8 +67,10 @@ export function useActorActions(groupId: string) {
     };
   }, []);
 
-  const clearReconcileTimers = useCallback((actorId: string) => {
-    const key = String(actorId || "").trim();
+  const clearReconcileTimers = useCallback((targetGid: string, actorId: string) => {
+    const gid = String(targetGid || "").trim();
+    const aid = String(actorId || "").trim();
+    const key = gid && aid ? `${gid}:${aid}` : "";
     if (!key) return;
     for (const timerId of reconcileTimersRef.current[key] || []) {
       window.clearTimeout(timerId);
@@ -57,102 +78,99 @@ export function useActorActions(groupId: string) {
     delete reconcileTimersRef.current[key];
   }, []);
 
-  const scheduleRuntimeReconcile = useCallback((actorId: string) => {
-    const key = String(actorId || "").trim();
-    if (!groupId || !key) return;
-    clearReconcileTimers(key);
-    reconcileTimersRef.current[key] = ACTOR_START_RECONCILE_DELAYS_MS.map((delayMs) =>
+  const scheduleRuntimeReconcile = useCallback((
+    targetGid: string,
+    actorId: string,
+    actionKey: string,
+    actionEpoch: number,
+  ) => {
+    const gid = String(targetGid || "").trim();
+    const aid = String(actorId || "").trim();
+    const timerKey = gid && aid ? `${gid}:${aid}` : "";
+    if (!timerKey) return;
+    clearReconcileTimers(gid, aid);
+    reconcileTimersRef.current[timerKey] = ACTOR_START_RECONCILE_DELAYS_MS.map((delayMs) =>
       window.setTimeout(() => {
-        void Promise.allSettled([refreshActors(groupId), refreshGroups()]);
+        if (!isLatestActionRequestEpoch(actionEpochsRef, actionKey, actionEpoch)) return;
+        void Promise.allSettled([refreshActors(gid), refreshGroups()]);
       }, delayMs)
     );
-  }, [clearReconcileTimers, groupId, refreshActors, refreshGroups]);
-
-  const optimisticMarkRunning = useCallback((actorId: string, reason: string) => {
-    const key = String(actorId || "").trim();
-    if (!groupId || !key) return;
-    const updatedAt = new Date().toISOString();
-    updateActorActivity([{
-      id: key,
-      running: true,
-      idle_seconds: null,
-      effective_working_state: "waiting",
-      effective_working_reason: reason,
-      effective_working_updated_at: updatedAt,
-      effective_active_task_id: null,
-    }]);
-    updateGroupRuntimeState(groupId, {
-      lifecycle_state: "active",
-      runtime_running: true,
-    });
-  }, [groupId, updateActorActivity, updateGroupRuntimeState]);
+  }, [clearReconcileTimers, refreshActors, refreshGroups]);
 
   // Start/stop actor
   const toggleActorEnabled = useCallback(
     async (actor: Actor) => {
-      if (!actor || !groupId) return;
+      const targetGid = String(groupId || "").trim();
+      if (!actor || !targetGid) return;
       const isRunning = actor.running ?? actor.enabled ?? false;
       const wantsStart = !isRunning;
-      const actionKey = `actor-lifecycle:${actor.id}`;
+      const actionKey = `actor-lifecycle:${targetGid}:${actor.id}`;
       if (!beginActorAction(actorActionInFlightRef, actionKey)) return;
-      setBusy(`actor-${isRunning ? "stop" : "start"}:${actor.id}`);
+      const actionEpoch = beginActionRequestEpoch(actionEpochsRef, actionKey);
+      clearReconcileTimers(targetGid, actor.id);
+      const busyLabel = `actor-${isRunning ? "stop" : "start"}:${actor.id}`;
+      const busyEpoch = beginBusy(busyLabel);
       try {
         const resp = isRunning
-          ? await api.stopActor(groupId, actor.id)
-          : await api.startActor(groupId, actor.id);
+          ? await api.stopActor(targetGid, actor.id)
+          : await api.startActor(targetGid, actor.id);
+        if (!isLatestActionRequestEpoch(actionEpochsRef, actionKey, actionEpoch)) return;
         if (!resp.ok) {
-          await Promise.all([refreshActors(), refreshGroups()]);
-          if (isRunning || !latestActorHasResumeFailure(actor.id)) {
+          await Promise.all([refreshActors(targetGid), refreshGroups()]);
+          if (isRunning || !latestActorHasResumeFailure(targetGid, actor.id)) {
             showError(`${resp.error.code}: ${resp.error.message}`);
           }
           return;
         }
-        clearStreamingEventsForActor(actor.id, groupId);
-        await Promise.all([refreshActors(), refreshGroups()]);
+        clearStreamingEventsForActor(actor.id, targetGid);
+        await Promise.all([refreshActors(targetGid), refreshGroups()]);
+        if (!isLatestActionRequestEpoch(actionEpochsRef, actionKey, actionEpoch)) return;
         if (wantsStart) {
-          optimisticMarkRunning(actor.id, "actor_start_requested");
-          scheduleRuntimeReconcile(actor.id);
-        } else {
-          clearReconcileTimers(actor.id);
+          scheduleRuntimeReconcile(targetGid, actor.id, actionKey, actionEpoch);
         }
       } finally {
         endActorAction(actorActionInFlightRef, actionKey);
-        setBusy("");
+        clearBusy(busyLabel, busyEpoch);
       }
     },
-    [clearReconcileTimers, clearStreamingEventsForActor, groupId, optimisticMarkRunning, refreshActors, refreshGroups, scheduleRuntimeReconcile, setBusy, showError]
+    [beginBusy, clearBusy, clearReconcileTimers, clearStreamingEventsForActor, groupId, refreshActors, refreshGroups, scheduleRuntimeReconcile, showError]
   );
 
   // Restart actor
   const relaunchActor = useCallback(
     async (actor: Actor) => {
-      if (!groupId || !actor) return;
-      const actionKey = `actor-lifecycle:${actor.id}`;
+      const targetGid = String(groupId || "").trim();
+      if (!targetGid || !actor) return;
+      const actionKey = `actor-lifecycle:${targetGid}:${actor.id}`;
       if (!beginActorAction(actorActionInFlightRef, actionKey)) return;
-      setBusy(`actor-relaunch:${actor.id}`);
+      const actionEpoch = beginActionRequestEpoch(actionEpochsRef, actionKey);
+      clearReconcileTimers(targetGid, actor.id);
+      const busyLabel = `actor-relaunch:${actor.id}`;
+      const busyEpoch = beginBusy(busyLabel);
       try {
-        const resp = await api.restartActor(groupId, actor.id);
+        const resp = await api.restartActor(targetGid, actor.id);
+        if (!isLatestActionRequestEpoch(actionEpochsRef, actionKey, actionEpoch)) return;
         if (!resp.ok) {
-          await Promise.all([refreshActors(), refreshGroups()]);
-          if (!latestActorHasResumeFailure(actor.id)) {
+          await Promise.all([refreshActors(targetGid), refreshGroups()]);
+          if (!latestActorHasResumeFailure(targetGid, actor.id)) {
             showError(`${resp.error.code}: ${resp.error.message}`);
           }
           return;
         } else {
-          await Promise.all([refreshActors(), refreshGroups()]);
-          optimisticMarkRunning(actor.id, "actor_restart_requested");
-          scheduleRuntimeReconcile(actor.id);
+          await Promise.all([refreshActors(targetGid), refreshGroups()]);
+          if (!isLatestActionRequestEpoch(actionEpochsRef, actionKey, actionEpoch)) return;
+          scheduleRuntimeReconcile(targetGid, actor.id, actionKey, actionEpoch);
           setTermEpochByActor((prev) => ({
             ...prev,
-            [actor.id]: (prev[actor.id] || 0) + 1,
+            [`${targetGid}:${actor.id}`]: (prev[`${targetGid}:${actor.id}`] || 0) + 1,
           }));
         }
       } finally {
         endActorAction(actorActionInFlightRef, actionKey);
-        setBusy("");
+        clearBusy(busyLabel, busyEpoch);
       }
     },
-    [groupId, optimisticMarkRunning, refreshActors, refreshGroups, scheduleRuntimeReconcile, setBusy, showError]
+    [beginBusy, clearBusy, clearReconcileTimers, groupId, refreshActors, refreshGroups, scheduleRuntimeReconcile, showError]
   );
 
   // Edit actor (initialize form state and open modal).
@@ -174,54 +192,62 @@ export function useActorActions(groupId: string) {
   // Remove actor
   const removeActor = useCallback(
     async (actor: Actor, currentActiveTab: string) => {
-      if (!actor || !groupId) return;
+      const targetGid = String(groupId || "").trim();
+      if (!actor || !targetGid) return;
       if (!window.confirm(`Remove actor "${actor.title || actor.id}"?`)) return;
-      setBusy(`actor-remove:${actor.id}`);
+      const busyLabel = `actor-remove:${actor.id}`;
+      const busyEpoch = beginBusy(busyLabel);
       try {
-        const resp = await api.removeActor(groupId, actor.id);
+        const resp = await api.removeActor(targetGid, actor.id);
         if (!resp.ok) {
           showError(`${resp.error.code}: ${resp.error.message}`);
           return;
         }
-        clearStreamingEventsForActor(actor.id, groupId);
-        if (currentActiveTab === actor.id) {
+        clearStreamingEventsForActor(actor.id, targetGid);
+        if (
+          currentActiveTab === actor.id
+          && String(useGroupStore.getState().selectedGroupId || "").trim() === targetGid
+        ) {
           setActiveTab("chat");
         }
-        await Promise.all([refreshActors(), refreshGroups()]);
-        await loadGroup(groupId);
+        await Promise.all([refreshActors(targetGid), refreshGroups()]);
+        await loadGroup(targetGid);
       } finally {
-        setBusy("");
+        clearBusy(busyLabel, busyEpoch);
       }
     },
-    [groupId, setBusy, showError, refreshActors, refreshGroups, loadGroup, setActiveTab, clearStreamingEventsForActor]
+    [beginBusy, clearBusy, groupId, showError, refreshActors, refreshGroups, loadGroup, setActiveTab, clearStreamingEventsForActor]
   );
 
   // Open inbox modal
   const openActorInbox = useCallback(
     async (actor: Actor) => {
-      if (!actor || !groupId) return;
-      setBusy(`inbox:${actor.id}`);
+      const targetGid = String(groupId || "").trim();
+      if (!actor || !targetGid) return;
+      const busyLabel = `inbox:${actor.id}`;
+      const busyEpoch = beginBusy(busyLabel);
       try {
         setInboxActorId(actor.id);
         setInboxMessages([]);
         openModal("inbox");
-        const resp = await api.fetchInbox(groupId, actor.id);
+        const resp = await api.fetchInbox(targetGid, actor.id);
         if (!resp.ok) {
           showError(`${resp.error.code}: ${resp.error.message}`);
           return;
         }
+        if (String(useGroupStore.getState().selectedGroupId || "").trim() !== targetGid) return;
         setInboxMessages(resp.result.messages || []);
       } finally {
-        setBusy("");
+        clearBusy(busyLabel, busyEpoch);
       }
     },
-    [groupId, setBusy, showError, setInboxActorId, setInboxMessages, openModal]
+    [beginBusy, clearBusy, groupId, showError, setInboxActorId, setInboxMessages, openModal]
   );
 
   // Get actor termEpoch
   const getTermEpoch = useCallback(
-    (actorId: string) => termEpochByActor[actorId] || 0,
-    [termEpochByActor]
+    (actorId: string) => termEpochByActor[`${groupId}:${actorId}`] || 0,
+    [groupId, termEpochByActor]
   );
 
   return {

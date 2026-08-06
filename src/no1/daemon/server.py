@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import ntpath
 import os
 import socket
 import signal
@@ -44,6 +43,7 @@ from .automation import AutomationManager
 from .actors.actor_exit_ops import persist_actor_process_exit_stopped
 from .claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from .codex_app_sessions import SUPERVISOR as codex_app_supervisor
+from .codex_config_ops import codex_command_stem, inject_codex_openai_base_url_config
 from .pty_app_server_exit import stop_codex_app_server_for_pty_actor_if_needed
 from .im.bootstrap_im_ops import autostart_enabled_im_bridges
 from .group.bootstrap_actor_ops import autostart_running_groups
@@ -327,7 +327,7 @@ SUPPORTED_RUNTIMES = (
 AUTO_MCP_RUNTIMES = ("claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode")
 
 
-def _normalize_runtime_command(runtime: str, command: list[str]) -> list[str]:
+def _normalize_runtime_command(runtime: str, command: list[str], *, env: Dict[str, Any] | None = None) -> list[str]:
     """Return a runtime-safe command line used for process start.
 
     Important: This MUST NOT mutate the stored actor.command (ledger). It's runtime-only.
@@ -343,10 +343,8 @@ def _normalize_runtime_command(runtime: str, command: list[str]) -> list[str]:
         return []
 
     if rt == "codex":
-        try:
-            exe = os.path.splitext(ntpath.basename(str(cmd[0] or "")))[0].lower()
-        except Exception:
-            exe = str(cmd[0] or "").strip().lower()
+        effective_env = dict(os.environ if env is None else env)
+        exe = codex_command_stem(str(cmd[0] or ""))
         if exe == "codex":
             # Ensure MCP servers inherit actor env (CCCC_* / ARENA_*).
             has_env_inherit = any("shell_environment_policy.inherit" in str(x) for x in cmd)
@@ -354,7 +352,8 @@ def _normalize_runtime_command(runtime: str, command: list[str]) -> list[str]:
                 cmd = [cmd[0], "-c", "shell_environment_policy.inherit=all", *cmd[1:]]
             from ..computer_control.isolation import codex_windows_mcp_disable_args
 
-            disable_args = codex_windows_mcp_disable_args(os.environ)
+            cmd = inject_codex_openai_base_url_config(cmd, effective_env)
+            disable_args = codex_windows_mcp_disable_args(effective_env)
             additions: list[str] = []
             for index in range(0, len(disable_args), 2):
                 pair = disable_args[index : index + 2]

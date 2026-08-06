@@ -10,6 +10,7 @@ import {
   mergePresetSecrets,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
+  needsDedicatedOneColleagueKey,
   opencodeRuntimePreset,
   opencodeRuntimePresetId,
   runtimePresetById,
@@ -19,6 +20,13 @@ import {
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
+  it("warns when a Peer runtime only has an ordinary OpenAI key", () => {
+    expect(needsDedicatedOneColleagueKey("opencode", 'OPENAI_API_KEY="openai"')).toBe(true);
+    expect(needsDedicatedOneColleagueKey("codex", '$env:OPENAI_API_KEY = "openai"')).toBe(true);
+    expect(needsDedicatedOneColleagueKey("opencode", 'OPENAI_API_KEY="openai"\nONECOLLEAGUE_API_KEY="peer"')).toBe(false);
+    expect(needsDedicatedOneColleagueKey("claude", 'OPENAI_API_KEY="openai"')).toBe(false);
+  });
+
   it("shows OpenCode as a selectable runtime when discovered", () => {
     const groups = buildRuntimeChoiceGroups([
       { name: "opencode", display_name: "OpenCode", available: true, recommended_command: "opencode" },
@@ -45,9 +53,9 @@ describe("runtime presets", () => {
       name: "opencode",
       display_name: "OpenCode",
       available: true,
-      recommended_command: "opencode",
-    })).toBe("opencode -m onecolleague/new-model");
-    expect(runtimePresetIdFor("opencode", "opencode -m onecolleague/new-model")).toBe(opencodeRuntimePresetId("new-model"));
+      recommended_command: "opencode --auto",
+    })).toBe("opencode --auto -m onecolleague/new-model");
+    expect(runtimePresetIdFor("opencode", "opencode --auto -m onecolleague/new-model")).toBe(opencodeRuntimePresetId("new-model"));
     expect(mergePresetSecrets("", preset!, "done-hub-key")).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
   });
 
@@ -195,10 +203,10 @@ describe("runtime presets", () => {
     expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
   });
 
-  it("replaces stale OpenAI Codex runtime key when available", () => {
+  it("keeps an unrelated OpenAI key when adding the OneColleague runtime key", () => {
     const secrets = mergeRuntimeAuthSecret('OPENAI_API_KEY="old-key"', "codex", "done-hub-key");
 
-    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
+    expect(secrets).toBe('OPENAI_API_KEY="old-key"\nONECOLLEAGUE_API_KEY="done-hub-key"');
   });
 
   it("preserves existing runtime auth when no Codex token is available", () => {
@@ -217,13 +225,12 @@ describe("runtime presets", () => {
     expect(secrets).not.toContain("OPENAI_MODEL");
   });
 
-  it("replaces stale OpenAI Codex key with OneColleague key when available", () => {
+  it("keeps an unrelated OpenAI key when applying a OneColleague model preset", () => {
     const preset = runtimePresetById("model:gpt-5.5-codex");
     expect(preset).toBeTruthy();
     const secrets = mergePresetSecrets('OPENAI_API_KEY="old-key"', preset!, "done-hub-key");
 
-    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
-    expect(secrets).not.toContain("OPENAI_API_KEY");
+    expect(secrets).toBe('OPENAI_API_KEY="old-key"\nONECOLLEAGUE_API_KEY="done-hub-key"');
   });
 
   it("builds Claude model commands from the runtime default", () => {

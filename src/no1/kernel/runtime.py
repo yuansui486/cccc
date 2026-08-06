@@ -283,7 +283,7 @@ def get_runtime_command_with_flags(name: str) -> List[str]:
         "hermes": ["hermes", "--tui", "--yolo"],
         "kimi": ["kimi", "--yolo"],
         "neovate": ["neovate"],
-        "opencode": ["opencode"],
+        "opencode": ["opencode", "--auto"],
         "custom": [],
         "web_model": [],
     }

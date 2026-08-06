@@ -115,6 +115,45 @@ class TestDiagnosticsOps(unittest.TestCase):
         )
         self.assertIsNone(resp)
 
+    def test_debug_snapshot_uses_app_supervisors_for_main_headless_runtimes(self) -> None:
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            update, _ = self._call("observability_update", {"by": "user", "patch": {"developer_mode": True}})
+            self.assertTrue(update.ok, getattr(update, "error", None))
+            group = create_group(load_registry(), title="debug-headless-app-supervisors")
+            add_actor(group, actor_id="codex-1", title="Codex", runtime="codex", runner="headless")
+            add_actor(group, actor_id="claude-1", title="Claude", runtime="claude", runner="headless")
+            add_actor(group, actor_id="gemini-1", title="Gemini", runtime="gemini", runner="headless")
+
+            with (
+                patch("no1.daemon.ops.diagnostics_ops.codex_app_supervisor.get_state", return_value={"thread_id": "thr"}),
+                patch("no1.daemon.ops.diagnostics_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.ops.diagnostics_ops.claude_app_supervisor.get_state", return_value={"session_id": "sid"}),
+                patch("no1.daemon.ops.diagnostics_ops.claude_app_supervisor.actor_running", return_value=True),
+                patch(
+                    "no1.daemon.ops.diagnostics_ops.headless_runner.SUPERVISOR.actor_running",
+                    return_value=True,
+                ) as generic_running,
+            ):
+                resp, _ = self._call("debug_snapshot", {"group_id": group.group_id, "by": "user"})
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            actors = {
+                str(item.get("id") or ""): item
+                for item in (resp.result or {}).get("actors", [])
+                if isinstance(item, dict)
+            }
+            self.assertTrue(actors["codex-1"].get("running"))
+            self.assertTrue(actors["claude-1"].get("running"))
+            self.assertTrue(actors["gemini-1"].get("running"))
+            generic_running.assert_called_once_with(group.group_id, "gemini-1")
+        finally:
+            cleanup()
+
     def test_debug_snapshot_includes_web_binding_runtime_evidence(self) -> None:
         from no1.ports.web.runtime_control import write_web_runtime_state
 

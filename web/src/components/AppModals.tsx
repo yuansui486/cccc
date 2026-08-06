@@ -275,6 +275,7 @@ export function AppModals({
   const [dirBrowseError, setDirBrowseError] = useState("");
   const [actorProfiles, setActorProfiles] = useState<ActorProfile[]>([]);
   const [actorProfilesBusy, setActorProfilesBusy] = useState(false);
+  const [pendingActorStart, setPendingActorStart] = useState<{ groupId: string; actor: Actor } | null>(null);
   const [editActorRoleNotesBusy, setEditActorRoleNotesBusy] = useState(false);
   const [editActorInheritedCapabilityAutoload, setEditActorInheritedCapabilityAutoload] = useState<string[]>([]);
   const [presentationViewerCacheByGroup, setPresentationViewerCacheByGroup] = useState<Record<string, string[]>>({});
@@ -1199,7 +1200,27 @@ export function AppModals({
   };
 
   const handleAddActor = async (avatarFile?: File | null): Promise<boolean> => {
-    if (!selectedGroupId) return false;
+    if (pendingActorStart) {
+      setBusy("actor-add");
+      setAddActorError("");
+      try {
+        const resp = await api.startActor(pendingActorStart.groupId, pendingActorStart.actor.id);
+        if (!resp.ok) {
+          setAddActorError(t("retryStartFailed", { message: resp.error?.message || t("failedToStartActor") }));
+          return false;
+        }
+        const targetGroupId = pendingActorStart.groupId;
+        setPendingActorStart(null);
+        closeModal("addActor");
+        resetAddActorForm();
+        await refreshActors(targetGroupId);
+        return true;
+      } finally {
+        setBusy("");
+      }
+    }
+    const targetGroupId = String(selectedGroupId || "").trim();
+    if (!targetGroupId) return false;
     const actorId = newActorId.trim();
     const secretsText = String(newActorSecretsSetText || "");
     const roleNotes = String(newActorRoleNotes || "").trim();
@@ -1226,7 +1247,7 @@ export function AppModals({
     try {
       const commandToUse = newActorUseProfile ? "" : newActorCommand.trim();
       const resp = await api.addActor(
-        selectedGroupId,
+        targetGroupId,
         actorId,
         newActorRole,
         newActorUseProfile ? String(selectedProfile?.runtime || "codex") : newActorRuntime,
@@ -1252,16 +1273,15 @@ export function AppModals({
       }
 
       const createdActorId = String(
-        (resp.result && typeof resp.result === "object"
-          ? (resp.result as { actor?: { id?: string } }).actor?.id
-          : "") || actorId || suggestedActorId
+        resp.result?.actor?.id || actorId || suggestedActorId
       ).trim();
+      const createdActor = resp.result?.actor;
 
       const postCreateErrors: string[] = [];
 
       if (roleNotes && createdActorId) {
         const roleNotesResp = await persistActorRoleNotes(
-          selectedGroupId,
+          targetGroupId,
           createdActorId,
           roleNotes,
           [...actors.map((item) => String(item.id || "").trim()).filter(Boolean), createdActorId]
@@ -1272,15 +1292,26 @@ export function AppModals({
       }
 
       if (avatarFile && createdActorId) {
-        const avatarResp = await api.uploadActorAvatar(selectedGroupId, createdActorId, avatarFile);
+        const avatarResp = await api.uploadActorAvatar(targetGroupId, createdActorId, avatarFile);
         if (!avatarResp.ok) {
           postCreateErrors.push(`${t("avatarTitle")}: ${avatarResp.error?.message || t("avatarUploadFailed")}`);
         }
       }
 
+      const startError = String(resp.result?.start_error || "").trim();
+      if (startError && createdActor && createdActorId) {
+        setPendingActorStart({ groupId: targetGroupId, actor: { ...createdActor, id: createdActorId, running: false } });
+        await refreshActors(targetGroupId);
+        const setupSuffix = postCreateErrors.length > 0
+          ? ` ${t("actorCreatedSetupFailed", { actor: createdActorId, details: postCreateErrors.join(" · ") })}`
+          : "";
+        setAddActorError(`${t("actorCreatedStartFailed", { actor: createdActorId, message: startError })}${setupSuffix}`);
+        return false;
+      }
+
       closeModal("addActor");
       resetAddActorForm();
-      await refreshActors();
+      await refreshActors(targetGroupId);
       if (postCreateErrors.length > 0) {
         showError(
           t("actorCreatedSetupFailed", {
@@ -1358,6 +1389,7 @@ export function AppModals({
 
   const canAddActor = (() => {
     if (busy === "actor-add") return false;
+    if (pendingActorStart) return true;
     if (newActorUseProfile) return Boolean(String(newActorProfileId || "").trim());
     const rtInfo = runtimes.find((r) => r.name === newActorRuntime);
     const available = rtInfo?.available ?? false;
@@ -1369,6 +1401,7 @@ export function AppModals({
 
   const addActorDisabledReason = (() => {
     if (busy === "actor-add") return "";
+    if (pendingActorStart) return "";
     if (newActorUseProfile && !String(newActorProfileId || "").trim()) {
       return t("profileRequired");
     }
@@ -1387,9 +1420,45 @@ export function AppModals({
   })();
 
   const handleCloseAddActor = useCallback(
-    () => closeModal("addActor"),
-    [closeModal]
+    () => {
+      if (pendingActorStart) {
+        setPendingActorStart(null);
+        resetAddActorForm();
+      }
+      closeModal("addActor");
+    },
+    [closeModal, pendingActorStart, resetAddActorForm]
   );
+
+  const handleEditCreatedActor = useCallback(() => {
+    if (!pendingActorStart) return;
+    const actor = pendingActorStart.actor;
+    const runtime = String(actor.runtime || "codex").trim() || "codex";
+    setSelectedGroupId(pendingActorStart.groupId);
+    setEditActorRuntime(runtime as SupportedRuntime);
+    setEditActorRunner(getEffectiveActorRunner(actor));
+    setEditActorCommand(Array.isArray(actor.command) ? actor.command.join(" ") : "");
+    setEditActorTitle(actor.title || "");
+    setEditActorRoleNotes(newActorRoleNotes);
+    setEditActorCapabilityAutoloadText(formatCapabilityIdInput(actor.capability_autoload));
+    setPendingActorStart(null);
+    closeModal("addActor");
+    resetAddActorForm();
+    setEditingActor(actor);
+  }, [
+    closeModal,
+    newActorRoleNotes,
+    pendingActorStart,
+    resetAddActorForm,
+    setEditActorCapabilityAutoloadText,
+    setEditActorCommand,
+    setEditActorRoleNotes,
+    setEditActorRunner,
+    setEditActorRuntime,
+    setEditActorTitle,
+    setEditingActor,
+    setSelectedGroupId,
+  ]);
 
   const handleCancelEditActor = useCallback(() => {
     editActorRoleNotesSeqRef.current += 1;
@@ -1995,12 +2064,15 @@ export function AppModals({
         setShowAdvancedActor={setShowAdvancedActor}
         addActorError={addActorError}
         setAddActorError={setAddActorError}
+        createdActorId={pendingActorStart?.actor.id}
         canAddActor={canAddActor}
         addActorDisabledReason={addActorDisabledReason}
         onAddActor={handleAddActor}
+        onEditCreatedActor={handleEditCreatedActor}
         onSaveAsProfile={handleSaveNewActorAsProfile}
         onClose={handleCloseAddActor}
         onCancelAndReset={() => {
+          setPendingActorStart(null);
           closeModal("addActor");
           resetAddActorForm();
         }}

@@ -11,7 +11,7 @@ class TestOpenCodeProvider(unittest.TestCase):
     def test_merge_provider_preserves_existing_config_and_uses_env_key(self) -> None:
         env = {"ONECOLLEAGUE_HOME": tempfile.mkdtemp()}
         with patch(
-            "no1.daemon.opencode_provider.get_opencode_model_catalog",
+            "no1.daemon.opencode_provider.load_opencode_model_catalog",
             return_value=[{"model": "gpt-5.4", "locked": True}, {"model": "qwen3.6-plus", "locked": False}],
         ):
             result = merge_opencode_provider_config(
@@ -31,6 +31,13 @@ class TestOpenCodeProvider(unittest.TestCase):
         self.assertEqual(provider["options"]["baseURL"], "https://peer.shierkeji.com/v1")
         self.assertEqual(provider["options"]["apiKey"], "{env:ONECOLLEAGUE_API_KEY}")
         self.assertEqual(sorted(provider["models"]), ["gpt-5.4", "qwen3.6-plus"])
+
+    def test_merge_provider_does_not_refresh_catalog_over_network(self) -> None:
+        with tempfile.TemporaryDirectory() as td, patch("no1.daemon.opencode_provider.httpx.get") as get:
+            result = merge_opencode_provider_config({}, {"ONECOLLEAGUE_HOME": td})
+
+        self.assertTrue(result["provider"]["onecolleague"]["models"])
+        get.assert_not_called()
 
     def test_catalog_keeps_locked_models_and_caches_server_response(self) -> None:
         with tempfile.TemporaryDirectory() as td:

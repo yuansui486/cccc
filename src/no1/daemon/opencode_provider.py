@@ -102,6 +102,20 @@ def _write_cached_catalog(path: Path, models: list[Dict[str, Any]]) -> None:
         pass
 
 
+def cache_opencode_model_catalog(models: Iterable[Any], env: Dict[str, Any] | None = None) -> list[Dict[str, Any]]:
+    """Normalize and cache a catalog fetched by an explicit refresh path."""
+    normalized = _normalize_model_rows({"data": list(models)})
+    if normalized:
+        _write_cached_catalog(_cache_path(env), normalized)
+    return normalized
+
+
+def load_opencode_model_catalog(env: Dict[str, Any] | None = None) -> list[Dict[str, Any]]:
+    """Load launch-safe catalog data without performing network I/O."""
+    _fetched_at, cached = _read_cached_catalog(_cache_path(env))
+    return cached or _fallback_catalog()
+
+
 def get_opencode_model_catalog(env: Dict[str, Any] | None = None) -> list[Dict[str, Any]]:
     """Return the server model catalog with cache and offline fallback."""
     path = _cache_path(env)
@@ -127,7 +141,7 @@ def get_opencode_model_catalog(env: Dict[str, Any] | None = None) -> list[Dict[s
 
 
 def opencode_model_ids(env: Dict[str, Any] | None = None) -> list[str]:
-    return [str(item.get("model") or "").strip() for item in get_opencode_model_catalog(env) if str(item.get("model") or "").strip()]
+    return [str(item.get("model") or "").strip() for item in load_opencode_model_catalog(env) if str(item.get("model") or "").strip()]
 
 
 def _model_config(models: Iterable[str]) -> Dict[str, Dict[str, str]]:

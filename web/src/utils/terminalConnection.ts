@@ -1,5 +1,3 @@
-/* eslint-disable no-control-regex */
-
 export function buildTerminalConnectionKey(args: {
   activated: boolean;
   isRunning: boolean;
@@ -48,11 +46,11 @@ export const TERMINAL_FRAME_INPUT_ACK = 52;
 
 const terminalTextEncoder = new TextEncoder();
 const terminalTextDecoder = new TextDecoder();
-const terminalResponseSuppressionRuntimes = new Set(["codex", "devin", "droid"]);
-const terminalGeneratedInputSequencePattern =
-  /^(?:\x1b\[(?:\?|>)(?:\d+)?(?:;\d+)*c|\x1b\](?:10|11);rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)|\x1b\[[IO])+$/;
-const bareTerminalColorReplyPattern =
-  /^(?:10|11);rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}(?:(?:10|11);rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4})*$/;
+const STARTUP_RACE_RECONNECT_DELAY_MS = 750;
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 30000;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const ACTOR_STARTUP_RETRY_WINDOW_MS = 60000;
 
 export type TerminalBinaryFrame =
   | { type: "input"; payload: Uint8Array }
@@ -82,15 +80,46 @@ export function encodeTerminalResizeFrame(cols: number, rows: number): Uint8Arra
   );
 }
 
-export function shouldSuppressTerminalGeneratedInput(
-  data: string,
-  runtime: string | null | undefined,
-): boolean {
-  const normalizedRuntime = String(runtime || "").trim().toLowerCase();
-  if (!terminalResponseSuppressionRuntimes.has(normalizedRuntime)) return false;
-  const text = String(data || "");
-  if (!text) return false;
-  return terminalGeneratedInputSequencePattern.test(text) || bareTerminalColorReplyPattern.test(text);
+export function shouldMaintainTerminalConnection(args: {
+  activated: boolean;
+  isRunning: boolean;
+  isHeadless: boolean;
+  hasTerminal: boolean;
+}): boolean {
+  return Boolean(args.activated && args.isRunning && !args.isHeadless && args.hasTerminal);
+}
+
+export function seedTerminalReplayCursor(
+  deliveredCursor: number | null,
+  replayCursorValue: unknown,
+): { cursor: number | null; resetTerminal: boolean } {
+  const replayCursor = Number(replayCursorValue);
+  if (!Number.isFinite(replayCursor)) {
+    return { cursor: deliveredCursor, resetTerminal: false };
+  }
+  return {
+    cursor: replayCursor,
+    resetTerminal: deliveredCursor !== null && replayCursor > deliveredCursor,
+  };
+}
+
+export function terminalAttachRetryDelayMs(args: {
+  code: string;
+  attempt: number;
+  startupElapsedMs: number;
+}): number | null {
+  const code = String(args.code || "").trim();
+  if (code === "actor_not_running") {
+    return args.startupElapsedMs < ACTOR_STARTUP_RETRY_WINDOW_MS
+      ? STARTUP_RACE_RECONNECT_DELAY_MS
+      : null;
+  }
+  if (code === "terminal_attach_busy") {
+    const attempt = Math.max(0, Math.floor(args.attempt));
+    if (attempt >= MAX_RECONNECT_ATTEMPTS) return null;
+    return Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt), RECONNECT_MAX_DELAY_MS);
+  }
+  return null;
 }
 
 export function decodeTerminalJsonFrame<T = Record<string, unknown>>(

@@ -9,7 +9,10 @@ import {
   isTerminalAttachNonRetryableErrorCode,
   isTerminalAttachStartupRaceErrorCode,
   parseTerminalBinaryFrame,
+  seedTerminalReplayCursor,
+  shouldMaintainTerminalConnection,
   shouldSuppressTerminalAttachErrorOutput,
+  terminalAttachRetryDelayMs,
 } from "../../src/utils/terminalConnection";
 
 describe("buildTerminalConnectionKey", () => {
@@ -49,6 +52,30 @@ describe("buildTerminalConnectionKey", () => {
     expect(shouldSuppressTerminalAttachErrorOutput("actor_not_found")).toBe(false);
     expect(shouldSuppressTerminalAttachErrorOutput("daemon_unavailable")).toBe(false);
     expect(shouldSuppressTerminalAttachErrorOutput("terminal_attach_busy")).toBe(true);
+  });
+
+  it("keeps an activated running terminal connected independently of tab visibility", () => {
+    expect(
+      shouldMaintainTerminalConnection({
+        activated: true,
+        isRunning: true,
+        isHeadless: false,
+        hasTerminal: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("resumes from a delivered cursor and resets only when replay falls out of the ring", () => {
+    expect(seedTerminalReplayCursor(null, 10)).toEqual({ cursor: 10, resetTerminal: false });
+    expect(seedTerminalReplayCursor(42, 42)).toEqual({ cursor: 42, resetTerminal: false });
+    expect(seedTerminalReplayCursor(42, 80)).toEqual({ cursor: 80, resetTerminal: true });
+  });
+
+  it("bounds startup-race and busy retries", () => {
+    expect(terminalAttachRetryDelayMs({ code: "actor_not_running", attempt: 100, startupElapsedMs: 59999 })).toBe(750);
+    expect(terminalAttachRetryDelayMs({ code: "actor_not_running", attempt: 0, startupElapsedMs: 60000 })).toBeNull();
+    expect(terminalAttachRetryDelayMs({ code: "terminal_attach_busy", attempt: 0, startupElapsedMs: 0 })).toBe(1000);
+    expect(terminalAttachRetryDelayMs({ code: "terminal_attach_busy", attempt: 10, startupElapsedMs: 0 })).toBeNull();
   });
 });
 
