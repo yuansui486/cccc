@@ -15,13 +15,9 @@ PROMPTS_DIRNAME = "prompts"
 
 _MAX_FILE_BYTES = 512 * 1024  # Safety limit for prompt markdown files.
 
-DEFAULT_PREAMBLE_BODY = """Startup routes:
-- Cold start or resume: use MCP tools `onecolleague_bootstrap`, then `onecolleague_help`.
-- From bootstrap, inspect `context_hygiene`, `memory_recall_gate`, and inbox before planning.
-- Need colder group/project detail: use `onecolleague_context_get` / `onecolleague_project_info`.
-
-Execution default:
-- Reuse working paths first.
+DEFAULT_PREAMBLE_BODY = """Startup:
+- On cold start or resume, use MCP tool `onecolleague_bootstrap`.
+- Call `onecolleague_help` only when you need a OneColleague-specific route or a missing capability.
 """
 
 

@@ -40,7 +40,7 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 ## Core Routes
 
 - Bootstrap / resume: start with MCP tool `onecolleague_bootstrap`.
-- Visible replies go through `onecolleague_message_send` / `onecolleague_message_reply`; terminal output is not delivery.
+- Reply with `onecolleague_message_reply`; start new threads with `onecolleague_message_send`. Terminal output is not delivered.
 - At key transitions, sync `onecolleague_coordination` / `onecolleague_task` and refresh `onecolleague_agent_state`.
 - For strategy questions, align before implementation.
 - For recall, read `memory_recall_gate`, then local `onecolleague_memory`; use `onecolleague_space(..., lane="memory")` only as deeper fallback.
@@ -58,7 +58,7 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 
 ### Chat
 
-- Visible coordination belongs in `onecolleague_message_send` / `onecolleague_message_reply`.
+- Use `onecolleague_message_reply` for replies and `onecolleague_message_send` for new visible coordination messages.
 - Targets: `@all`, `@foreman`, `@peers`, `user`, or one actor.
 - Before sending, verify `reply_to` and `to`; make the audience explicit when it differs. Do not use `@all` for routine status, acknowledgements, or narrow updates.
 

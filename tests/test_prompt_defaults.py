@@ -8,21 +8,21 @@ class TestPromptDefaults(unittest.TestCase):
         from no1.kernel.prompt_files import DEFAULT_PREAMBLE_BODY
 
         body = str(DEFAULT_PREAMBLE_BODY or "")
-        self.assertIn("Startup routes:", body)
-        self.assertIn("Execution default:", body)
+        self.assertIn("Startup:", body)
         self.assertIn("onecolleague_bootstrap", body)
-        self.assertIn("context_hygiene", body)
         self.assertIn("onecolleague_help", body)
-        self.assertIn("onecolleague_context_get", body)
-        self.assertIn("onecolleague_project_info", body)
-        self.assertIn("Reuse working paths first.", body)
+        self.assertIn("only when you need a OneColleague-specific route or a missing capability", body)
+        self.assertNotIn("context_hygiene", body)
+        self.assertNotIn("onecolleague_context_get", body)
+        self.assertNotIn("onecolleague_project_info", body)
+        self.assertNotIn("Execution default:", body)
         self.assertNotIn("Working stance:", body)
         self.assertNotIn("Work like a teammate, not a script.", body)
         self.assertNotIn("Prefer silence over low-signal chatter", body)
         self.assertNotIn("routine `@all` updates", body)
         self.assertNotIn("finish it end-to-end", body)
         self.assertNotIn("intent is not progress", body)
-        self.assertLessEqual(len(body.split()), 90)
+        self.assertLessEqual(len(body.split()), 40)
 
     def test_default_preamble_avoids_long_rule_duplication(self) -> None:
         from no1.kernel.prompt_files import DEFAULT_PREAMBLE_BODY
@@ -88,13 +88,15 @@ class TestPromptDefaults(unittest.TestCase):
     def test_mcp_reminder_line_stays_single_purpose(self) -> None:
         from no1.daemon.messaging.delivery import MCP_REMINDER_LINE
 
-        self.assertIn("use MCP", MCP_REMINDER_LINE)
-        self.assertIn("terminal output isn't delivered.", MCP_REMINDER_LINE)
+        self.assertIn("Use onecolleague_message_reply for replies", MCP_REMINDER_LINE)
+        self.assertIn("use onecolleague_message_send for new messages", MCP_REMINDER_LINE)
+        self.assertIn("Terminal output is not delivered.", MCP_REMINDER_LINE)
         self.assertIn("Verify reply_to/to", MCP_REMINDER_LINE)
         self.assertIn("avoid routine @all", MCP_REMINDER_LINE)
-        self.assertIn("communication obligation, not the whole job", MCP_REMINDER_LINE)
-        self.assertIn("resume active work unless priority changed", MCP_REMINDER_LINE)
-        self.assertIn("use MCP tool onecolleague_help", MCP_REMINDER_LINE)
+        self.assertIn("Use onecolleague_help if unsure", MCP_REMINDER_LINE)
+        self.assertNotIn("If you respond", MCP_REMINDER_LINE)
+        self.assertNotIn("use MCP (", MCP_REMINDER_LINE)
+        self.assertNotIn("Write-Output", MCP_REMINDER_LINE)
         self.assertNotIn("Help: onecolleague_help", MCP_REMINDER_LINE)
 
     def test_default_standup_stays_short_ritual(self) -> None:

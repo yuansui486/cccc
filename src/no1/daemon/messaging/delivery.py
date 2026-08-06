@@ -573,10 +573,9 @@ THROTTLE = DeliveryThrottle()
 
 REMINDER_EVERY_N_MESSAGES = 1
 MCP_REMINDER_LINE = (
-    "[onecolleague] If you respond: use MCP (onecolleague_message_send / onecolleague_message_reply); "
-    "terminal output isn't delivered. Verify reply_to/to; avoid routine @all. "
-    "A reply handles the communication obligation, not the whole job; "
-    "resume active work unless priority changed. If unsure, use MCP tool onecolleague_help."
+    "[onecolleague] Use onecolleague_message_reply for replies; use onecolleague_message_send for new messages. "
+    "Terminal output is not delivered. Verify reply_to/to; avoid routine @all. "
+    "Use onecolleague_help if unsure."
 )
 
 

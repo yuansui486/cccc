@@ -345,7 +345,11 @@ MCP_TOOLS = [
     },
     {
         "name": "onecolleague_message_send",
-        "description": "Send a visible chat message. Choose `to` deliberately; use @all only when the whole group needs it.",
+        "description": (
+            "Start a new visible chat message. Do not use this to answer an existing delivered message/event; "
+            "use onecolleague_message_reply with that event_id instead. Choose `to` deliberately; "
+            "use @all only when the whole group needs it."
+        ),
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,

@@ -4,6 +4,15 @@ import unittest
 
 
 class TestDeliveryStateBehavior(unittest.TestCase):
+    def test_reply_reminder_routes_to_named_tools(self) -> None:
+        from no1.daemon.messaging.delivery import append_mcp_reply_reminder
+
+        rendered = append_mcp_reply_reminder("[onecolleague] user -> agent: hello")
+        self.assertIn("Use onecolleague_message_reply for replies", rendered)
+        self.assertIn("use onecolleague_message_send for new messages", rendered)
+        self.assertNotIn("If you respond: use MCP", rendered)
+        self.assertNotIn("Write-Output", rendered)
+
     def test_should_deliver_message_respects_idle_and_paused_semantics(self) -> None:
         from no1.daemon.messaging.delivery import should_deliver_message
         from no1.kernel.group import create_group, set_group_state

@@ -108,6 +108,18 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertIn("UTF-8 text", str((file_props.get("rel_path") or {}).get("description") or ""))
         self.assertIn("active scope", str((file_props.get("path") or {}).get("description") or ""))
 
+    def test_message_toolspecs_route_replies_directly(self) -> None:
+        send_spec = next(item for item in MCP_TOOLS if item.get("name") == "onecolleague_message_send")
+        reply_spec = next(item for item in MCP_TOOLS if item.get("name") == "onecolleague_message_reply")
+
+        send_desc = str(send_spec.get("description") or "")
+        reply_desc = str(reply_spec.get("description") or "")
+        self.assertIn("Start a new visible chat message", send_desc)
+        self.assertIn("Do not use this to answer an existing delivered message/event", send_desc)
+        self.assertIn("use onecolleague_message_reply", send_desc)
+        self.assertIn("Reply to a visible chat message", reply_desc)
+        self.assertIn("event_id/reply_to", reply_desc)
+
     def test_task_toolspec_exposes_type_enum(self) -> None:
         spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_task"), None)
         self.assertIsInstance(spec, dict)
