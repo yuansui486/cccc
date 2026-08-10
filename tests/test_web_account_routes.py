@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
-
-from fastapi.testclient import TestClient
 
 from no1.ports.web.routes.account import _api_v1_base_url
 
@@ -59,23 +58,10 @@ def test_api_v1_base_url_accepts_smart_ops_root_for_ocs() -> None:
 
 
 class TestAccountCodexConfig(unittest.TestCase):
-    def _create_client(self) -> TestClient:
-        from no1.ports.web.app import create_app
+    def test_fetch_account_session_repairs_codex_custom_provider_config(self) -> None:
+        from no1.ports.web.routes import account
 
-        client = TestClient(create_app())
-        self.addCleanup(self._close_client, client)
-        return client
-
-    def _close_client(self, client: TestClient) -> None:
-        client.close()
-        from no1.ports.web.app import _close_web_logging
-
-        _close_web_logging()
-
-    def test_login_session_preserves_existing_codex_config(self) -> None:
         async def fake_json_request(_client, _method, _url, *, stage, **_kwargs):
-            if stage == "ua2_login":
-                return {"access_token": "ua-token"}
             if stage == "ua2_self":
                 return {"username": "agent1", "display_name": "Agent 1", "status": "enabled"}
             if stage == "ocs_donehub_ensure":
@@ -97,57 +83,59 @@ class TestAccountCodexConfig(unittest.TestCase):
             codex_dir = home_path / ".codex"
             codex_dir.mkdir(parents=True, exist_ok=True)
             config_path = codex_dir / "config.toml"
-            sentinel = b'preserve = "exactly"\r\n# login must not rewrite this file\r\n'
-            config_path.write_bytes(sentinel)
+            config_path.write_text(
+                'model = "old-model"\n'
+                'openai_base_url = "https://old.example/v1"\n'
+                'model_provider = "legacy"\n'
+                "\n"
+                "[model_providers.custom]\n"
+                'name = "custom"\n'
+                "requires_openai_auth = true\n"
+                'base_url = "https://old.example/v1"\n'
+                "\n"
+                "[projects.'F:\\\\existing']\n"
+                'trust_level = "trusted"\n',
+                encoding="utf-8",
+            )
 
             with (
                 patch("no1.ports.web.routes.account._json_request", new=AsyncMock(side_effect=fake_json_request)),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
-                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
-                client = self._create_client()
-                resp = client.post(
-                    "/api/v1/account/login",
-                    json={"tenant_code": "tenant", "username": "agent1", "password": "secret"},
-                )
+                resp = asyncio.run(account._fetch_account_session("ua-token", start_onecolleague_session=True))
 
-            self.assertEqual(resp.status_code, 200)
-            body = resp.json()
-            self.assertTrue(bool(body.get("ok")), body)
-            session = ((body.get("result") or {}).get("session") or {})
+            self.assertTrue(bool(resp.get("ok")), resp)
+            session = ((resp.get("result") or {}).get("session") or {})
             self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-secret")
-            self.assertEqual(config_path.read_bytes(), sentinel)
-            sync_config.assert_not_called()
+            content = config_path.read_text(encoding="utf-8")
+            self.assertIn('model_provider = "custom"\n', content)
+            self.assertIn("disable_response_storage = true\n", content)
+            self.assertIn("[model_providers.custom]\n", content)
+            self.assertIn('wire_api = "responses"\n', content)
+            self.assertIn('base_url = "https://peer.shierkeji.com/v1"\n', content)
+            self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
+            self.assertIn("[projects.'F:\\\\existing']\n", content)
+            self.assertNotIn('model = "old-model"', content)
+            self.assertNotIn("openai_base_url", content)
+            self.assertNotIn("requires_openai_auth", content)
 
-    def test_self_session_does_not_create_codex_config(self) -> None:
+    def test_fetch_account_session_returns_generic_error_when_codex_config_fails(self) -> None:
+        from no1.ports.web.routes import account
+
         async def fake_json_request(_client, _method, _url, *, stage, **_kwargs):
             if stage == "ua2_self":
                 return {"username": "agent1", "display_name": "Agent 1", "status": "enabled"}
-            if stage == "ocs_donehub_me":
+            if stage == "ocs_donehub_ensure":
                 return {"ok": True, "result": {"codex_api_key": "sk-codex-secret"}}
             raise AssertionError(f"unexpected stage: {stage}")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            home_path = Path(tmpdir)
-            config_path = home_path / ".codex" / "config.toml"
-            with (
-                patch("no1.ports.web.routes.account._json_request", new=AsyncMock(side_effect=fake_json_request)),
-                patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
-                patch(
-                    "no1.ports.web.codex_client_config.sync_codex_custom_provider_config",
-                    side_effect=OSError(str(config_path)),
-                ) as sync_config,
-            ):
-                client = self._create_client()
-                resp = client.post(
-                    "/api/v1/account/self",
-                    json={"access_token": "ua-token", "onecolleague_session_version": 7},
-                )
+        with (
+            patch("no1.ports.web.routes.account._json_request", new=AsyncMock(side_effect=fake_json_request)),
+            patch("no1.ports.web.routes.account.sync_codex_custom_provider_config", side_effect=OSError("config write failed")),
+        ):
+            resp = asyncio.run(account._fetch_account_session("ua-token", start_onecolleague_session=True))
 
-            self.assertEqual(resp.status_code, 200)
-            body = resp.json()
-            self.assertTrue(bool(body.get("ok")), body)
-            session = ((body.get("result") or {}).get("session") or {})
-            self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-secret")
-            self.assertFalse(config_path.exists())
-            sync_config.assert_not_called()
+        self.assertFalse(bool(resp.get("ok")), resp)
+        error = resp.get("error") if isinstance(resp.get("error"), dict) else {}
+        self.assertEqual(str(error.get("code") or ""), "account_client_config_failed")
+        self.assertNotIn(".codex", str(error.get("message") or ""))

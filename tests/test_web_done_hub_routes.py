@@ -187,7 +187,6 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
                 patch("no1.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value={"codex_api_key": "sk-codex-token"})),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
-                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
                 client = self._create_client()
                 resp = client.post(
@@ -202,8 +201,10 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-token")
             headers = calls[0][2].get("headers") or {}
             self.assertEqual(headers.get("Authorization"), "Bearer token-32")
-            self.assertFalse(config_path.exists())
-            sync_config.assert_not_called()
+            self.assertTrue(config_path.exists())
+            content = config_path.read_text(encoding="utf-8")
+            self.assertIn('model_provider = "custom"\n', content)
+            self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
 
     def test_done_hub_team_presets_proxy_uses_bearer_token(self) -> None:
         base = "https://peer.shierkeji.com"
@@ -429,7 +430,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         headers = calls[0][2].get("headers") or {}
         self.assertEqual(headers.get("Authorization"), "Bearer token-32")
 
-    def test_done_hub_login_returns_client_env_without_writing_files_for_normal_user(self) -> None:
+    def test_done_hub_login_writes_only_codex_provider_config_for_normal_user(self) -> None:
         base = "https://peer.shierkeji.com"
         calls: list[tuple[str, str, dict]] = []
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -540,7 +541,6 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             with (
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
-                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
                 client = self._create_client()
                 try:
@@ -566,9 +566,13 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 "unlimited_quota": True,
             })
             self.assertFalse((codex_dir / "auth.json").exists())
-            self.assertEqual((codex_dir / "config.toml").read_text(encoding="utf-8"), existing_config)
+            content = (codex_dir / "config.toml").read_text(encoding="utf-8")
+            self.assertIn('model_provider = "custom"\n', content)
+            self.assertIn('base_url = "https://peer.shierkeji.com/v1"\n', content)
+            self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
+            self.assertIn(existing_tail, content)
+            self.assertNotIn('model = "old-model"', content)
             self.assertFalse((home_path / ".gemini").exists())
-            sync_config.assert_not_called()
 
     def test_done_hub_login_skips_client_files_for_pro_user(self) -> None:
         base = "https://peer.shierkeji.com"
@@ -700,7 +704,6 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
                 patch("no1.ports.web.routes.done_hub._TOKEN_PAGE_SIZE", 2),
-                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
                 client = self._create_client()
                 try:
@@ -727,12 +730,14 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 {"page": 2, "size": 2, "keyword": "", "order": "-id"},
             ])
             codex_config = home_path / ".codex" / "config.toml"
-            self.assertFalse(codex_config.exists())
+            self.assertTrue(codex_config.exists())
+            content = codex_config.read_text(encoding="utf-8")
+            self.assertIn('model_provider = "custom"\n', content)
+            self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
             self.assertFalse((home_path / ".codex" / "auth.json").exists())
             self.assertFalse((home_path / ".gemini").exists())
-            sync_config.assert_not_called()
 
-    def test_done_hub_login_does_not_create_codex_provider_config(self) -> None:
+    def test_done_hub_login_writes_only_codex_provider_config(self) -> None:
         base = "https://peer.shierkeji.com"
         calls: list[tuple[str, str, dict]] = []
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -809,7 +814,6 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             with (
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
-                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
                 client = self._create_client()
                 try:
@@ -825,10 +829,13 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             self.assertTrue(bool(body.get("ok")))
             session = ((body.get("result") or {}).get("session") or {})
             self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-secret")
-            self.assertFalse((home_path / ".codex" / "config.toml").exists())
+            codex_config = home_path / ".codex" / "config.toml"
+            self.assertTrue(codex_config.exists())
+            content = codex_config.read_text(encoding="utf-8")
+            self.assertIn('model_provider = "custom"\n', content)
+            self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
             self.assertFalse((home_path / ".codex" / "auth.json").exists())
             self.assertFalse((home_path / ".gemini").exists())
-            sync_config.assert_not_called()
 
 
 if __name__ == "__main__":

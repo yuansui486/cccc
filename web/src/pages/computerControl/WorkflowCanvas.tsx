@@ -28,18 +28,41 @@ const kindMeta: Record<WorkflowNodeKind, { label: string; color: string; icon: L
 const WorkflowNodeCard = memo(function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
   const meta = kindMeta[data.model.type];
   const Icon = meta.icon;
+  const cardStyle: React.CSSProperties = {
+    borderColor: selected ? "var(--color-accent-primary)" : "var(--color-border)",
+    boxShadow: selected
+      ? "0 0 0 2px var(--color-bg-primary), 0 0 0 4px color-mix(in srgb, var(--color-accent-primary) 28%, transparent), 0 14px 30px rgba(15, 23, 42, 0.14)"
+      : "0 10px 26px rgba(15, 23, 42, 0.10)",
+  };
+  const handleStyle: React.CSSProperties = {
+    background: "var(--color-bg-primary)",
+    borderColor: meta.color,
+    boxShadow: `0 0 0 2px var(--color-bg-primary), 0 0 0 3px ${meta.color}`,
+  };
   return (
-    <div className={`w-[190px] rounded-md border bg-[var(--color-bg-primary)] shadow-sm ${selected ? "border-[var(--color-accent-primary)] ring-2 ring-[var(--color-accent-primary)]/15" : "border-[var(--color-border)]"}`}>
-      <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-2 !bg-white" />
-      <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2" style={{ color: meta.color }}>
-        <Icon size={14} />
+    <div
+      className="group relative w-[216px] overflow-visible rounded-xl border bg-[var(--color-bg-primary)] transition-[box-shadow,transform] duration-150 hover:-translate-y-px"
+      style={cardStyle}
+    >
+      <div className="pointer-events-none absolute inset-y-2 left-0.5 w-1 rounded-full" style={{ backgroundColor: meta.color }} />
+      <Handle type="target" position={Position.Left} className="!z-10 !h-3 !w-3 !border-2" style={handleStyle} />
+      <div className="flex items-center gap-2 border-b border-[var(--glass-border-subtle)] px-3.5 py-2.5" style={{ color: meta.color }}>
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-black/[0.04] dark:bg-white/[0.06]">
+          <Icon size={14} strokeWidth={2.2} />
+        </span>
         <span className="text-[11px] font-semibold">{meta.label}</span>
+        <span className="ml-auto text-[10px] font-medium text-[var(--color-text-muted)]">步骤</span>
       </div>
-      <div className="px-3 py-2.5">
-        <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{data.model.title || meta.label}</div>
-        {data.model.tool && <div className="mt-1 flex items-center gap-1 truncate text-[11px] text-[var(--color-text-secondary)]"><Bot size={11} />{data.model.tool}</div>}
+      <div className="px-3.5 py-3">
+        <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{data.model.title || meta.label}</div>
+        {data.model.tool && (
+          <div className="mt-2 flex min-w-0 items-center gap-1.5 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)]">
+            <Bot size={11} className="shrink-0" />
+            <span className="truncate">{data.model.tool}</span>
+          </div>
+        )}
       </div>
-      <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-2 !bg-white" />
+      <Handle type="source" position={Position.Right} className="!z-10 !h-3 !w-3 !border-2" style={handleStyle} />
     </div>
   );
 });
@@ -78,7 +101,11 @@ export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onC
   return (
     <ReactFlow<CanvasNode, CanvasEdge>
       nodes={nodes}
-      edges={edges.map((edge) => ({ ...edge, style: { stroke: "var(--color-accent-primary)", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "var(--color-accent-primary)" } }))}
+      edges={edges.map((edge) => ({
+        ...edge,
+        style: { stroke: "var(--color-accent-primary)", strokeWidth: 2.25, strokeLinecap: "round" },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: "var(--color-accent-primary)" },
+      }))}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
@@ -92,18 +119,25 @@ export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onC
       fitViewOptions={{ padding: 0.25 }}
       minZoom={0.35}
       maxZoom={1.6}
-      className="bg-[var(--color-bg-secondary)]"
+      className="bg-[var(--color-bg-secondary)] [&_.react-flow__edge-path]:drop-shadow-[0_1px_1px_rgba(15,23,42,0.12)]"
     >
-      <Background gap={20} size={1} color="var(--color-border)" />
+      <Background gap={24} size={1} color="var(--color-border)" />
       <Controls
         position="bottom-left"
         showInteractive={false}
-        className="!bottom-5 !left-5 !m-0 [&>button]:!h-10 [&>button]:!w-10 [&>button]:!border-[var(--color-border)] [&>button]:!bg-[var(--color-bg-primary)] [&>button]:hover:!bg-[var(--color-bg-secondary)]"
+        className="!bottom-4 !left-4 !m-0 !overflow-hidden !rounded-xl !border !border-[var(--glass-border-subtle)] !bg-[var(--color-bg-primary)] !shadow-lg [&>button]:!h-9 [&>button]:!w-9 [&>button]:!border-0 [&>button]:!bg-transparent [&>button]:!text-[var(--color-text-secondary)] [&>button]:hover:!bg-[var(--color-bg-secondary)] [&>button]:hover:!text-[var(--color-text-primary)]"
       />
-      <MiniMap pannable zoomable className="!hidden !border !border-[var(--color-border)] !bg-[var(--color-bg-primary)] lg:!block" nodeColor={(node) => {
-        const model = (node.data as { model?: { type?: WorkflowNodeKind } }).model;
-        return model?.type ? kindMeta[model.type].color : "#64748b";
-      }} />
+      <MiniMap
+        pannable
+        zoomable
+        nodeBorderRadius={6}
+        className="!right-4 !top-4 !hidden !h-[132px] !w-[196px] !overflow-hidden !rounded-xl !border !border-[var(--glass-border-subtle)] !bg-[var(--color-bg-primary)] !shadow-lg lg:!block"
+        nodeColor={(node) => {
+          const model = (node.data as { model?: { type?: WorkflowNodeKind } }).model;
+          return model?.type ? kindMeta[model.type].color : "#64748b";
+        }}
+        nodeStrokeColor="var(--color-bg-primary)"
+      />
     </ReactFlow>
   );
 }

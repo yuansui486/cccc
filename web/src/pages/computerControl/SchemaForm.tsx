@@ -20,9 +20,9 @@ type FieldProps = {
 };
 
 const inputClass =
-  "mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2.5 text-sm outline-none transition focus:border-[var(--color-accent-primary)]";
+  "mt-1 h-10 w-full rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm outline-none transition focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10";
 const compactInputClass =
-  "h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2 text-xs outline-none focus:border-[var(--color-accent-primary)]";
+  "h-9 w-full rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 text-xs outline-none transition focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10";
 
 function defaultValue(schema: ToolSchema): unknown {
   if (schema.default !== undefined) return schema.default;
@@ -61,7 +61,7 @@ function FieldEditor({ name, schema, value, required = false, path = name, onCha
   if (alternatives?.length) {
     const variant = alternatives[Math.max(0, selectedAlternative)] || alternatives[0];
     return (
-      <div className="space-y-2 rounded-md border border-[var(--color-border)]/70 p-3">
+      <div className="space-y-2 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3">
         <label className="block text-xs font-medium">
           <span className="flex items-center gap-1">{parameterLabel(name, schema.title)}{required && <span className="text-red-500">*</span>}</span>
           <select
@@ -87,7 +87,7 @@ function FieldEditor({ name, schema, value, required = false, path = name, onCha
       return <DynamicObjectField name={name} schema={schema} value={objectValue} onChange={onChange} />;
     }
     return (
-      <fieldset className="space-y-3 rounded-md border border-[var(--color-border)]/70 p-3">
+      <fieldset className="space-y-3 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3">
         <legend className="px-1 text-xs font-medium">{parameterLabel(name, schema.title)}{required && <span className="ml-1 text-red-500">*</span>}</legend>
         {schema.description && <p className="-mt-1 text-xs leading-4 text-[var(--color-text-secondary)]">{parameterDescription(name, schema.description)}</p>}
         {keys.map((childName) => {
@@ -117,7 +117,7 @@ function FieldEditor({ name, schema, value, required = false, path = name, onCha
     const items = Array.isArray(value) ? value : [];
     const itemSchema = schema.items || { type: "string" };
     return (
-      <fieldset className="space-y-2 rounded-md border border-[var(--color-border)]/70 p-3">
+      <fieldset className="space-y-2 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3">
         <legend className="px-1 text-xs font-medium">{parameterLabel(name, schema.title)}{required && <span className="ml-1 text-red-500">*</span>}</legend>
         {schema.description && <p className="-mt-1 text-xs leading-4 text-[var(--color-text-secondary)]">{parameterDescription(name, schema.description)}</p>}
         {items.map((item, index) => (
@@ -134,7 +134,7 @@ function FieldEditor({ name, schema, value, required = false, path = name, onCha
             </button>
           </div>
         ))}
-        <button type="button" className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:bg-black/5" onClick={() => onChange([...items, defaultValue(itemSchema)])}>
+        <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--glass-tab-bg-hover)]" onClick={() => onChange([...items, defaultValue(itemSchema)])}>
           <Plus size={13} /> 添加一项
         </button>
       </fieldset>
@@ -153,7 +153,7 @@ function FieldEditor({ name, schema, value, required = false, path = name, onCha
           {choices.map((choice) => <option key={String(choice)} value={String(choice)}>{optionLabel(choice)}</option>)}
         </select>
       ) : schema.type === "boolean" ? (
-        <span className="mt-1 flex min-h-9 items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2">
+        <span className="mt-1 flex min-h-10 items-center justify-between rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
           <span className="font-normal text-[var(--color-text-secondary)]">{current ? "已开启" : "已关闭"}</span>
           <input type="checkbox" checked={Boolean(current)} onChange={(event) => onChange(event.target.checked)} />
         </span>
@@ -170,7 +170,7 @@ function FieldEditor({ name, schema, value, required = false, path = name, onCha
 function DynamicObjectField({ name, schema, value, onChange }: { name: string; schema: ToolSchema; value: Record<string, unknown>; onChange: (value: unknown) => void }) {
   const entries = Object.entries(value);
   return (
-    <fieldset className="space-y-2 rounded-md border border-[var(--color-border)]/70 p-3">
+    <fieldset className="space-y-2 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3">
       <legend className="px-1 text-xs font-medium">{parameterLabel(name, schema.title)}</legend>
       {schema.description && <p className="-mt-1 text-xs leading-4 text-[var(--color-text-secondary)]">{parameterDescription(name, schema.description)}</p>}
       {entries.map(([key, item]) => (
@@ -185,7 +185,7 @@ function DynamicObjectField({ name, schema, value, onChange }: { name: string; s
           <button type="button" title="删除参数" aria-label="删除参数" className="rounded p-1.5 text-red-600 hover:bg-red-500/10" onClick={() => { const next = { ...value }; delete next[key]; onChange(next); }}><Trash2 size={14} /></button>
         </div>
       ))}
-      <button type="button" className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:bg-black/5" onClick={() => onChange({ ...value, 参数: "" })}><Plus size={13} /> 添加字段</button>
+      <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--glass-tab-bg-hover)]" onClick={() => onChange({ ...value, 参数: "" })}><Plus size={13} /> 添加字段</button>
     </fieldset>
   );
 }
@@ -207,7 +207,7 @@ export function SchemaForm({ schema, toolName, value, onChange }: Props) {
 
   return (
     <div className="space-y-4">
-      {isElementTool && <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs leading-4 text-sky-900 dark:text-sky-100">此工具优先使用已捕获的界面元素。屏幕坐标只作为明确允许的一次性兜底，不会保存为长期定位。</div>}
+      {isElementTool && <div className="rounded-xl border border-sky-500/30 bg-sky-500/8 px-3 py-2.5 text-xs leading-4 text-sky-900 dark:text-sky-100">此工具优先使用已捕获的界面元素。屏幕坐标只作为明确允许的一次性兜底，不会保存为长期定位。</div>}
       {Object.entries(properties).map(([name, field]) => (
         <FieldEditor key={name} name={name} schema={field} value={value[name] ?? field.default} required={required.has(name)} onChange={(next) => setField(name, next)} />
       ))}

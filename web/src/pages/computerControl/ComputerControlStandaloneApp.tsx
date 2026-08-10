@@ -1204,9 +1204,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   }
 
   const runsPanel = (
-    <div className="h-full overflow-auto p-4">
+    <div className="h-full overflow-auto p-4 scrollbar-subtle">
       {lease.active && lease.lease && (
-        <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/8 p-3 text-xs">
+        <div className="mb-3 rounded-xl border border-amber-500/35 bg-amber-500/8 p-3 text-xs shadow-sm">
           <div className="flex items-start gap-2">
             <CircleStop size={16} className="mt-0.5 shrink-0 text-amber-600" />
             <div className="min-w-0 flex-1">
@@ -1220,14 +1220,14 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             </div>
             <div className="flex shrink-0 gap-1.5">
               <button
-                className="rounded border border-amber-600/40 px-2 py-1 text-amber-800 disabled:opacity-40 dark:text-amber-200"
+                className="rounded-lg border border-amber-600/40 px-2 py-1 text-amber-800 disabled:opacity-40 dark:text-amber-200"
                 disabled={Boolean(busy)}
                 onClick={() => void interruptLease(false)}
               >
                 停止
               </button>
               <button
-                className="rounded border border-red-500/50 px-2 py-1 text-red-700 disabled:opacity-40 dark:text-red-300"
+                className="rounded-lg border border-red-500/50 px-2 py-1 text-red-700 disabled:opacity-40 dark:text-red-300"
                 disabled={Boolean(busy)}
                 onClick={() => void interruptLease(true)}
               >
@@ -1241,14 +1241,14 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         <h2 className="text-sm font-semibold">运行时间线</h2>
         <button
           title="刷新运行记录"
-          className="rounded-md p-1.5 hover:bg-black/5"
+          className="rounded-lg p-1.5 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
           onClick={() => void refresh()}
         >
           <RefreshCw size={15} />
         </button>
       </div>
       {runs.length === 0 ? (
-        <div className="rounded-md border border-dashed border-[var(--color-border)] p-5 text-center text-xs text-[var(--color-text-secondary)]">
+        <div className="rounded-xl border border-dashed border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-5 text-center text-xs text-[var(--color-text-secondary)]">
           暂无运行记录
         </div>
       ) : (
@@ -1273,7 +1273,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             return (
               <div
                 key={String(run.run_id)}
-                className="rounded-md border border-[var(--color-border)] p-3 text-xs"
+                className="rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3 text-xs shadow-sm"
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-semibold">
@@ -1289,12 +1289,12 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   个步骤
                 </div>
                 {error && (
-                  <div className="mt-2 rounded bg-red-500/8 px-2 py-1.5 text-red-700 dark:text-red-300">
+                  <div className="mt-2 rounded-lg bg-red-500/8 px-2 py-1.5 text-red-700 dark:text-red-300">
                     {friendlyError(error.message)}
                   </div>
                 )}
                 {recovery && (
-                  <div className="mt-2 rounded bg-amber-500/8 px-2 py-1.5 text-amber-800 dark:text-amber-200">
+                  <div className="mt-2 rounded-lg bg-amber-500/8 px-2 py-1.5 text-amber-800 dark:text-amber-200">
                     自适应恢复：
                     {recovery.delivery_status === "delivered"
                       ? "已通知执行智能体，等待修正"
@@ -1304,17 +1304,17 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   </div>
                 )}
                 {run.status === "recovering" && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded bg-sky-500/8 px-2 py-1.5">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-sky-500/8 px-2 py-1.5">
                     <span className="mr-auto text-sky-800 dark:text-sky-200">请选择处理方式</span>
-                    <button className="rounded border border-sky-500/40 px-2 py-1 text-sky-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "reobserve")}>重新观察</button>
-                    <button className="rounded border border-[var(--color-border)] px-2 py-1 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "retry")}>重试</button>
-                    <button className="rounded border border-amber-500/40 px-2 py-1 text-amber-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "skip")}>跳过</button>
-                    <button className="rounded border border-red-500/40 px-2 py-1 text-red-600 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "cancel")}>停止</button>
+                    <button className="rounded-lg border border-sky-500/40 px-2 py-1 text-sky-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "reobserve")}>重新观察</button>
+                    <button className="rounded-lg border border-[var(--glass-border-subtle)] px-2 py-1 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "retry")}>重试</button>
+                    <button className="rounded-lg border border-amber-500/40 px-2 py-1 text-amber-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "skip")}>跳过</button>
+                    <button className="rounded-lg border border-red-500/40 px-2 py-1 text-red-600 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "cancel")}>停止</button>
                   </div>
                 )}
                 {run.status === "waiting_approval" &&
                   Boolean(run.current_node_id) && (
-                    <div className="mt-2 flex items-center gap-2 rounded bg-amber-500/8 px-2 py-1.5">
+                    <div className="mt-2 flex items-center gap-2 rounded-lg bg-amber-500/8 px-2 py-1.5">
                       <span className="flex-1 text-amber-800 dark:text-amber-200">
                         此步骤要求人工确认
                       </span>
@@ -1348,7 +1348,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   )}
                 {run.status === "running" && String(lease.lease?.run_id || "") === String(run.run_id || "") && (
                   <button
-                    className="mt-2 inline-flex items-center gap-1 rounded border border-red-500/40 px-2 py-1 text-red-600"
+                    className="mt-2 inline-flex items-center gap-1 rounded-lg border border-red-500/40 px-2 py-1 text-red-600"
                     onClick={() => void interruptLease(true)}
                   >
                     <CircleStop size={13} />
@@ -1363,29 +1363,55 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     </div>
   );
 
+  const setupStatusTone = setup.phase === "ready"
+    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+    : setup.phase === "failed" || setup.phase === "service_unavailable"
+      ? "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+      : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  const setupStatusIcon = setup.phase === "ready"
+    ? <Check size={13} />
+    : setup.phase === "failed" || setup.phase === "service_unavailable"
+      ? <AlertTriangle size={13} />
+      : setup.phase === "cancelled"
+        ? <CircleStop size={13} />
+        : setup.in_progress
+          ? <LoaderCircle size={13} className="animate-spin" />
+          : <Wrench size={13} />;
+  const selectedGroupLabel = groupLabelById?.[String(groupId || "")] || groupId || "未选择工作组";
+  const propertyInputClass = "mt-1 h-10 w-full rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm outline-none transition focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10";
+  const propertyToggleClass = "mt-4 flex items-center justify-between rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2.5 text-xs";
+
   return (
     <main className="flex h-full min-h-0 flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
-      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3 md:px-6">
+      <header className="sticky top-0 z-20 flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-2.5 backdrop-blur-xl md:px-6">
         <div className="flex min-w-0 items-center gap-3">
-          <Laptop size={22} />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg-hover)] text-[var(--color-accent-primary)]">
+            <Laptop size={18} />
+          </span>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">电脑控制</div>
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="truncate text-sm font-semibold">电脑控制</div>
+              <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${setupStatusTone}`}>
+                {setupStatusIcon}
+                {phaseLabel(setup.phase)}
+              </span>
+            </div>
             <div className="truncate text-xs text-[var(--color-text-secondary)]">
-              工作组 {groupId || "未选择"}
+              {selectedGroupLabel}
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex max-w-full items-center justify-end gap-1.5 overflow-x-auto pb-0.5 scrollbar-subtle">
           <button
             title="撤销"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] disabled:opacity-40"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
             onClick={undo}
             disabled={history.length === 0}
           >
             <Undo2 size={15} />
           </button>
           <button
-            className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
             onClick={() => void save()}
             disabled={!hasEditableDraft || Boolean(busy)}
           >
@@ -1393,7 +1419,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             保存
           </button>
           <button
-            className="hidden h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50 sm:inline-flex"
+            className="hidden h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-50 sm:inline-flex"
             onClick={() => void publish()}
             disabled={!hasEditableDraft || Boolean(busy)}
           >
@@ -1401,7 +1427,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             发布
           </button>
           <button
-            className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
             onClick={() => void openTriggerEditor()}
             disabled={!hasEditableDraft || Boolean(busy)}
             title="配置元素、定时、周期和一次性触发"
@@ -1410,7 +1436,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             自动触发
           </button>
           <button
-            className="inline-flex h-9 items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 text-sm text-white disabled:opacity-50"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--color-accent-primary)] px-3 text-sm font-medium text-white shadow-sm transition-colors hover:brightness-105 disabled:opacity-50"
             onClick={() => void run()}
             disabled={!setupReady || !hasEditableDraft || Boolean(busy)}
           >
@@ -1421,7 +1447,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       </header>
 
       {message && (
-        <div className="mx-4 mt-3 flex items-center justify-between rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm md:mx-6">
+        <div className="mx-4 mt-3 flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/8 px-3 py-2 text-sm shadow-sm md:mx-6">
           <span>{message}</span>
           <button aria-label="关闭" onClick={() => setMessage("")}>
             <X size={15} />
@@ -1430,7 +1456,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       )}
 
       {setup.phase !== "ready" && (
-      <div className="mx-4 mt-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
+      <div className="mx-4 mt-3 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2.5 text-xs shadow-sm md:mx-6">
         <div className="flex flex-wrap items-start gap-3">
           {setup.phase === "ready" ? (
             <Check size={15} className="mt-0.5 shrink-0 text-emerald-600" />
@@ -1491,14 +1517,14 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             <button
               title="刷新安装状态"
               aria-label="刷新安装状态"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md border disabled:opacity-40"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:opacity-40"
               onClick={() => void refreshSetupStatus()}
               disabled={Boolean(busy)}
             >
               <RefreshCw size={13} className={busy === "refresh-setup" ? "animate-spin" : ""} />
             </button>
             <button
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:opacity-40"
               onClick={() => void copySetupDiagnostics()}
               disabled={!setup.logs?.length && !setup.error && !setupPollError}
             >
@@ -1507,7 +1533,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             </button>
             {setup.in_progress ? (
               <button
-                className="inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2 py-1 text-red-600 disabled:opacity-40"
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-500/40 px-2.5 text-red-600 disabled:opacity-40"
                 onClick={() => void cancelSetup()}
                 disabled={Boolean(busy) || !setup.can_cancel}
               >
@@ -1516,7 +1542,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               </button>
             ) : setup.phase === "failed" || setup.phase === "cancelled" ? (
               <button
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 transition-colors hover:bg-[var(--glass-tab-bg-hover)]"
                 onClick={() => void beginSetup("repair")}
                 disabled={Boolean(busy) || lease.active}
               >
@@ -1527,7 +1553,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               <>
                 <button
                   title="仅重启 Windows-MCP 连接，不会重新安装或升级"
-                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:opacity-40"
                   onClick={() => void beginSetup("restart")}
                   disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
                 >
@@ -1536,7 +1562,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 </button>
                 <button
                   title="检查并安装最新版 Windows-MCP"
-                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:opacity-40"
                   onClick={() => void beginSetup("upgrade")}
                   disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
                 >
@@ -1548,7 +1574,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           </div>
         </div>
         {(setup.logs?.length || setup.current_command) && (
-          <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+          <div className="mt-2 border-t border-[var(--glass-border-subtle)] pt-2">
             <button
               className="inline-flex items-center gap-1 text-[var(--color-text-secondary)]"
               onClick={() => setSetupLogsOpen((open) => !open)}
@@ -1564,7 +1590,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   const panel = event.currentTarget;
                   setupLogPinnedRef.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
                 }}
-                className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-black/90 p-2 font-mono text-[11px] leading-5 text-zinc-100"
+                className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-zinc-950 p-3 font-mono text-[11px] leading-5 text-zinc-100 shadow-inner scrollbar-subtle"
               >
                 {(setup.logs || []).join("\n") || setup.current_command}
               </pre>
@@ -1579,7 +1605,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         .map((request) => (
           <div
             key={request.request_id}
-            className="mx-4 mt-3 flex items-center gap-3 rounded-md border border-red-500/35 bg-red-500/6 px-3 py-2 text-xs md:mx-6"
+            className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/8 px-3 py-2.5 text-xs shadow-sm md:mx-6"
           >
             <ShieldCheck size={16} className="shrink-0 text-red-600" />
             <div className="min-w-0 flex-1">
@@ -1596,14 +1622,14 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               </div>
             </div>
             <button
-              className="shrink-0 rounded border border-emerald-500/40 px-2 py-1 text-emerald-700 disabled:opacity-40"
+              className="shrink-0 rounded-lg border border-emerald-500/40 px-2.5 py-1 text-emerald-700 disabled:opacity-40"
               disabled={Boolean(busy)}
               onClick={() => void decideRequest(request.request_id, true)}
             >
               仅批准本次
             </button>
             <button
-              className="shrink-0 rounded border border-red-500/30 px-2 py-1 text-red-600 disabled:opacity-40"
+              className="shrink-0 rounded-lg border border-red-500/30 px-2.5 py-1 text-red-600 disabled:opacity-40"
               disabled={Boolean(busy)}
               onClick={() => void decideRequest(request.request_id, false)}
             >
@@ -1612,11 +1638,11 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           </div>
         ))}
 
-      <div className="mx-4 mt-3 grid grid-cols-4 gap-1 rounded-md bg-black/5 p-1 md:hidden">
+      <div className="mx-4 mt-3 grid grid-cols-4 gap-1 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-1 shadow-sm md:hidden">
         {(["tools", "steps", "properties", "runs"] as Section[]).map((item) => (
           <button
             key={item}
-            className={`rounded px-2 py-1.5 text-xs ${section === item ? "bg-white text-slate-900 shadow-sm" : "text-[var(--color-text-secondary)]"}`}
+            className={`rounded-lg px-2 py-2 text-xs font-medium transition-colors ${section === item ? "bg-[var(--color-accent-primary)] text-white shadow-sm" : "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"}`}
             onClick={() => setSection(item)}
           >
             {
@@ -1633,9 +1659,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         ))}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)_310px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 border-t border-[var(--glass-border-subtle)] md:grid-cols-[248px_minmax(0,1fr)_340px]">
         <aside
-          className={`${section === "tools" ? "block" : "hidden md:block"} min-h-0 border-r border-[var(--color-border)] p-3`}
+          className={`${section === "tools" ? "block" : "hidden md:block"} min-h-0 overflow-y-auto border-r border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-4 scrollbar-subtle`}
         >
           <div className="mb-4">
             <div className="mb-2 flex items-center justify-between">
@@ -1645,7 +1671,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 </h2>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent-primary)] disabled:opacity-40"
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2 py-1 text-[11px] transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:opacity-40"
                   onClick={() => void openTriggerEditor()}
                   disabled={!hasEditableDraft || Boolean(busy)}
                   title="配置元素、定时、周期和一次性触发"
@@ -1657,7 +1683,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               <div className="flex items-center gap-1">
                 <button
                   title="新建工作流"
-                  className="rounded-md p-1.5 hover:bg-black/5 disabled:opacity-40"
+                  className="rounded-lg p-1.5 transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:opacity-40"
                   onClick={() => void createWorkflow()}
                   disabled={Boolean(busy)}
                 >
@@ -1666,7 +1692,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 <button
                   title="删除当前工作流"
                   aria-label="删除当前工作流"
-                  className="rounded-md p-1.5 text-red-600 hover:bg-red-500/10 disabled:opacity-40"
+                  className="rounded-lg p-1.5 text-red-600 hover:bg-red-500/10 disabled:opacity-40"
                   onClick={() => void deleteWorkflow()}
                   disabled={!selectedManifest || Boolean(busy)}
                 >
@@ -1677,7 +1703,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             {workflows.length > 0 ? (
               <div className="relative">
                 <select
-                  className="h-9 w-full appearance-none rounded-md border border-[var(--color-border)] bg-transparent px-2.5 pr-8 text-sm"
+                  className="h-10 w-full appearance-none rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 pr-8 text-sm outline-none focus:border-[var(--color-accent-primary)]"
                   value={selectedId}
                   onChange={(event) => setSelectedId(event.target.value)}
                 >
@@ -1693,11 +1719,11 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 />
               </div>
             ) : (
-              <div className="rounded-md border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-secondary)]">
+              <div className="rounded-xl border border-dashed border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-3 text-xs text-[var(--color-text-secondary)]">
                 <div>还没有工作流，先在画布中规划步骤。</div>
                 <button
                   type="button"
-                  className="mt-2 inline-flex h-8 items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 text-xs text-white"
+                  className="mt-2 inline-flex h-8 items-center gap-1 rounded-lg bg-[var(--color-accent-primary)] px-3 text-xs text-white"
                   onClick={() => void createWorkflow()}
                   disabled={Boolean(busy)}
                 >
@@ -1708,7 +1734,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             )}
           </div>
           {versions.length > 0 && (
-            <div className="mb-4 border-t border-[var(--color-border)] pt-3">
+            <div className="mb-4 border-t border-[var(--glass-border-subtle)] pt-3">
               <h2 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">
                 版本历史
               </h2>
@@ -1716,7 +1742,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 {versions.slice(0, 4).map((item) => (
                   <div
                     key={item.version}
-                    className="flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-black/5"
+                    className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs transition-colors hover:bg-[var(--glass-tab-bg-hover)]"
                   >
                     <span>
                       版本 {item.version}
@@ -1741,7 +1767,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             </div>
           )}
           {proposals.some((item) => item.status === "pending") && (
-            <div className="mb-4 border-t border-[var(--color-border)] pt-3">
+            <div className="mb-4 border-t border-[var(--glass-border-subtle)] pt-3">
               <h2 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">
                 AI 优化建议
               </h2>
@@ -1751,7 +1777,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 .map((item) => (
                   <div
                     key={item.proposal_id}
-                    className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs"
+                    className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/8 p-2.5 text-xs"
                   >
                     <p className="leading-4">
                       {item.summary || "根据运行恢复结果优化工作流"}
@@ -1794,13 +1820,13 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               className="absolute left-2.5 top-2.5 text-[var(--color-text-secondary)]"
             />
             <input
-              className="h-8 w-full rounded-md border border-[var(--color-border)] bg-transparent pl-8 pr-2 text-xs outline-none"
+              className="h-9 w-full rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] pl-8 pr-2.5 text-xs outline-none transition focus:border-[var(--color-accent-primary)]"
               value={toolSearch}
               onChange={(event) => setToolSearch(event.target.value)}
               placeholder="搜索工具"
             />
           </div>
-          <div className="max-h-[calc(100vh-310px)] space-y-1 overflow-auto">
+          <div className="max-h-[calc(100vh-310px)] space-y-1 overflow-auto pr-1 scrollbar-subtle">
             {filteredTools.map((tool) => (
               <button
                 draggable
@@ -1813,7 +1839,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   event.dataTransfer.effectAllowed = "copy";
                 }}
                 onClick={() => addNode("action", tool)}
-                className="block w-full rounded-md border border-transparent px-2 py-2 text-left hover:border-[var(--color-border)] hover:bg-black/5"
+                className="block w-full rounded-xl border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-[var(--glass-border-subtle)] hover:bg-[var(--glass-tab-bg-hover)]"
               >
                 <div className="truncate text-xs font-medium">
                   {toolName(tool.name)}{" "}
@@ -1835,9 +1861,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         </aside>
 
         <section
-          className={`${section === "steps" ? "flex" : "hidden md:flex"} min-h-[520px] min-w-0 flex-col border-r border-[var(--color-border)]`}
+          className={`${section === "steps" ? "flex" : "hidden md:flex"} min-h-[520px] min-w-0 flex-col border-r border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)]`}
         >
-          <div className="flex min-h-16 flex-wrap items-center gap-2 overflow-x-auto border-b border-[var(--color-border)] px-4 py-2.5">
+          <div className="flex min-h-14 flex-wrap items-center gap-2 overflow-x-auto border-b border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-2.5 scrollbar-subtle">
             <span className="mr-1 text-sm font-semibold text-[var(--color-text-primary)]">
               添加步骤
             </span>
@@ -1847,28 +1873,28 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 : "未选中步骤时追加到结束节点之前"}
             </span>
             <button
-              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm transition-colors hover:border-[var(--color-accent-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
               onClick={() => addNode("action")}
             >
               <MousePointer2 size={16} />
               操作
             </button>
             <button
-              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm transition-colors hover:border-[var(--color-accent-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
               onClick={() => addNode("condition")}
             >
               <GitBranch size={16} />
               判断
             </button>
             <button
-              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm transition-colors hover:border-[var(--color-accent-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
               onClick={() => addNode("wait")}
             >
               <Hourglass size={16} />
               等待
             </button>
             <button
-              className="inline-flex h-10 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 text-sm hover:border-[var(--color-accent-primary)] hover:bg-black/5"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 text-sm transition-colors hover:border-[var(--color-accent-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
               onClick={() => addNode("approval")}
             >
               <ShieldCheck size={16} />
@@ -1894,7 +1920,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             {nodes.map((node, index) => (
               <div
                 key={node.id}
-                className={`flex items-center gap-2 rounded-md border p-2 ${selectedNodeId === node.id ? "border-[var(--color-accent-primary)] bg-black/5" : "border-[var(--color-border)]"}`}
+                className={`flex items-center gap-2 rounded-xl border p-2.5 ${selectedNodeId === node.id ? "border-[var(--color-accent-primary)] bg-[var(--glass-tab-bg-hover)]" : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]"}`}
               >
                 <button
                   className="min-w-0 flex-1 text-left"
@@ -1919,7 +1945,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   <div className="flex shrink-0 gap-1">
                     <button
                       title="上移步骤"
-                      className="rounded-md border border-[var(--color-border)] p-1.5 disabled:opacity-30"
+                      className="rounded-lg border border-[var(--glass-border-subtle)] p-1.5 disabled:opacity-30"
                       disabled={!canLinearReorder || index <= 1}
                       onClick={() => moveNode(node.id, -1)}
                     >
@@ -1927,7 +1953,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                     </button>
                     <button
                       title="下移步骤"
-                      className="rounded-md border border-[var(--color-border)] p-1.5 disabled:opacity-30"
+                      className="rounded-lg border border-[var(--glass-border-subtle)] p-1.5 disabled:opacity-30"
                       disabled={!canLinearReorder || index >= nodes.length - 2}
                       onClick={() => moveNode(node.id, 1)}
                     >
@@ -1943,16 +1969,39 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               </p>
             )}
           </div>
-          <div className="hidden h-44 border-t border-[var(--color-border)] lg:block">
-            {runsPanel}
-          </div>
         </section>
 
         <aside
-          className={`${section === "properties" ? "block" : "hidden md:block"} min-h-0 overflow-auto p-4`}
+          className={`${section === "properties" ? "flex" : "hidden md:flex"} min-h-0 flex-col bg-[var(--color-bg-primary)]`}
         >
-          {selectedNode ? (
-            <div>
+          <div className="hidden shrink-0 items-center justify-between border-b border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-3 md:flex">
+            <div className="inline-flex rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)] p-1">
+              <button
+                type="button"
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${section !== "runs" ? "bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm" : "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"}`}
+                onClick={() => setSection("properties")}
+              >
+                属性
+              </button>
+              <button
+                type="button"
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${section === "runs" ? "bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm" : "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"}`}
+                onClick={() => setSection("runs")}
+              >
+                运行
+                {runs.length > 0 && (
+                  <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--color-accent-primary)] px-1 text-[10px] leading-4 text-white">
+                    {runs.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {section === "runs" ? runsPanel : (
+              <div className="h-full overflow-auto p-4 scrollbar-subtle">
+                {selectedNode ? (
+                  <div>
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-semibold">步骤属性</h2>
@@ -1965,7 +2014,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 ) && (
                   <button
                     title="删除步骤"
-                    className="rounded-md p-2 text-red-600 hover:bg-red-500/10"
+                    className="rounded-lg p-2 text-red-600 hover:bg-red-500/10"
                     onClick={removeSelectedNode}
                   >
                     <Trash2 size={15} />
@@ -1975,7 +2024,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               <label className="block text-xs font-medium">
                 步骤名称
                 <input
-                  className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm outline-none"
+                  className={propertyInputClass}
                   value={selectedNode.data.model.title}
                   onChange={(event) =>
                     updateNode(selectedNode.id, { title: event.target.value })
@@ -1987,7 +2036,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   <label className="block text-xs font-medium">
                     执行工具
                     <select
-                      className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2 text-sm"
+                      className={propertyInputClass}
                       value={selectedNode.data.model.tool || ""}
                       onChange={(event) =>
                         updateNode(selectedNode.id, {
@@ -2012,7 +2061,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                         )
                       : "请选择要执行的电脑工具。"}
                   </p>
-                  <div className="my-4 border-t border-[var(--color-border)]" />
+                  <div className="my-4 border-t border-[var(--glass-border-subtle)]" />
                   <SchemaForm
                     toolName={selectedTool?.name}
                     schema={selectedTool?.inputSchema}
@@ -2023,7 +2072,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   />
                   {(selectedNode.data.model.tool || "").toLowerCase() === "click" ||
                   (selectedNode.data.model.tool || "").toLowerCase() === "type" ? (
-                    <div className="mt-4 rounded-md border border-[var(--color-border)] p-3">
+                    <div className="mt-4 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <div className="text-xs font-semibold">操作目标</div>
@@ -2037,7 +2086,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                           <button
                             type="button"
                             title="启动桌面拾取器"
-                            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-accent-primary)]/50 px-2 py-1 text-xs text-[var(--color-accent-primary)]"
+                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-accent-primary)]/50 px-2 py-1 text-xs text-[var(--color-accent-primary)]"
                             onClick={() => void startPicker()}
                             disabled={pickerBusy || Boolean(pickerSession)}
                           >
@@ -2047,7 +2096,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                           <button
                             type="button"
                             title="读取一次 Windows-MCP 快照"
-                            className="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs"
+                            className="rounded-lg border border-[var(--glass-border-subtle)] px-2 py-1 text-xs"
                             onClick={() => void captureElements()}
                             disabled={pickerBusy}
                           >
@@ -2056,7 +2105,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                         </div>
                       </div>
                       {pickerSession && (
-                        <div className="mt-3 rounded-md border border-sky-500/30 bg-sky-500/5 p-2.5 text-xs">
+                        <div className="mt-3 rounded-xl border border-sky-500/30 bg-sky-500/8 p-2.5 text-xs">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium text-sky-900 dark:text-sky-100">
                               桌面拾取中 · {pickerSession.hotkey === "Ctrl+Shift+LeftClick"
@@ -2076,14 +2125,14 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                             </button>
                           </div>
                           {pickerSession.element && (
-                            <div className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-2">
+                            <div className="mt-2 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] p-2.5">
                               <div className="font-medium">{String(pickerSession.element.name || pickerSession.element.text || "未命名元素")}</div>
                               <div className="mt-0.5 text-[var(--color-text-secondary)]">{String(pickerSession.element.control_type || "控件")} · {String(pickerSession.element.window_name || "当前窗口")}</div>
                               <div className="mt-0.5 text-[var(--color-text-secondary)]">稳定性：{String(pickerSession.element.stability || pickerSession.stability || "检测中")}</div>
                             </div>
                           )}
                           <div className="mt-2 flex gap-2">
-                            <button type="button" className="rounded border border-[var(--color-border)] px-2 py-1" onClick={() => void lockPicker()} disabled={pickerBusy}>锁定当前元素</button>
+                            <button type="button" className="rounded-lg border border-[var(--glass-border-subtle)] px-2 py-1" onClick={() => void lockPicker()} disabled={pickerBusy}>锁定当前元素</button>
                             <button type="button" className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-700" onClick={() => void confirmPicker()} disabled={pickerBusy || !pickerSession.element}>确认定位</button>
                           </div>
                           {pickerSession.warning && <div className="mt-2 text-amber-700">{pickerSession.warning}</div>}
@@ -2091,7 +2140,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                       )}
                       {pickerElements.length > 0 && (
                         <select
-                          className="mt-3 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2 text-xs"
+                          className={propertyInputClass}
                           value=""
                           onChange={(event) => {
                             const item = pickerElements[Number(event.target.value)];
@@ -2107,7 +2156,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                         </select>
                       )}
                       {selectedNode.data.model.target && (
-                        <label className="mt-2 flex items-center justify-between rounded border border-[var(--color-border)] px-2.5 py-2 text-xs">
+                        <label className="mt-2 flex items-center justify-between rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2.5 py-2 text-xs">
                           <span>
                             <span className="block font-medium">只允许元素定位</span>
                             <span className="text-[var(--color-text-secondary)]">关闭后才允许本次运行使用一次性位置兜底</span>
@@ -2131,7 +2180,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                         type="number"
                         min={0}
                         placeholder="不限时"
-                        className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2"
+                        className={propertyInputClass}
                         value={selectedNode.data.model.timeout_seconds ?? ""}
                         onChange={(event) =>
                           updateNode(selectedNode.id, {
@@ -2143,7 +2192,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                     <label className="text-xs font-medium">
                       失败重试
                       <select
-                        className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2"
+                        className={propertyInputClass}
                         value={selectedNode.data.model.retries || 0}
                         onChange={(event) =>
                           updateNode(selectedNode.id, {
@@ -2159,7 +2208,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                       </select>
                     </label>
                   </div>
-                  <label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs">
+                  <label className={propertyToggleClass}>
                     <span>
                       <span className="block font-medium">AI 自适应恢复</span>
                       <span className="text-[var(--color-text-secondary)]">
@@ -2185,7 +2234,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                     type="number"
                     min={0}
                     step={0.5}
-                    className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm"
+                    className={propertyInputClass}
                     value={selectedNode.data.model.duration_seconds ?? ""}
                     onChange={(event) =>
                       updateNode(selectedNode.id, {
@@ -2199,7 +2248,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                 <label className="mt-4 block text-xs font-medium">
                   判断条件
                   <input
-                    className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm"
+                    className={propertyInputClass}
                     value={selectedNode.data.model.condition || ""}
                     onChange={(event) =>
                       updateNode(selectedNode.id, {
@@ -2218,8 +2267,8 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               </p>
               <label className="mt-5 block text-xs font-medium">
                 流程名称
-                <input
-                  className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm"
+              <input
+                  className={propertyInputClass}
                   value={definition.name}
                   onChange={(event) =>
                     setDefinition((value) => ({
@@ -2232,7 +2281,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               <label className="mt-4 block text-xs font-medium">
                 说明
                 <textarea
-                  className="mt-1 min-h-20 w-full resize-y rounded-md border border-[var(--color-border)] bg-transparent p-2.5 text-sm"
+                  className="mt-1 min-h-24 w-full resize-y rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3 text-sm outline-none transition focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10"
                   value={definition.description}
                   onChange={(event) =>
                     setDefinition((value) => ({
@@ -2242,7 +2291,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   }
                 />
               </label>
-              <label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs">
+              <label className={propertyToggleClass}>
                 <span>保存关键截图</span>
                 <input
                   type="checkbox"
@@ -2255,7 +2304,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   }
                 />
               </label>
-              <label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs">
+              <label className={propertyToggleClass}>
                 <span>
                   <span className="block font-medium">自动验证</span>
                   <span className="text-[var(--color-text-secondary)]">全部步骤和最终证据完成后自动结束运行</span>
@@ -2268,8 +2317,11 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                   }
                 />
               </label>
-            </div>
-          )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </aside>
 
         {section === "runs" && (

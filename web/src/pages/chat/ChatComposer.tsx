@@ -665,6 +665,137 @@ export function ChatComposer({
   const remoteReceiptStatus = remoteReceiptProjection.status;
   const remoteReceiptEventId = remoteReceiptProjection.eventId;
   const remoteReceiptLabel = remoteReceiptProjection.label;
+  const skillPicker = (
+    <div ref={skillMenuRef} className="relative z-50 flex-shrink-0">
+      <button
+        type="button"
+        className={classNames(
+          chipBaseClass,
+          "gap-1.5 px-2.5",
+          selectedSkill ? skillPickerActiveClass : chipInactiveClass,
+        )}
+        onClick={() => setShowSkillMenu((value) => !value)}
+        disabled={busy === "send" || isRemoteTarget}
+        aria-expanded={showSkillMenu}
+        aria-label={t("skillPicker", { defaultValue: "技能选择" })}
+        title={t("skillPicker", { defaultValue: "技能选择" })}
+      >
+        <SparklesIcon size={12} />
+        <span className="max-w-[9rem] truncate">
+          {selectedSkill ? (selectedSkill.displayName || selectedSkill.name) : t("skillPicker", { defaultValue: "技能选择" })}
+        </span>
+        <ChevronDownIcon size={12} className={classNames("transition-transform", showSkillMenu ? "rotate-180" : "")} />
+      </button>
+
+      {showSkillMenu && (
+        <div
+          className={classNames(
+            "absolute bottom-full left-0 z-50 mb-2 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border shadow-2xl",
+            isDark
+              ? "border-white/10 bg-slate-950/95 text-slate-100"
+              : "border-black/10 bg-white text-gray-900",
+          )}
+        >
+          <div className={classNames("flex items-center gap-1 border-b p-2", isDark ? "border-white/8" : "border-black/8")}>
+            {(["team", "global"] as SlashSkillScope[]).map((scope) => {
+              const active = slashSkillScope === scope;
+              return (
+                <button
+                  key={scope}
+                  type="button"
+                  className={classNames(
+                    "flex-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors",
+                    active
+                      ? "bg-blue-600 text-white"
+                      : isDark
+                        ? "text-slate-400 hover:bg-white/[0.06] hover:text-slate-100"
+                        : "text-gray-500 hover:bg-gray-100 hover:text-gray-900",
+                  )}
+                  onClick={() => setSlashSkillScope(scope)}
+                >
+                  {scope === "team"
+                    ? t("teamSkills", { defaultValue: "团队 skills" })
+                    : t("globalSkills", { defaultValue: "全局 skills" })}
+                </button>
+              );
+            })}
+          </div>
+          <div className={classNames("border-b p-2", isDark ? "border-white/8" : "border-black/8")}>
+            <input
+              type="search"
+              value={skillSearchQuery}
+              onChange={(event) => setSkillSearchQuery(event.target.value)}
+              onKeyDown={(event) => event.stopPropagation()}
+              placeholder={t("searchSkills", { defaultValue: "搜索 skill" })}
+              className={classNames(
+                "h-8 w-full rounded-xl border px-3 text-xs outline-none transition-colors",
+                isDark
+                  ? "border-white/10 bg-white/[0.05] text-slate-100 placeholder:text-slate-500 focus:border-blue-400/60 focus:bg-white/[0.08]"
+                  : "border-gray-200 bg-gray-50 text-gray-900 placeholder:text-gray-400 focus:border-blue-300 focus:bg-white",
+              )}
+              autoFocus
+            />
+          </div>
+          <div className="max-h-72 overflow-auto py-1 scrollbar-subtle">
+            {visibleSkillCommands.length === 0 ? (
+              <div className={classNames("px-4 py-6 text-center text-xs", isDark ? "text-slate-400" : "text-gray-500")}>
+                {skillSearchQuery.trim()
+                  ? t("noMatchedSkills", { defaultValue: "没有匹配的 skill" })
+                  : slashSkillScope === "team"
+                    ? t("noTeamSkills", { defaultValue: "当前团队没有可用 skill" })
+                    : t("noGlobalSkills", { defaultValue: "没有可用的全局 skill" })}
+              </div>
+            ) : (
+              visibleSkillCommands.map((item) => {
+                const active = selectedSkillCommand === item.capabilityId || selectedSkillCommand === item.command;
+                return (
+                  <button
+                    key={`${item.capabilityId}:${item.name}`}
+                    type="button"
+                    className={classNames(
+                      "flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors",
+                      active
+                        ? "bg-blue-600 text-white"
+                        : isDark
+                          ? "text-slate-200 hover:bg-white/[0.06]"
+                          : "text-gray-800 hover:bg-gray-50",
+                    )}
+                    onClick={() => {
+                      setSelectedSkillCommand(item.capabilityId);
+                      setShowSkillMenu(false);
+                      requestAnimationFrame(() => composerRef.current?.focus());
+                    }}
+                  >
+                    <span className={classNames(
+                      "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                      active
+                        ? "bg-white/18 text-white"
+                        : isDark
+                          ? "bg-white/[0.06] text-blue-200"
+                          : "bg-blue-50 text-blue-600",
+                    )}>
+                      <SparklesIcon size={14} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">{item.displayName || item.name}</span>
+                      {item.description ? (
+                        <span className={classNames(
+                          "mt-0.5 line-clamp-2 block text-xs leading-5",
+                          active ? "text-blue-50/90" : isDark ? "text-slate-400" : "text-gray-500",
+                        )}>
+                          {item.description}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <footer
@@ -828,13 +959,18 @@ export function ChatComposer({
             {/* Row 1 — Skill picker and recipients */}
             <div
               className={classNames(
-                "flex items-center gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b px-2.5 py-1 scrollbar-subtle touch-pan-x sm:overflow-x-visible sm:overscroll-auto",
+                "flex min-w-0 items-center gap-1.5 overflow-visible border-b px-2.5 py-1",
                 isDark ? "border-white/[0.04]" : "border-black/[0.04]",
               )}
-              role="toolbar"
-              aria-label="Composer controls"
-              tabIndex={0}
             >
+              {skillPicker}
+              <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain scrollbar-subtle touch-pan-x sm:overflow-x-visible sm:overscroll-auto">
+                <div
+                  className="flex min-w-max items-center gap-1.5"
+                  role="toolbar"
+                  aria-label="Composer controls"
+                  tabIndex={0}
+                >
               {(remoteTargetsBusy || remoteTargets.length > 0) && (
                 <label className="hidden min-w-0 shrink-0 items-center gap-1.5 text-[10px] font-medium text-[var(--color-text-tertiary)] sm:flex">
                   <span>Route</span>
@@ -857,136 +993,6 @@ export function ChatComposer({
                   </select>
                 </label>
               )}
-              <div ref={skillMenuRef} className="relative flex-shrink-0">
-                <button
-                  type="button"
-                  className={classNames(
-                    chipBaseClass,
-                    "gap-1.5 px-2.5",
-                    selectedSkill ? skillPickerActiveClass : chipInactiveClass,
-                  )}
-                  onClick={() => setShowSkillMenu((value) => !value)}
-                  disabled={busy === "send" || isRemoteTarget}
-                  aria-expanded={showSkillMenu}
-                  aria-label={t("skillPicker", { defaultValue: "技能选择" })}
-                  title={t("skillPicker", { defaultValue: "技能选择" })}
-                >
-                  <SparklesIcon size={12} />
-                  <span className="max-w-[9rem] truncate">
-                    {selectedSkill ? (selectedSkill.displayName || selectedSkill.name) : t("skillPicker", { defaultValue: "技能选择" })}
-                  </span>
-                  <ChevronDownIcon size={12} className={classNames("transition-transform", showSkillMenu ? "rotate-180" : "")} />
-                </button>
-
-                {showSkillMenu && (
-                  <div
-                    className={classNames(
-                      "absolute bottom-full left-0 z-40 mb-2 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border shadow-2xl",
-                      isDark
-                        ? "border-white/10 bg-slate-950/95 text-slate-100"
-                        : "border-black/10 bg-white text-gray-900",
-                    )}
-                  >
-                    <div className={classNames("flex items-center gap-1 border-b p-2", isDark ? "border-white/8" : "border-black/8")}>
-                      {(["team", "global"] as SlashSkillScope[]).map((scope) => {
-                        const active = slashSkillScope === scope;
-                        return (
-                          <button
-                            key={scope}
-                            type="button"
-                            className={classNames(
-                              "flex-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors",
-                              active
-                                ? "bg-blue-600 text-white"
-                                : isDark
-                                  ? "text-slate-400 hover:bg-white/[0.06] hover:text-slate-100"
-                                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-900",
-                            )}
-                            onClick={() => setSlashSkillScope(scope)}
-                          >
-                            {scope === "team"
-                              ? t("teamSkills", { defaultValue: "团队 skills" })
-                              : t("globalSkills", { defaultValue: "全局 skills" })}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className={classNames("border-b p-2", isDark ? "border-white/8" : "border-black/8")}>
-                      <input
-                        type="search"
-                        value={skillSearchQuery}
-                        onChange={(event) => setSkillSearchQuery(event.target.value)}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        placeholder={t("searchSkills", { defaultValue: "搜索 skill" })}
-                        className={classNames(
-                          "h-8 w-full rounded-xl border px-3 text-xs outline-none transition-colors",
-                          isDark
-                            ? "border-white/10 bg-white/[0.05] text-slate-100 placeholder:text-slate-500 focus:border-blue-400/60 focus:bg-white/[0.08]"
-                            : "border-gray-200 bg-gray-50 text-gray-900 placeholder:text-gray-400 focus:border-blue-300 focus:bg-white",
-                        )}
-                        autoFocus
-                      />
-                    </div>
-                    <div className="max-h-72 overflow-auto py-1 scrollbar-subtle">
-                      {visibleSkillCommands.length === 0 ? (
-                        <div className={classNames("px-4 py-6 text-center text-xs", isDark ? "text-slate-400" : "text-gray-500")}>
-                          {skillSearchQuery.trim()
-                            ? t("noMatchedSkills", { defaultValue: "没有匹配的 skill" })
-                            : slashSkillScope === "team"
-                              ? t("noTeamSkills", { defaultValue: "当前团队没有可用 skill" })
-                              : t("noGlobalSkills", { defaultValue: "没有可用的全局 skill" })}
-                        </div>
-                      ) : (
-                        visibleSkillCommands.map((item) => {
-                          const active = selectedSkillCommand === item.capabilityId || selectedSkillCommand === item.command;
-                          return (
-                            <button
-                              key={`${item.capabilityId}:${item.name}`}
-                              type="button"
-                              className={classNames(
-                                "flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors",
-                                active
-                                  ? "bg-blue-600 text-white"
-                                  : isDark
-                                    ? "text-slate-200 hover:bg-white/[0.06]"
-                                    : "text-gray-800 hover:bg-gray-50",
-                              )}
-                              onClick={() => {
-                                setSelectedSkillCommand(item.capabilityId);
-                                setShowSkillMenu(false);
-                                requestAnimationFrame(() => composerRef.current?.focus());
-                              }}
-                            >
-                              <span className={classNames(
-                                "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
-                                active
-                                  ? "bg-white/18 text-white"
-                                  : isDark
-                                    ? "bg-white/[0.06] text-blue-200"
-                                    : "bg-blue-50 text-blue-600",
-                              )}>
-                                <SparklesIcon size={14} />
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-semibold">{item.displayName || item.name}</span>
-                                {item.description ? (
-                                  <span className={classNames(
-                                    "mt-0.5 line-clamp-2 block text-xs leading-5",
-                                    active ? "text-blue-50/90" : isDark ? "text-slate-400" : "text-gray-500",
-                                  )}>
-                                    {item.description}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
               <button
                 type="button"
                 className={classNames(
@@ -1143,6 +1149,8 @@ export function ChatComposer({
                   <CloseIcon size={12} />
                 </button>
               )}
+                </div>
+              </div>
             </div>
 
             {remoteReceiptLabel ? (
