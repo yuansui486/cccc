@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ActorProfile, ActorProfileUsage, RUNTIME_INFO, SUPPORTED_RUNTIMES } from "../../../types";
+import { ActorProfile, ActorProfileUsage, OpenCodeDefaultVariant, RUNTIME_INFO, SUPPORTED_RUNTIMES } from "../../../types";
 import * as api from "../../../services/api";
 import { parsePrivateEnvSetText, parsePrivateEnvUnsetText } from "../../../utils/privateEnvInput";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../../utils/capabilityAutoload";
@@ -21,8 +21,9 @@ import {
   settingsWorkspaceSoftPanelClass,
 } from "./types";
 import { CapabilityPicker } from "../../CapabilityPicker";
+import { OpenCodeReasoningEffortSelector } from "../../ReasoningEffortSelector";
 import { BodyPortal } from "../../ui/BodyPortal";
-import { defaultCommandForRuntime } from "../../../utils/runtimePresets";
+import { defaultCommandForRuntime, opencodeDeepSeekModelFromCommand } from "../../../utils/runtimePresets";
 
 interface ActorProfilesTabProps {
   isDark: boolean;
@@ -37,6 +38,7 @@ type EditorState = {
   runtime: string;
   runner: "pty" | "headless";
   command: string;
+  opencodeDefaultVariant: OpenCodeDefaultVariant;
   submit: "enter" | "newline" | "none";
   capabilityAutoloadText: string;
   capabilityDefaultScope: "actor" | "session";
@@ -68,6 +70,7 @@ function buildEditor(profile?: ActorProfile | null): EditorState {
     runtime,
     runner,
     command,
+    opencodeDefaultVariant: profile?.runtime_options?.opencode?.default_variant || "high",
     submit: (String(profile?.submit || "enter") as "enter" | "newline" | "none"),
     capabilityAutoloadText: formatCapabilityIdInput(profile?.capability_defaults?.autoload_capabilities),
     capabilityDefaultScope:
@@ -281,6 +284,14 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
               </div>
             ) : null}
           </div>
+
+          {editor.runtime === "opencode" && opencodeDeepSeekModelFromCommand(editor.command) ? (
+            <OpenCodeReasoningEffortSelector
+              value={editor.opencodeDefaultVariant}
+              disabled={editorBusy}
+              onChange={(value) => setEditor((prev) => ({ ...prev, opencodeDefaultVariant: value }))}
+            />
+          ) : null}
 
           <div>
             <label className={labelClass()}>{t("actorProfiles.submit")}</label>
@@ -683,6 +694,10 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
         runtime: editor.runtime,
         runner: editorSupportsHeadlessRunner ? editor.runner : "pty",
         command: editor.command.trim(),
+        runtime_options:
+          editor.runtime === "opencode" && opencodeDeepSeekModelFromCommand(editor.command)
+            ? { opencode: { default_variant: editor.opencodeDefaultVariant } }
+            : {},
         submit: editor.submit,
         env: {},
         capability_defaults: {

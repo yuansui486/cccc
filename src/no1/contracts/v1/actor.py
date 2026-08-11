@@ -14,6 +14,7 @@ ActorRole = Literal["foreman", "peer"]
 ActorSubmit = Literal["enter", "newline", "none"]
 RunnerKind = Literal["pty", "headless"]
 RuntimeStateSource = Literal["terminal", "app_server"]
+OpenCodeDefaultVariant = Literal["none", "low", "high", "max"]
 AgentRuntime = Literal[
     "amp",
     "auggie",
@@ -36,6 +37,18 @@ InternalActorKind = Literal["voice_secretary"]
 GroupState = Literal["active", "idle", "paused", "stopped"]
 
 
+class OpenCodeRuntimeOptions(BaseModel):
+    default_variant: OpenCodeDefaultVariant = "high"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActorRuntimeOptions(BaseModel):
+    opencode: Optional[OpenCodeRuntimeOptions] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class Actor(BaseModel):
     v: int = 1
     id: str
@@ -53,6 +66,7 @@ class Actor(BaseModel):
     runner: RunnerKind = "pty"  # "pty" for interactive, "headless" for MCP-driven
     runtime: AgentRuntime = "codex"  # Agent CLI runtime
     runtime_state_source: RuntimeStateSource = "terminal"
+    runtime_options: ActorRuntimeOptions = Field(default_factory=ActorRuntimeOptions)
     internal_kind: Optional[InternalActorKind] = None
     avatar_asset_path: str = ""
     profile_id: str = ""

@@ -5,7 +5,7 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ...util.time import utc_now_iso
-from .actor import ActorSubmit, AgentRuntime, RunnerKind
+from .actor import ActorRuntimeOptions, ActorSubmit, AgentRuntime, RunnerKind
 
 class CapabilityDefaults(BaseModel):
     autoload_capabilities: List[str] = Field(default_factory=list)
@@ -35,6 +35,7 @@ class ActorProfile(BaseModel):
     command: List[str] = Field(default_factory=list)
     submit: ActorSubmit = "enter"
     env: Dict[str, str] = Field(default_factory=dict)
+    runtime_options: ActorRuntimeOptions = Field(default_factory=ActorRuntimeOptions)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
     revision: int = 1

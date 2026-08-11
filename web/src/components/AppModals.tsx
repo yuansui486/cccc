@@ -53,7 +53,7 @@ import {
 import { getAckRecipientIdsForEvent, getRecipientActorIdsForEvent } from "../hooks/useSSE";
 import { getChatSession } from "../stores/useUIStore";
 import * as api from "../services/api";
-import { Actor, ActorProfile, RUNTIME_INFO, LedgerEvent, GroupSettings, ChatMessageData, PresentationMessageRef, SupportedRuntime, TextScale, Theme } from "../types";
+import { Actor, ActorProfile, ActorRuntimeOptions, OpenCodeDefaultVariant, RUNTIME_INFO, LedgerEvent, GroupSettings, ChatMessageData, PresentationMessageRef, SupportedRuntime, TextScale, Theme } from "../types";
 
 const ContextModal = lazy(() => import("./ContextModal/index").then((module) => ({ default: module.ContextModal })));
 const SettingsModal = lazy(() => import("./SettingsModal").then((module) => ({ default: module.SettingsModal })));
@@ -689,6 +689,8 @@ export function AppModals({
     const nextCapabilityAutoload = Array.isArray(payload.capabilityAutoload)
       ? normalizeCapabilityIdList(payload.capabilityAutoload)
       : [];
+    const currentRuntimeOptions = editingActor.runtime_options || {};
+    const nextRuntimeOptions = payload.runtimeOptions || {};
 
     const runtimeChanged = mode === "custom" && (!linkedBefore || convertToCustom) && nextRuntime !== currentRuntime;
     const runnerChanged = mode === "custom" && (!linkedBefore || convertToCustom) && nextRunner !== currentRunner;
@@ -696,6 +698,7 @@ export function AppModals({
     const titleChanged = nextTitle !== currentTitle;
     const autoloadChanged =
       JSON.stringify(nextCapabilityAutoload) !== JSON.stringify(currentCapabilityAutoload);
+    const runtimeOptionsChanged = mode === "custom" && JSON.stringify(nextRuntimeOptions) !== JSON.stringify(currentRuntimeOptions);
     const profileChanged = mode === "profile" && !actorProfileMatchesRef(selectedProfile || { id: "", scope: "global", owner_id: "" }, {
       profileId: String(editingActor.profile_id || "").trim(),
       profileScope: String(editingActor.profile_scope || "global").trim() || "global",
@@ -703,7 +706,7 @@ export function AppModals({
     });
     const roleNotesChanged = nextRoleNotes !== currentRoleNotes;
     const hasActorMutation =
-      convertToCustom || runtimeChanged || runnerChanged || commandChanged || titleChanged || autoloadChanged || profileChanged;
+      convertToCustom || runtimeChanged || runnerChanged || commandChanged || titleChanged || autoloadChanged || runtimeOptionsChanged || profileChanged;
 
     if (!options.restart && !hasActorMutation && !willChangeSecrets && !roleNotesChanged) {
       throw new Error(NO_CHANGES_SENTINEL);
@@ -783,7 +786,8 @@ export function AppModals({
           nextRunner !== snapshotRunner ||
           nextCommand !== snapshotCommand ||
           nextTitle !== snapshotTitle ||
-          autoloadChanged;
+          autoloadChanged ||
+          runtimeOptionsChanged;
         if (needCustomPatch) {
           const customResp = await api.updateActor(
             selectedGroupId,
@@ -792,7 +796,7 @@ export function AppModals({
             nextRunner,
             editActorCommand,
             nextTitle,
-            { capabilityAutoload: nextCapabilityAutoload }
+            { capabilityAutoload: nextCapabilityAutoload, runtimeOptions: nextRuntimeOptions }
           );
           if (!customResp.ok) {
             showError(`${customResp.error.code}: ${customResp.error.message}`);
@@ -828,7 +832,8 @@ export function AppModals({
         editActorRoleNotesBaselineRef.current = nextRoleNotes;
       }
 
-      if (options.restart) {
+      const restartForRuntimeOptions = runtimeOptionsChanged && Boolean(editingActor.running ?? editingActor.enabled ?? false);
+      if (options.restart || restartForRuntimeOptions) {
         const restartResp = await api.restartActor(selectedGroupId, actorId);
         if (!restartResp.ok) {
           showError(`${restartResp.error.code}: ${restartResp.error.message}`);
@@ -962,7 +967,7 @@ export function AppModals({
     }
   }, [actors, editingActor, applyEditingActor, setEditingActor]);
 
-  const handleSaveEditActorAsProfile = async (): Promise<SaveActorProfileResult | void> => {
+  const handleSaveEditActorAsProfile = async (runtimeOptions?: ActorRuntimeOptions): Promise<SaveActorProfileResult | void> => {
     if (!editingActor || !selectedGroupId) return;
     const suggested = String(editActorTitle || editingActor.title || editingActor.id || "New Profile").trim();
     const name = window.prompt(t("profileNamePrompt"), suggested);
@@ -976,6 +981,7 @@ export function AppModals({
         command: editActorCommand.trim(),
         submit: String(editingActor.submit || "enter"),
         env: editingActor.env && typeof editingActor.env === "object" ? editingActor.env : {},
+        runtime_options: runtimeOptions || editingActor.runtime_options || {},
         capability_defaults: {
           autoload_capabilities: parseCapabilityIdInput(editActorCapabilityAutoloadText),
           default_scope: "actor",
@@ -1199,7 +1205,7 @@ export function AppModals({
     }
   };
 
-  const handleAddActor = async (avatarFile?: File | null): Promise<boolean> => {
+  const handleAddActor = async (avatarFile?: File | null, defaultVariant?: OpenCodeDefaultVariant): Promise<boolean> => {
     if (pendingActorStart) {
       setBusy("actor-add");
       setAddActorError("");
@@ -1265,6 +1271,7 @@ export function AppModals({
             }
           : {
               capabilityAutoload,
+              runtimeOptions: defaultVariant ? { opencode: { default_variant: defaultVariant } } : undefined,
             }
       );
       if (!resp.ok) {
@@ -1326,7 +1333,7 @@ export function AppModals({
     }
   };
 
-  const handleSaveNewActorAsProfile = async () => {
+  const handleSaveNewActorAsProfile = async (defaultVariant?: OpenCodeDefaultVariant) => {
     if (newActorUseProfile) return;
     const suggested = String(newActorId || `${newActorRuntime}-profile`).trim();
     const name = window.prompt(t("profileNamePrompt"), suggested);
@@ -1341,6 +1348,7 @@ export function AppModals({
         command: commandToUse,
         submit: "enter",
         env: {},
+        runtime_options: defaultVariant ? { opencode: { default_variant: defaultVariant } } : {},
         capability_defaults: {
           autoload_capabilities: parseCapabilityIdInput(newActorCapabilityAutoloadText),
           default_scope: "actor",
@@ -1967,6 +1975,7 @@ export function AppModals({
         developerMode={developerMode}
         runtimes={runtimes}
         runtime={editActorRuntime}
+        runtimeOptions={editingActor?.runtime_options}
         onChangeRuntime={setEditActorRuntime}
         runner={editActorRunner}
         onChangeRunner={setEditActorRunner}

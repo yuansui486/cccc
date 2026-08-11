@@ -8,7 +8,7 @@ from ...contracts.v1 import ActorProfileRef
 from .actor_profile_store import ProfileResolver, normalize_actor_profile_ref
 from .web_model_actor_policy import require_standard_chatgpt_web_model_actor
 
-PROFILE_CONTROLLED_FIELDS = ("runtime", "runner", "command", "submit", "env")
+PROFILE_CONTROLLED_FIELDS = ("runtime", "runner", "command", "submit", "env", "runtime_options")
 _LOG = logging.getLogger("no1.daemon.actor_profile_runtime")
 
 
@@ -92,6 +92,7 @@ def _profile_patch(profile: Dict[str, Any]) -> Dict[str, Any]:
         "submit": str(profile.get("submit") or "enter"),
         # Unified model: profile variables are secret env; keep actor.env empty.
         "env": {},
+        "runtime_options": dict(profile.get("runtime_options") or {}),
     }
 
 
@@ -113,6 +114,7 @@ def _same_profile_config(actor: Dict[str, Any], profile: Dict[str, Any]) -> bool
         and list(actor_command) == list(patch["command"])
         and str(actor.get("submit") or "enter") == str(patch["submit"])
         and dict(actor_env) == dict(patch["env"])
+        and dict(actor.get("runtime_options") or {}) == dict(patch["runtime_options"])
     )
 
 

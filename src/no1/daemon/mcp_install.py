@@ -14,7 +14,7 @@ from ..kernel.runtime import get_onecolleague_mcp_stdio_command
 from ..util.conv import coerce_bool
 from ..util.fs import read_json
 from ..util.process import resolve_subprocess_argv
-from .opencode_provider import merge_opencode_provider_config
+from .opencode_provider import merge_opencode_agent_default, merge_opencode_provider_config
 
 MCP_SERVER_NAME = "onecolleague"
 MCP_SERVER_NAMES = (MCP_SERVER_NAME,)
@@ -237,13 +237,20 @@ def _opencode_mcp_state(env: Dict[str, str] | None) -> str:
     return "ready" if _opencode_mcp_entry_matches_expected(entry, _runtime_expected_onecolleague_command("opencode"), env) else "stale"
 
 
-def prepare_runtime_mcp_env(runtime: str, env: Dict[str, Any] | None) -> Dict[str, str]:
+def prepare_runtime_mcp_env(
+    runtime: str,
+    env: Dict[str, Any] | None,
+    *,
+    command: list[str] | None = None,
+    runtime_options: Dict[str, Any] | None = None,
+) -> Dict[str, str]:
     """Prepare runtime-scoped MCP environment without changing user config."""
     result = {str(k): str(v) for k, v in (env or {}).items() if isinstance(k, str)}
     if str(runtime or "").strip().lower() != "opencode":
         return result
     doc = _read_opencode_inline_config(result)
     doc = merge_opencode_provider_config(doc, result)
+    doc = merge_opencode_agent_default(doc, command=command, runtime_options=runtime_options)
     mcp = doc.get("mcp")
     mcp = dict(mcp) if isinstance(mcp, dict) else {}
     mcp[MCP_SERVER_NAME] = _opencode_onecolleague_entry(result)

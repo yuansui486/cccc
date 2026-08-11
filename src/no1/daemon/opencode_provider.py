@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable
@@ -26,6 +27,8 @@ _DEEPSEEK_V4_REASONING_MODELS = frozenset(
         "deepseek-v4-pro",
     }
 )
+_OPENCODE_REASONING_VARIANTS = frozenset({"none", "low", "high", "max"})
+_LOG = logging.getLogger("no1.daemon.opencode_provider")
 
 # Keep a useful offline fallback. The server catalog is authoritative when it is available.
 OPENCODE_FALLBACK_MODELS = (
@@ -155,9 +158,66 @@ def _deepseek_v4_variants() -> Dict[str, Dict[str, Any]]:
     return {
         "none": {"thinking": {"type": "disabled"}},
         "low": {"thinking": {"type": "enabled"}, "reasoningEffort": "low"},
+        "medium": {"disabled": True},
         "high": {"thinking": {"type": "enabled"}, "reasoningEffort": "high"},
         "max": {"thinking": {"type": "enabled"}, "reasoningEffort": "max"},
     }
+
+
+def _command_option(command: Iterable[str] | None, *names: str) -> str:
+    tokens = [str(value) for value in (command or [])]
+    for index, token in enumerate(tokens):
+        for name in names:
+            if token == name and index + 1 < len(tokens):
+                return tokens[index + 1].strip()
+            prefix = f"{name}="
+            if token.startswith(prefix):
+                return token[len(prefix) :].strip()
+    return ""
+
+
+def opencode_model_from_command(command: Iterable[str] | None) -> str:
+    value = _command_option(command, "-m", "--model")
+    if "/" in value:
+        provider, _, model = value.partition("/")
+        if provider.strip().lower() == OPENCODE_PROVIDER_ID:
+            return model.strip()
+    return value.strip()
+
+
+def _default_variant(runtime_options: Dict[str, Any] | None) -> str:
+    opencode = runtime_options.get("opencode") if isinstance(runtime_options, dict) else None
+    raw = str(opencode.get("default_variant") or "high").strip().lower() if isinstance(opencode, dict) else "high"
+    return raw if raw in _OPENCODE_REASONING_VARIANTS else "high"
+
+
+def merge_opencode_agent_default(
+    doc: Dict[str, Any],
+    *,
+    command: Iterable[str] | None,
+    runtime_options: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """Inject the configured startup variant for the selected DeepSeek model."""
+    result = dict(doc or {})
+    model = opencode_model_from_command(command).lower()
+    if model not in _DEEPSEEK_V4_REASONING_MODELS:
+        return result
+    agent_name = _command_option(command, "--agent") or str(result.get("default_agent") or "build").strip() or "build"
+    agents = result.get("agent")
+    agents = dict(agents) if isinstance(agents, dict) else {}
+    current = agents.get(agent_name)
+    current = dict(current) if isinstance(current, dict) else {}
+    variant = _default_variant(runtime_options)
+    current.update({"model": f"{OPENCODE_PROVIDER_ID}/{model}", "variant": variant})
+    agents[agent_name] = current
+    result["agent"] = agents
+    _LOG.info(
+        "OpenCode DeepSeek startup config model=%s agent=%s variants=none,low,high,max default_variant=%s",
+        model,
+        agent_name,
+        variant,
+    )
+    return result
 
 
 def _model_config(models: Iterable[str]) -> Dict[str, Dict[str, Any]]:

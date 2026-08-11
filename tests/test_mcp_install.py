@@ -38,7 +38,12 @@ class TestMcpInstall(unittest.TestCase):
         ), patch(
             "no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]
         ):
-            prepared = prepare_runtime_mcp_env("opencode", env)
+            prepared = prepare_runtime_mcp_env(
+                "opencode",
+                env,
+                command=["opencode", "-m", "onecolleague/deepseek-v4-pro"],
+                runtime_options={"opencode": {"default_variant": "max"}},
+            )
         doc = json.loads(prepared["OPENCODE_CONFIG_CONTENT"])
         self.assertEqual(doc["mcp"]["other"]["command"], ["other"])
         self.assertEqual(doc["mcp"]["onecolleague"]["command"], ["/abs/onecolleague", "mcp"])
@@ -50,8 +55,11 @@ class TestMcpInstall(unittest.TestCase):
         self.assertTrue(provider["models"])
         self.assertEqual(
             list(provider["models"]["deepseek-v4-pro"]["variants"]),
-            ["none", "low", "high", "max"],
+            ["none", "low", "medium", "high", "max"],
         )
+        self.assertTrue(provider["models"]["deepseek-v4-pro"]["variants"]["medium"]["disabled"])
+        self.assertEqual(doc["agent"]["build"]["model"], "onecolleague/deepseek-v4-pro")
+        self.assertEqual(doc["agent"]["build"]["variant"], "max")
         with patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]):
             self.assertTrue(is_mcp_installed("opencode", env=prepared))
 

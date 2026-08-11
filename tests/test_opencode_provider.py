@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from no1.daemon.opencode_provider import get_opencode_model_catalog, merge_opencode_provider_config
+from no1.daemon.opencode_provider import (
+    get_opencode_model_catalog,
+    merge_opencode_agent_default,
+    merge_opencode_provider_config,
+    opencode_model_from_command,
+)
 
 
 class TestOpenCodeProvider(unittest.TestCase):
@@ -54,6 +59,7 @@ class TestOpenCodeProvider(unittest.TestCase):
         expected_variants = {
             "none": {"thinking": {"type": "disabled"}},
             "low": {"thinking": {"type": "enabled"}, "reasoningEffort": "low"},
+            "medium": {"disabled": True},
             "high": {"thinking": {"type": "enabled"}, "reasoningEffort": "high"},
             "max": {"thinking": {"type": "enabled"}, "reasoningEffort": "max"},
         }
@@ -62,6 +68,42 @@ class TestOpenCodeProvider(unittest.TestCase):
             self.assertEqual(models[model]["variants"], expected_variants)
             self.assertNotIn("reasoningEffort", models[model]["variants"]["none"])
         self.assertEqual(models["qwen3.6-plus"], {"name": "qwen3.6-plus"})
+
+    def test_merge_agent_default_preserves_fields_and_defaults_legacy_actor_to_high(self) -> None:
+        result = merge_opencode_agent_default(
+            {"agent": {"build": {"prompt": "keep", "temperature": 0.2}}},
+            command=["opencode", "--auto", "-m", "onecolleague/deepseek-v4-pro"],
+            runtime_options=None,
+        )
+        self.assertEqual(
+            result["agent"]["build"],
+            {
+                "prompt": "keep",
+                "temperature": 0.2,
+                "model": "onecolleague/deepseek-v4-pro",
+                "variant": "high",
+            },
+        )
+
+    def test_merge_agent_default_uses_selected_agent_and_variant(self) -> None:
+        result = merge_opencode_agent_default(
+            {"agent": {"review": {"description": "keep"}}},
+            command=["opencode", "--model=onecolleague/deepseek-v4-flash", "--agent", "review"],
+            runtime_options={"opencode": {"default_variant": "none"}},
+        )
+        self.assertEqual(result["agent"]["review"]["variant"], "none")
+        self.assertEqual(result["agent"]["review"]["model"], "onecolleague/deepseek-v4-flash")
+        self.assertEqual(result["agent"]["review"]["description"], "keep")
+
+    def test_non_deepseek_command_does_not_change_agents(self) -> None:
+        source = {"agent": {"build": {"variant": "custom"}}}
+        result = merge_opencode_agent_default(
+            source,
+            command=["opencode", "-m", "onecolleague/gpt-5.4"],
+            runtime_options={"opencode": {"default_variant": "max"}},
+        )
+        self.assertEqual(result, source)
+        self.assertEqual(opencode_model_from_command(["opencode", "--model=onecolleague/gpt-5.4"]), "gpt-5.4")
 
     def test_catalog_keeps_locked_models_and_caches_server_response(self) -> None:
         with tempfile.TemporaryDirectory() as td:

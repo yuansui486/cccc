@@ -79,6 +79,7 @@ def handle_actor_add(
     by = str(args.get("by") or "user").strip()
     command_raw = args.get("command")
     env_raw = args.get("env")
+    runtime_options_raw = args.get("runtime_options")
     capability_autoload_raw = args.get("capability_autoload")
     capability_hidden_raw = args.get("capability_hidden")
     env_private_raw = args.get("env_private")
@@ -91,6 +92,8 @@ def handle_actor_add(
     is_admin = coerce_bool(args.get("is_admin"), default=False)
     if not group_id:
         return _error("missing_group_id", "missing group_id")
+    if runtime_options_raw is not None and not isinstance(runtime_options_raw, dict):
+        return _error("actor_add_failed", "runtime_options must be an object")
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
@@ -138,6 +141,7 @@ def handle_actor_add(
             runtime = str(linked_profile.get("runtime") or "codex").strip() or "codex"
             requested_runner = str(linked_profile.get("runner") or "pty").strip() or "pty"
             submit = str(linked_profile.get("submit") or submit or "enter").strip() or "enter"
+            runtime_options_raw = linked_profile.get("runtime_options")
             linked_profile_secrets = load_actor_profile_secrets(linked_profile_ref)
             if len(linked_profile_secrets) > private_env_max_keys:
                 raise ValueError("too many profile private env keys configured")
@@ -260,6 +264,7 @@ def handle_actor_add(
             capability_hidden=list(capability_hidden_raw) if isinstance(capability_hidden_raw, list) else None,
             runner=runner,  # type: ignore
             runtime=runtime,  # type: ignore
+            runtime_options=runtime_options_raw if isinstance(runtime_options_raw, dict) else None,
         )
 
         effective_actor_id = str(actor.get("id") or actor_id).strip() or actor_id

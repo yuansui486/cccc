@@ -148,6 +148,8 @@ def autostart_running_groups(
             launch_env = prepare_runtime_mcp_env(
                 runtime,
                 inject_actor_context_env(effective_env, group.group_id, actor_id),
+                command=list(launch_spec["effective_command"]),
+                runtime_options=dict((launch_spec.get("actor") or {}).get("runtime_options") or {}),
             )
 
             ok_mcp = True

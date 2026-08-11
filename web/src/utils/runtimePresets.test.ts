@@ -12,6 +12,7 @@ import {
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
   needsDedicatedOneColleagueKey,
+  opencodeDeepSeekModelFromCommand,
   opencodeRuntimePreset,
   opencodeRuntimePresetId,
   runtimePresetById,
@@ -21,6 +22,12 @@ import {
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
+  it("detects DeepSeek models that support OpenCode reasoning variants", () => {
+    expect(opencodeDeepSeekModelFromCommand("opencode -m onecolleague/deepseek-v4-pro")).toBe("deepseek-v4-pro");
+    expect(opencodeDeepSeekModelFromCommand(["opencode", "--model=deepseek-v4-flash"])).toBe("deepseek-v4-flash");
+    expect(opencodeDeepSeekModelFromCommand("opencode -m onecolleague/gpt-5.4")).toBe("");
+  });
+
   it("provides shared runtime default commands for profile editors", () => {
     expect(defaultCommandForRuntime("opencode")).toBe("opencode --auto");
     expect(defaultCommandForRuntime("codex")).toBe(

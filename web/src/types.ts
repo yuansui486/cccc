@@ -286,6 +286,7 @@ export type Actor = {
   runner_effective?: string;
   runtime?: string;
   runtime_state_source?: "terminal" | "app_server" | string;
+  runtime_options?: ActorRuntimeOptions;
   runtime_session_status?: string | null;
   runtime_session_resume_eligible?: boolean | null;
   runtime_session_last_resume_error?: string | null;
@@ -312,6 +313,7 @@ export type ActorProfile = {
   command: string[];
   submit: "enter" | "newline" | "none";
   env: Record<string, string>;
+  runtime_options?: ActorRuntimeOptions;
   capability_defaults?: {
     autoload_capabilities?: string[];
     default_scope?: "actor" | "session";
@@ -321,6 +323,14 @@ export type ActorProfile = {
   updated_at: string;
   revision: number;
   usage_count?: number;
+};
+
+export type OpenCodeDefaultVariant = "none" | "low" | "high" | "max";
+
+export type ActorRuntimeOptions = {
+  opencode?: {
+    default_variant?: OpenCodeDefaultVariant;
+  };
 };
 
 export type ActorProfileUsage = {

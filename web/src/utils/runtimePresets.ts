@@ -495,6 +495,13 @@ function modelFromCommand(command: string[]): string {
   return "";
 }
 
+export function opencodeDeepSeekModelFromCommand(command: string | string[] | undefined): string {
+  const tokens = Array.isArray(command) ? command : splitCommand(String(command || ""));
+  const model = modelFromCommand(tokens);
+  const normalized = model.includes("/") ? model.split("/", 2)[1] || "" : model;
+  return ["deepseek-v4-flash", "deepseek-v4-pro"].includes(normalized.toLowerCase()) ? normalized.toLowerCase() : "";
+}
+
 function normalizeCodexReasoningEffort(value: string): CodexReasoningEffort {
   const normalized = String(value || "").trim().toLowerCase();
   if (

@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable, Dict, Literal, Optional, Union
 from fastapi import Depends, HTTPException, Path as FastApiPath, Request, WebSocket
 from pydantic import BaseModel, ConfigDict, Field
 
-from ...contracts.v1.actor import ActorSubmit, AgentRuntime, RunnerKind, RuntimeStateSource
+from ...contracts.v1.actor import ActorRuntimeOptions, ActorSubmit, AgentRuntime, RunnerKind, RuntimeStateSource
 from ...contracts.v1.automation import AutomationRule
 from ...kernel.access_tokens import list_access_tokens, lookup_access_token
 from .middleware import get_access_token_cookie
@@ -116,6 +116,7 @@ class ActorCreateRequest(BaseModel):
     env: Dict[str, str] = Field(default_factory=dict)
     capability_autoload: list[str] = Field(default_factory=list)
     capability_hidden: list[str] = Field(default_factory=list)
+    runtime_options: ActorRuntimeOptions = Field(default_factory=ActorRuntimeOptions)
     # Write-only runtime-only secrets (stored under ONECOLLEAGUE_HOME/state; never persisted into ledger).
     # Values are never returned by the daemon; only keys can be listed via the dedicated endpoints.
     env_private: Optional[Dict[str, str]] = None
@@ -141,6 +142,7 @@ class ActorUpdateRequest(BaseModel):
     runner: Optional[RunnerKind] = None
     runtime: Optional[AgentRuntime] = None
     runtime_state_source: Optional[RuntimeStateSource] = None
+    runtime_options: Optional[ActorRuntimeOptions] = None
     enabled: Optional[bool] = None
     profile_id: Optional[str] = None
     profile_scope: Optional[Literal["global", "user"]] = None

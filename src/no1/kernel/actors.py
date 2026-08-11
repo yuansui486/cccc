@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from ..contracts.v1 import Actor, ActorRole, ActorSubmit, RunnerKind, AgentRuntime, RuntimeStateSource
+from ..contracts.v1 import Actor, ActorRole, ActorRuntimeOptions, ActorSubmit, RunnerKind, AgentRuntime, RuntimeStateSource
 from ..util.time import utc_now_iso
 from ..util.conv import coerce_bool
 from .group import Group
@@ -201,6 +201,7 @@ def add_actor(
     runner: RunnerKind = "pty",
     runtime: AgentRuntime = "codex",
     runtime_state_source: Optional[RuntimeStateSource] = None,
+    runtime_options: Optional[Dict[str, Any]] = None,
     internal_kind: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Add a new actor to the group.
@@ -246,6 +247,7 @@ def add_actor(
             requested_source=runtime_state_source,
             command=command_list,
         ),
+        runtime_options=ActorRuntimeOptions.model_validate(runtime_options or {}),
         internal_kind=(str(internal_kind or "").strip() or None),
         created_at=now,
         updated_at=now,
@@ -415,6 +417,15 @@ def update_actor(group: Group, actor_id: str, patch: Dict[str, Any]) -> Dict[str
             and not item.get("command")
         ):
             raise ValueError("custom runtime requires a command (PTY runner)")
+
+    if "runtime_options" in patch:
+        raw_runtime_options = patch.get("runtime_options")
+        if raw_runtime_options is None:
+            item["runtime_options"] = {}
+        elif isinstance(raw_runtime_options, dict):
+            item["runtime_options"] = ActorRuntimeOptions.model_validate(raw_runtime_options).model_dump(exclude_none=True)
+        else:
+            raise ValueError("invalid runtime_options")
 
     if "runtime_state_source" in patch:
         source = patch.get("runtime_state_source")

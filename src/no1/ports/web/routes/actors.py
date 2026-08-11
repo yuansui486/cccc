@@ -712,6 +712,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "env": dict(req.env),
                     "capability_autoload": list(req.capability_autoload or []),
                     "capability_hidden": list(req.capability_hidden or []),
+                    "runtime_options": req.runtime_options.model_dump(exclude_none=True),
                     "env_private": env_private,
                     "profile_id": profile_id,
                     **_profile_ref_args(scope=req.profile_scope, owner_id=req.profile_owner),
@@ -762,6 +763,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch["runtime"] = req.runtime
         if req.runtime_state_source is not None:
             patch["runtime_state_source"] = req.runtime_state_source
+        if req.runtime_options is not None:
+            patch["runtime_options"] = req.runtime_options.model_dump(exclude_none=True)
         if req.enabled is not None:
             patch["enabled"] = bool(req.enabled)
         if req.avatar_asset_path is not None:

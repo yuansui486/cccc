@@ -282,6 +282,9 @@ def _save_actor_profile(
     command_in = profile.get("command") if "command" in profile else existing.get("command")
     command = [] if runtime == "web_model" else _normalize_profile_command(runtime=runtime, runner=runner, command=command_in)
 
+    runtime_options_in = profile.get("runtime_options") if "runtime_options" in profile else existing.get("runtime_options")
+    runtime_options = dict(runtime_options_in) if isinstance(runtime_options_in, dict) else {}
+
     capability_defaults_in = profile.get("capability_defaults") if "capability_defaults" in profile else existing.get("capability_defaults")
     capability_defaults: Optional[Dict[str, Any]] = None
     if capability_defaults_in is not None:
@@ -321,6 +324,7 @@ def _save_actor_profile(
         "command": command,
         "submit": submit,
         "env": env,
+        "runtime_options": runtime_options,
         "created_at": str(existing.get("created_at") or now),
         "updated_at": now,
         "revision": int(existing.get("revision") or 0) + 1,

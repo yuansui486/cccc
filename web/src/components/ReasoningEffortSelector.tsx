@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { OpenCodeDefaultVariant } from "../types";
 import type { ClaudeReasoningEffort, CodexReasoningEffort } from "../utils/runtimePresets";
 import { Button } from "./ui/button";
 
@@ -23,6 +24,13 @@ const CLAUDE_REASONING_OPTIONS: Array<ReasoningEffortOption<ClaudeReasoningEffor
   { value: "high", labelKey: "reasoningMedium" },
   { value: "medium", labelKey: "reasoningLow" },
   { value: "low", labelKey: "reasoningMinimal" },
+];
+
+const OPENCODE_REASONING_OPTIONS: Array<ReasoningEffortOption<OpenCodeDefaultVariant>> = [
+  { value: "none", labelKey: "reasoningNone" },
+  { value: "low", labelKey: "reasoningLow" },
+  { value: "high", labelKey: "reasoningHigh" },
+  { value: "max", labelKey: "reasoningMax" },
 ];
 
 function modeButtonClass(selected: boolean): string {
@@ -117,4 +125,18 @@ export function ClaudeReasoningEffortSelector({
   labelPlacement?: ReasoningEffortLayout;
 }) {
   return <ReasoningEffortButtonGrid options={CLAUDE_REASONING_OPTIONS} value={value} disabled={disabled} onChange={onChange} layout={labelPlacement} />;
+}
+
+export function OpenCodeReasoningEffortSelector({
+  value,
+  disabled,
+  onChange,
+  labelPlacement = "stacked",
+}: {
+  value: OpenCodeDefaultVariant;
+  disabled?: boolean;
+  onChange: (value: OpenCodeDefaultVariant) => void;
+  labelPlacement?: ReasoningEffortLayout;
+}) {
+  return <ReasoningEffortButtonGrid options={OPENCODE_REASONING_OPTIONS} value={value} disabled={disabled} onChange={onChange} layout={labelPlacement} />;
 }

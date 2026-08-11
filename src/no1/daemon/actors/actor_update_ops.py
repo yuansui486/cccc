@@ -118,6 +118,7 @@ def handle_actor_update(
         "runner",
         "runtime",
         "runtime_state_source",
+        "runtime_options",
     }
     unknown = set(patch.keys()) - allowed
     if unknown:
@@ -336,6 +337,8 @@ def handle_actor_update(
                 launch_env = prepare_runtime_mcp_env(
                     runtime,
                     inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id),
+                    command=list(launch_spec["effective_command"]),
+                    runtime_options=dict(actor.get("runtime_options") or {}),
                 )
                 if runner_effective != "headless":
                     if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):

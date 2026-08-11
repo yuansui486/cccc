@@ -397,6 +397,8 @@ def handle_actor_restart(
         launch_env = prepare_runtime_mcp_env(
             runtime,
             inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id),
+            command=list(launch_spec["effective_command"]),
+            runtime_options=dict((launch_spec.get("actor") or {}).get("runtime_options") or {}),
         )
         if runner_effective != "headless":
             try:

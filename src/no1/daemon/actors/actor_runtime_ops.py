@@ -317,6 +317,8 @@ def start_actor_process(
     launch_env = prepare_runtime_mcp_env(
         runtime,
         inject_actor_context_env(effective_env, group.group_id, actor_id),
+        command=list(effective_cmd),
+        runtime_options=dict(actor.get("runtime_options") or {}),
     )
 
     if effective_runner != "headless":

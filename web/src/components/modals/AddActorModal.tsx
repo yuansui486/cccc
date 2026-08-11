@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActorProfile,
+  OpenCodeDefaultVariant,
   RuntimeInfo,
   SupportedRuntime,
   RUNTIME_INFO,
@@ -11,7 +12,7 @@ import { useModalA11y } from "../../hooks/useModalA11y";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
 import { ActorAvatarField } from "../ActorAvatarField";
-import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
+import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector, OpenCodeReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
@@ -27,6 +28,7 @@ import {
   mergeRuntimeAuthSecret,
   needsDedicatedOneColleagueKey,
   OPENCODE_FALLBACK_MODELS,
+  opencodeDeepSeekModelFromCommand,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -89,9 +91,9 @@ export interface AddActorModalProps {
   canAddActor: boolean;
   addActorDisabledReason: string;
 
-  onAddActor: (avatarFile?: File | null) => Promise<boolean> | boolean;
+  onAddActor: (avatarFile?: File | null, defaultVariant?: OpenCodeDefaultVariant) => Promise<boolean> | boolean;
   onEditCreatedActor?: () => void;
-  onSaveAsProfile: () => void;
+  onSaveAsProfile: (defaultVariant?: OpenCodeDefaultVariant) => void;
   onClose: () => void;
   onCancelAndReset: () => void;
 }
@@ -184,6 +186,7 @@ export function AddActorModal({
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
+  const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
   const primedRuntimePresetRef = useRef("");
   const primedRuntimeAuthRef = useRef("");
   const primedCommandRef = useRef("");
@@ -246,6 +249,7 @@ export function AddActorModal({
   const previewTitle = String(newActorId || "").trim() || suggestedActorId;
   const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(newActorCommand) || "medium";
   const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(newActorCommand) || "high";
+  const showOpenCodeReasoning = !newActorUseProfile && newActorRuntime === "opencode" && !!opencodeDeepSeekModelFromCommand(newActorCommand);
 
   useEffect(() => {
     if (!isOpen) {
@@ -337,7 +341,7 @@ export function AddActorModal({
 
   const handleSubmit = async () => {
     try {
-      const ok = await Promise.resolve(onAddActor(avatarFile));
+      const ok = await Promise.resolve(onAddActor(avatarFile, showOpenCodeReasoning ? opencodeDefaultVariant : undefined));
       if (ok) {
         setAvatarFile(null);
         setSelectedRuntimePresetId("");
@@ -350,6 +354,7 @@ export function AddActorModal({
   const handleCancel = () => {
     setAvatarFile(null);
     setSelectedRuntimePresetId("");
+    setOpencodeDefaultVariant("high");
     onCancelAndReset();
   };
 
@@ -544,6 +549,14 @@ export function AddActorModal({
                       {newActorRuntime === "claude" ? (
                         <ClaudeReasoningEffortSelector value={selectedClaudeReasoningEffort} onChange={updateClaudeReasoningEffort} labelPlacement="inline" />
                       ) : null}
+
+                      {showOpenCodeReasoning ? (
+                        <OpenCodeReasoningEffortSelector
+                          value={opencodeDefaultVariant}
+                          onChange={setOpencodeDefaultVariant}
+                          labelPlacement="inline"
+                        />
+                      ) : null}
                     </>
                   )}
                 </div>
@@ -737,7 +750,7 @@ export function AddActorModal({
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={onSaveAsProfile}
+                        onClick={() => onSaveAsProfile(showOpenCodeReasoning ? opencodeDefaultVariant : undefined)}
                         disabled={busy === "actor-profile-save" || busy === "actor-add"}
                       >
                         {busy === "actor-profile-save" ? t("savingProfile") : t("addToActorProfiles")}

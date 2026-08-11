@@ -1,4 +1,4 @@
-import type { Actor, ActorProfile, ActorProfileUsage } from "../../types";
+import type { Actor, ActorProfile, ActorProfileUsage, ActorRuntimeOptions } from "../../types";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import {
   actorsReadOnlyRequestKey,
@@ -81,6 +81,7 @@ export async function addActor(
     title?: string;
     capabilityAutoload?: string[];
     capabilityHidden?: string[];
+    runtimeOptions?: ActorRuntimeOptions;
   },
 ) {
   clearActorsReadOnlyRequest(groupId);
@@ -101,6 +102,7 @@ export async function addActor(
       capability_autoload: Array.isArray(options?.capabilityAutoload) ? options.capabilityAutoload : [],
       capability_hidden: Array.isArray(options?.capabilityHidden) ? options.capabilityHidden : [],
       title: options?.title || "",
+      runtime_options: options?.runtimeOptions,
       default_scope_key: "",
       by: "user",
     }),
@@ -122,6 +124,7 @@ export async function updateActor(
     enabled?: boolean;
     capabilityAutoload?: string[];
     capabilityHidden?: string[];
+    runtimeOptions?: ActorRuntimeOptions;
   },
 ) {
   clearActorsReadOnlyRequest(groupId);
@@ -138,6 +141,7 @@ export async function updateActor(
   if (typeof opts?.enabled === "boolean") body.enabled = opts.enabled;
   if (Array.isArray(opts?.capabilityAutoload)) body.capability_autoload = opts.capabilityAutoload;
   if (Array.isArray(opts?.capabilityHidden)) body.capability_hidden = opts.capabilityHidden;
+  if (opts?.runtimeOptions) body.runtime_options = opts.runtimeOptions;
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}`, {
     method: "POST",
     body: JSON.stringify(body),

@@ -1,4 +1,4 @@
-import { ActorProfile, RuntimeInfo, SupportedRuntime, RUNTIME_INFO } from "../../types";
+import { ActorProfile, ActorRuntimeOptions, OpenCodeDefaultVariant, RuntimeInfo, SupportedRuntime, RUNTIME_INFO } from "../../types";
 import { useTranslation } from "react-i18next";
 import { CircleHelp } from "lucide-react";
 import { BASIC_MCP_CONFIG_SNIPPET } from "../../utils/mcpConfigSnippets";
@@ -12,7 +12,7 @@ import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
 import { HoverTooltip } from "../HoverTooltip";
 import { ActorAvatarField } from "../ActorAvatarField";
-import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
+import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector, OpenCodeReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
 import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
 import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
@@ -26,6 +26,7 @@ import {
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
   OPENCODE_FALLBACK_MODELS,
+  opencodeDeepSeekModelFromCommand,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -52,6 +53,7 @@ export interface EditActorSavePayload {
   capabilityAutoload: string[];
   profileId?: string;
   convertToCustom?: boolean;
+  runtimeOptions?: ActorRuntimeOptions;
 }
 
 export interface SaveActorProfileResult {
@@ -74,6 +76,7 @@ export interface EditActorModalProps {
   developerMode: boolean;
   runtimes: RuntimeInfo[];
   runtime: SupportedRuntime;
+  runtimeOptions?: ActorRuntimeOptions;
   onChangeRuntime: (runtime: SupportedRuntime) => void;
   runner: "pty" | "headless";
   onChangeRunner: (runner: "pty" | "headless") => void;
@@ -95,7 +98,7 @@ export interface EditActorModalProps {
   actorProfiles: ActorProfile[];
   actorProfilesBusy: boolean;
   onRequestActorProfiles?: () => Promise<void> | void;
-  onSaveAsProfile: () => Promise<SaveActorProfileResult | void>;
+  onSaveAsProfile: (runtimeOptions?: ActorRuntimeOptions) => Promise<SaveActorProfileResult | void>;
   onAvatarChanged?: () => Promise<void>;
   inlineNotice?: string;
   onCancel: () => void;
@@ -165,6 +168,7 @@ export function EditActorModal({
   developerMode,
   runtimes,
   runtime,
+  runtimeOptions,
   onChangeRuntime,
   runner,
   onChangeRunner,
@@ -211,6 +215,7 @@ export function EditActorModal({
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
+  const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
   const secretFetchSeqRef = useRef(0);
   const presetSecretsPrimedRef = useRef("");
   const runtimeAuthPrimedRef = useRef("");
@@ -431,6 +436,13 @@ export function EditActorModal({
   const requireCommand = !effectiveLinked && editMode === "custom" && (runtime === "custom" || !available);
   const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(command) || "medium";
   const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(command) || "high";
+  const showOpenCodeReasoning = editMode === "custom" && !effectiveLinked && runtime === "opencode" && !!opencodeDeepSeekModelFromCommand(command);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const configured = runtimeOptions?.opencode?.default_variant;
+    setOpencodeDefaultVariant(configured === "none" || configured === "low" || configured === "max" ? configured : "high");
+  }, [isOpen, groupId, actorId, runtimeOptions]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -509,7 +521,7 @@ export function EditActorModal({
     setSecretsError("");
     setLocalNotice("");
     try {
-      const result = await onSaveAsProfile();
+      const result = await onSaveAsProfile(showOpenCodeReasoning ? { opencode: { default_variant: opencodeDefaultVariant } } : undefined);
       const profileId = String(result?.profileId || "").trim();
       if (profileId && result?.useNow) {
         setPendingConvertToCustom(false);
@@ -653,6 +665,7 @@ export function EditActorModal({
         clear: secretsClearAll,
         capabilityAutoload: parseCapabilityIdInput(capabilityAutoloadText),
         convertToCustom: linked && pendingConvertToCustom,
+        runtimeOptions: showOpenCodeReasoning ? { opencode: { default_variant: opencodeDefaultVariant } } : {},
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
@@ -906,6 +919,14 @@ export function EditActorModal({
                         value={selectedClaudeReasoningEffort}
                         disabled={busy === "actor-update"}
                         onChange={updateClaudeReasoningEffort}
+                      />
+                    ) : null}
+
+                    {showOpenCodeReasoning ? (
+                      <OpenCodeReasoningEffortSelector
+                        value={opencodeDefaultVariant}
+                        disabled={busy === "actor-update"}
+                        onChange={setOpencodeDefaultVariant}
                       />
                     ) : null}
 

@@ -17,6 +17,7 @@ import { getRuntimeIndicatorState } from "../utils/statusIndicators";
 import { getEffectiveActorRunner } from "../utils/headlessRuntimeSupport";
 import { copyTextToClipboard } from "../utils/copy";
 import { getStoppedTerminalOutputText } from "../utils/stoppedTerminalOutput";
+import { opencodeDeepSeekModelFromCommand } from "../utils/runtimePresets";
 import { fetchTerminalTail } from "../services/api/diagnostics";
 import { useAgentTerminalConnection } from "./agentTerminal/useAgentTerminalConnection";
 
@@ -204,6 +205,20 @@ export function AgentTab({
   }, [activated, loadObservability, observabilityLoaded]);
 
   const rtInfo = (actor.runtime && RUNTIME_INFO[actor.runtime]) ? RUNTIME_INFO[actor.runtime] : RUNTIME_INFO.codex;
+  const openCodeReasoningVariant = String(actor.runtime || "").toLowerCase() === "opencode" && opencodeDeepSeekModelFromCommand(actor.command)
+    ? String(actor.runtime_options?.opencode?.default_variant || "high")
+    : "";
+  const openCodeReasoningLabel = openCodeReasoningVariant
+    ? t(
+        openCodeReasoningVariant === "none"
+          ? "reasoningNone"
+          : openCodeReasoningVariant === "low"
+            ? "reasoningLow"
+            : openCodeReasoningVariant === "max"
+              ? "reasoningMax"
+              : "reasoningHigh",
+      )
+    : "";
   const unreadCount = actor.unread_count ?? 0;
   const statusClamp2Style: CSSProperties = {
     display: "-webkit-box",
@@ -575,6 +590,7 @@ export function AgentTab({
                 <div className={classNames("mt-0.5 text-xs truncate", "text-[var(--color-text-tertiary)]")}>
                   {rtInfo?.label || t('custom')} • {runtimeStatusText}
                   {isHeadless && ` • ${t('headless')}`}
+                  {openCodeReasoningLabel && ` • ${t("reasoningEffort")}: ${openCodeReasoningLabel}`}
                 </div>
                 {/* Mobile-only: condensed single-line agent state */}
                 <div
