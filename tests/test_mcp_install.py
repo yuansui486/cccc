@@ -29,7 +29,13 @@ class TestMcpInstall(unittest.TestCase):
             "ONECOLLEAGUE_ACTOR_ID": "peer1",
             "OPENCODE_CONFIG_CONTENT": json.dumps({"mcp": {"other": {"type": "local", "command": ["other"]}}}),
         }
-        with patch("no1.daemon.opencode_provider.load_opencode_model_catalog", return_value=[{"model": "gpt-5.4", "locked": True}]), patch(
+        with patch(
+            "no1.daemon.opencode_provider.load_opencode_model_catalog",
+            return_value=[
+                {"model": "gpt-5.4", "locked": True},
+                {"model": "deepseek-v4-pro", "locked": False},
+            ],
+        ), patch(
             "no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]
         ):
             prepared = prepare_runtime_mcp_env("opencode", env)
@@ -42,6 +48,10 @@ class TestMcpInstall(unittest.TestCase):
         self.assertEqual(provider["options"]["baseURL"], "https://peer.shierkeji.com/v1")
         self.assertEqual(provider["options"]["apiKey"], "{env:ONECOLLEAGUE_API_KEY}")
         self.assertTrue(provider["models"])
+        self.assertEqual(
+            list(provider["models"]["deepseek-v4-pro"]["variants"]),
+            ["none", "low", "high", "max"],
+        )
         with patch("no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command", return_value=["/abs/onecolleague", "mcp"]):
             self.assertTrue(is_mcp_installed("opencode", env=prepared))
 

@@ -61,6 +61,22 @@ opencode -m onecolleague/<server-model-id>
 如需使用 OpenCode 的其他 provider，保留原有配置即可；OneColleague provider 不会删除用户的
 其他 provider 或 MCP 配置。
 
+## DeepSeek V4 思考深度
+
+`deepseek-v4-pro` 和 `deepseek-v4-flash` 提供以下 OpenCode 变体：
+
+- `none`：关闭思考模式。
+- `low`：开启思考模式，使用低思考强度。
+- `high`：开启思考模式，使用高思考强度。
+- `max`：开启思考模式，使用最大思考强度。
+
+未选择变体时不额外传递思考参数，使用服务端默认值（思考模式开启，强度为 `high`）。在 OpenCode
+中使用 `variant_cycle` 对应的快捷键可以循环切换变体。OneColleague 会按 Chat Completions 格式
+发送 `thinking.type` 和 `reasoning_effort`；`none` 只发送关闭开关，不会发送不受支持的
+`reasoning_effort=none`。
+
+变体配置在 actor 启动时注入。配置更新后，需要重启已经运行的 OpenCode actor。
+
 ## MCP 工具与排障
 
 OneColleague 的 OpenCode actor 会在进程启动时通过 `OPENCODE_CONFIG_CONTENT` 注入名为

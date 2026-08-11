@@ -39,6 +39,30 @@ class TestOpenCodeProvider(unittest.TestCase):
         self.assertTrue(result["provider"]["onecolleague"]["models"])
         get.assert_not_called()
 
+    def test_merge_provider_adds_deepseek_v4_reasoning_variants(self) -> None:
+        with patch(
+            "no1.daemon.opencode_provider.load_opencode_model_catalog",
+            return_value=[
+                {"model": "deepseek-v4-pro", "locked": False},
+                {"model": "deepseek-v4-flash", "locked": False},
+                {"model": "qwen3.6-plus", "locked": False},
+            ],
+        ):
+            result = merge_opencode_provider_config({})
+
+        models = result["provider"]["onecolleague"]["models"]
+        expected_variants = {
+            "none": {"thinking": {"type": "disabled"}},
+            "low": {"thinking": {"type": "enabled"}, "reasoningEffort": "low"},
+            "high": {"thinking": {"type": "enabled"}, "reasoningEffort": "high"},
+            "max": {"thinking": {"type": "enabled"}, "reasoningEffort": "max"},
+        }
+        for model in ("deepseek-v4-pro", "deepseek-v4-flash"):
+            self.assertTrue(models[model]["reasoning"])
+            self.assertEqual(models[model]["variants"], expected_variants)
+            self.assertNotIn("reasoningEffort", models[model]["variants"]["none"])
+        self.assertEqual(models["qwen3.6-plus"], {"name": "qwen3.6-plus"})
+
     def test_catalog_keeps_locked_models_and_caches_server_response(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             response = Mock()

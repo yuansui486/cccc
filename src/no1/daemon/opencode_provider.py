@@ -20,6 +20,13 @@ OPENCODE_API_KEY_ENV = "ONECOLLEAGUE_API_KEY"
 OPENCODE_MODEL_CATALOG_TTL_SECONDS = 600
 OPENCODE_MODEL_CATALOG_TIMEOUT_SECONDS = 1.5
 
+_DEEPSEEK_V4_REASONING_MODELS = frozenset(
+    {
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    }
+)
+
 # Keep a useful offline fallback. The server catalog is authoritative when it is available.
 OPENCODE_FALLBACK_MODELS = (
     "gpt-5.4",
@@ -144,8 +151,26 @@ def opencode_model_ids(env: Dict[str, Any] | None = None) -> list[str]:
     return [str(item.get("model") or "").strip() for item in load_opencode_model_catalog(env) if str(item.get("model") or "").strip()]
 
 
-def _model_config(models: Iterable[str]) -> Dict[str, Dict[str, str]]:
-    return {model: {"name": model} for model in models if str(model or "").strip()}
+def _deepseek_v4_variants() -> Dict[str, Dict[str, Any]]:
+    return {
+        "none": {"thinking": {"type": "disabled"}},
+        "low": {"thinking": {"type": "enabled"}, "reasoningEffort": "low"},
+        "high": {"thinking": {"type": "enabled"}, "reasoningEffort": "high"},
+        "max": {"thinking": {"type": "enabled"}, "reasoningEffort": "max"},
+    }
+
+
+def _model_config(models: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    result: Dict[str, Dict[str, Any]] = {}
+    for value in models:
+        model = str(value or "").strip()
+        if not model:
+            continue
+        config: Dict[str, Any] = {"name": model}
+        if model.lower() in _DEEPSEEK_V4_REASONING_MODELS:
+            config.update({"reasoning": True, "variants": _deepseek_v4_variants()})
+        result[model] = config
+    return result
 
 
 def merge_opencode_provider_config(doc: Dict[str, Any], env: Dict[str, Any] | None = None) -> Dict[str, Any]:

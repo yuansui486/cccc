@@ -248,7 +248,7 @@ def prepare_runtime_mcp_env(runtime: str, env: Dict[str, Any] | None) -> Dict[st
     mcp = dict(mcp) if isinstance(mcp, dict) else {}
     mcp[MCP_SERVER_NAME] = _opencode_onecolleague_entry(result)
     doc["mcp"] = mcp
-    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(doc, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(doc, ensure_ascii=True, separators=(",", ":"))
     return result
 
 
