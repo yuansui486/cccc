@@ -358,6 +358,7 @@ class TestActorRuntimeOps(unittest.TestCase):
 
     def test_opencode_actor_start_injects_inline_mcp_config_into_pty_env(self) -> None:
         from no1.daemon.actors import actor_runtime_ops
+        from no1.kernel.runtime import ensure_opencode_auto_command
 
         captured: dict[str, object] = {}
 
@@ -412,7 +413,9 @@ class TestActorRuntimeOps(unittest.TestCase):
                     find_scope_url=lambda _group, _scope_key: td,
                     effective_runner_kind=lambda runner: runner,
                     merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
-                    normalize_runtime_command=lambda _runtime, command: list(command),
+                    normalize_runtime_command=lambda runtime, command: (
+                        ensure_opencode_auto_command(command) if runtime == "opencode" else list(command)
+                    ),
                     ensure_mcp_installed=lambda _runtime, _cwd, **kwargs: "OPENCODE_CONFIG_CONTENT" in kwargs.get("env", {}),
                     inject_actor_context_env=inject_context,
                     prepare_pty_env=lambda env: dict(env),
@@ -426,6 +429,7 @@ class TestActorRuntimeOps(unittest.TestCase):
 
         self.assertTrue(bool(result.get("success")), result.get("error"))
         prepare_launch_env.assert_called_once()
+        self.assertEqual(captured.get("base_command"), ["opencode", "--auto"])
         env = captured.get("env") if isinstance(captured.get("env"), dict) else {}
         doc = json.loads(str(env.get("OPENCODE_CONFIG_CONTENT") or "{}"))
         self.assertEqual(doc["mcp"]["other"]["command"], ["other"])

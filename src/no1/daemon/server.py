@@ -28,6 +28,7 @@ from ..kernel.settings import (
 )
 from ..kernel.terminal_transcript import get_terminal_transcript_settings
 from ..kernel.messaging import disabled_recipient_actor_ids, enabled_recipient_actor_ids
+from ..kernel.runtime import ensure_opencode_auto_command
 from ..kernel.runtime_state_source import actor_uses_codex_app_server_state
 from ..paths import ensure_home
 from ..runners import pty as pty_runner
@@ -339,6 +340,8 @@ def _normalize_runtime_command(runtime: str, command: list[str], *, env: Dict[st
     """
     rt = str(runtime or "").strip()
     cmd = [str(x) for x in (command or []) if str(x).strip()]
+    if rt == "opencode":
+        return ensure_opencode_auto_command(cmd)
     if not cmd:
         return []
 

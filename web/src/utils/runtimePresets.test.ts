@@ -6,6 +6,7 @@ import {
   commandHasModelFlag,
   codexReasoningEffortFromCommand,
   commandForRuntimePreset,
+  defaultCommandForRuntime,
   defaultRuntimePresetFor,
   mergePresetSecrets,
   mergePresetUnsetKeys,
@@ -20,6 +21,16 @@ import {
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
+  it("provides shared runtime default commands for profile editors", () => {
+    expect(defaultCommandForRuntime("opencode")).toBe("opencode --auto");
+    expect(defaultCommandForRuntime("codex")).toBe(
+      "codex -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox --search"
+    );
+    expect(defaultCommandForRuntime("gemini")).toBe("gemini --yolo");
+    expect(defaultCommandForRuntime("custom-runtime")).toBe("custom-runtime");
+    expect(defaultCommandForRuntime("  ")).toBe("");
+  });
+
   it("warns when a Peer runtime only has an ordinary OpenAI key", () => {
     expect(needsDedicatedOneColleagueKey("opencode", 'OPENAI_API_KEY="openai"')).toBe(true);
     expect(needsDedicatedOneColleagueKey("codex", '$env:OPENAI_API_KEY = "openai"')).toBe(true);

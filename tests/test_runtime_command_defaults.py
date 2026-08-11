@@ -12,6 +12,40 @@ class TestRuntimeCommandDefaults(unittest.TestCase):
         self.assertEqual(get_runtime_command_with_flags("hermes"), ["hermes", "--tui", "--yolo"])
         self.assertEqual(get_runtime_command_with_flags("opencode"), ["opencode", "--auto"])
 
+    def test_direct_opencode_commands_force_auto_mode(self) -> None:
+        from no1.kernel.runtime import ensure_opencode_auto_command
+
+        cases = (
+            ([], ["opencode", "--auto"]),
+            (["opencode"], ["opencode", "--auto"]),
+            (["opencode", "-m", "onecolleague/gpt-5.4"], ["opencode", "--auto", "-m", "onecolleague/gpt-5.4"]),
+            ([r"C:\Tools\opencode.cmd", "--no-auto", "--model=onecolleague/gpt-5.5"], [r"C:\Tools\opencode.cmd", "--auto", "--model=onecolleague/gpt-5.5"]),
+            (["/usr/local/bin/opencode", "--auto=false", "run", "task"], ["/usr/local/bin/opencode", "--auto", "run", "task"]),
+            (["opencode.exe", "--auto", "--auto=true", "--mini"], ["opencode.exe", "--auto", "--mini"]),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(ensure_opencode_auto_command(command), expected)
+
+    def test_opencode_wrapper_commands_are_not_rewritten(self) -> None:
+        from no1.kernel.runtime import ensure_opencode_auto_command
+
+        self.assertEqual(
+            ensure_opencode_auto_command(["npx", "opencode", "--model", "onecolleague/gpt-5.4"]),
+            ["npx", "opencode", "--model", "onecolleague/gpt-5.4"],
+        )
+
+    def test_daemon_launch_normalizer_applies_opencode_auto_mode(self) -> None:
+        from no1.daemon import server as daemon_server
+
+        self.assertEqual(
+            daemon_server._normalize_runtime_command(
+                "opencode",
+                ["opencode", "-m", "onecolleague/gpt-5.4"],
+            ),
+            ["opencode", "--auto", "-m", "onecolleague/gpt-5.4"],
+        )
+
     def test_onecolleague_mcp_stdio_command_prefers_unresolved_venv_entrypoint(self) -> None:
         from no1.kernel.runtime import get_onecolleague_mcp_stdio_command
 

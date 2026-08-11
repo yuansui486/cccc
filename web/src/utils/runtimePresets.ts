@@ -44,11 +44,24 @@ export function needsDedicatedOneColleagueKey(runtime: string, secretsText: stri
 }
 
 const FALLBACK_RUNTIME_COMMANDS: Partial<Record<SupportedRuntime, string[]>> = {
+  amp: ["amp"],
+  auggie: ["auggie"],
   claude: ["claude", "--dangerously-skip-permissions"],
   codex: ["codex", "-c", "shell_environment_policy.inherit=all", "--dangerously-bypass-approvals-and-sandbox", "--search"],
+  droid: ["droid", "--auto", "high"],
+  gemini: ["gemini", "--yolo"],
+  hermes: ["hermes"],
   kimi: ["kimi", "--yolo"],
+  neovate: ["neovate"],
   opencode: ["opencode", "--auto"],
 };
+
+export function defaultCommandForRuntime(runtime: string): string {
+  const normalizedRuntime = String(runtime || "").trim();
+  if (!normalizedRuntime) return "";
+  const fallback = FALLBACK_RUNTIME_COMMANDS[normalizedRuntime as SupportedRuntime];
+  return fallback?.length ? fallback.join(" ") : normalizedRuntime;
+}
 
 export const RUNTIME_PRESETS: RuntimePreset[] = [
   {

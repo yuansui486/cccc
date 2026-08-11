@@ -22,6 +22,7 @@ import {
 } from "./types";
 import { CapabilityPicker } from "../../CapabilityPicker";
 import { BodyPortal } from "../../ui/BodyPortal";
+import { defaultCommandForRuntime } from "../../../utils/runtimePresets";
 
 interface ActorProfilesTabProps {
   isDark: boolean;
@@ -45,24 +46,6 @@ type EditorState = {
 function formatCommand(cmd: string[] | undefined): string {
   const parts = Array.isArray(cmd) ? cmd.filter((item) => typeof item === "string" && item.trim()) : [];
   return parts.join(" ");
-}
-
-const RUNTIME_DEFAULT_COMMANDS: Record<string, string> = {
-  amp: "amp",
-  auggie: "auggie",
-  claude: "claude --dangerously-skip-permissions",
-  codex: "codex -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox --search",
-  droid: "droid --auto high",
-  gemini: "gemini --yolo",
-  kimi: "kimi --yolo",
-  neovate: "neovate",
-  opencode: "opencode",
-  custom: "",
-};
-
-function defaultCommandForRuntime(runtime: string): string {
-  const key = String(runtime || "").trim();
-  return String(RUNTIME_DEFAULT_COMMANDS[key] || key || "").trim();
 }
 
 function modeButtonClass(selected: boolean): string {

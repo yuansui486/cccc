@@ -1,6 +1,7 @@
 """Runtime detection and configuration for agent CLIs."""
 from __future__ import annotations
 
+import ntpath
 import shutil
 import sys
 from dataclasses import dataclass
@@ -288,6 +289,28 @@ def get_runtime_command_with_flags(name: str) -> List[str]:
         "web_model": [],
     }
     return commands.get(name, [name])
+
+
+def ensure_opencode_auto_command(command: List[str]) -> List[str]:
+    """Force direct OpenCode launches into automatic permission mode.
+
+    Wrapper commands are intentionally left unchanged because OneColleague cannot
+    safely determine where a wrapper expects OpenCode's global options.
+    """
+    cmd = [str(item) for item in list(command or []) if str(item).strip()]
+    if not cmd:
+        return get_runtime_command_with_flags("opencode")
+    executable = str(Path(ntpath.basename(str(cmd[0] or ""))).stem or "").strip().lower()
+    if executable != "opencode":
+        return cmd
+
+    args: List[str] = []
+    for item in cmd[1:]:
+        normalized = str(item or "").strip().lower()
+        if normalized in {"--auto", "--no-auto"} or normalized.startswith("--auto="):
+            continue
+        args.append(item)
+    return [cmd[0], "--auto", *args]
 
 
 def runtime_start_preflight_error(runtime: str, command: Optional[List[str]] = None, *, runner: str = "pty") -> str:
