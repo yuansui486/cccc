@@ -53,7 +53,7 @@ import {
 import { getAckRecipientIdsForEvent, getRecipientActorIdsForEvent } from "../hooks/useSSE";
 import { getChatSession } from "../stores/useUIStore";
 import * as api from "../services/api";
-import { Actor, ActorProfile, ActorRuntimeOptions, OpenCodeDefaultVariant, RUNTIME_INFO, LedgerEvent, GroupSettings, ChatMessageData, PresentationMessageRef, SupportedRuntime, TextScale, Theme } from "../types";
+import { Actor, ActorProfile, ActorRuntimeOptions, RUNTIME_INFO, LedgerEvent, GroupSettings, ChatMessageData, PresentationMessageRef, SupportedRuntime, TextScale, Theme } from "../types";
 
 const ContextModal = lazy(() => import("./ContextModal/index").then((module) => ({ default: module.ContextModal })));
 const SettingsModal = lazy(() => import("./SettingsModal").then((module) => ({ default: module.SettingsModal })));
@@ -1205,7 +1205,7 @@ export function AppModals({
     }
   };
 
-  const handleAddActor = async (avatarFile?: File | null, defaultVariant?: OpenCodeDefaultVariant): Promise<boolean> => {
+  const handleAddActor = async (avatarFile?: File | null, runtimeOptions?: ActorRuntimeOptions): Promise<boolean> => {
     if (pendingActorStart) {
       setBusy("actor-add");
       setAddActorError("");
@@ -1271,7 +1271,7 @@ export function AppModals({
             }
           : {
               capabilityAutoload,
-              runtimeOptions: defaultVariant ? { opencode: { default_variant: defaultVariant } } : undefined,
+              runtimeOptions,
             }
       );
       if (!resp.ok) {
@@ -1333,7 +1333,7 @@ export function AppModals({
     }
   };
 
-  const handleSaveNewActorAsProfile = async (defaultVariant?: OpenCodeDefaultVariant) => {
+  const handleSaveNewActorAsProfile = async (runtimeOptions?: ActorRuntimeOptions) => {
     if (newActorUseProfile) return;
     const suggested = String(newActorId || `${newActorRuntime}-profile`).trim();
     const name = window.prompt(t("profileNamePrompt"), suggested);
@@ -1348,7 +1348,7 @@ export function AppModals({
         command: commandToUse,
         submit: "enter",
         env: {},
-        runtime_options: defaultVariant ? { opencode: { default_variant: defaultVariant } } : {},
+        runtime_options: runtimeOptions || {},
         capability_defaults: {
           autoload_capabilities: parseCapabilityIdInput(newActorCapabilityAutoloadText),
           default_scope: "actor",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActorProfile,
+  ActorRuntimeOptions,
   OpenCodeDefaultVariant,
   RuntimeInfo,
   SupportedRuntime,
@@ -16,21 +17,25 @@ import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector, OpenCodeRe
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
-import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
+import { RuntimeModelSelector } from "../RuntimeModelSelector";
 import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
+  clearKnownPresetSecrets,
   commandHasModelFlag,
   commandForRuntimePreset,
   codexReasoningEffortFromCommand,
   defaultRuntimePresetFor,
   mergePresetSecrets,
   mergeRuntimeAuthSecret,
+  modelFromRuntimeConfiguration,
   needsDedicatedOneColleagueKey,
   OPENCODE_FALLBACK_MODELS,
   opencodeDeepSeekModelFromCommand,
   runtimePresetById,
+  runtimePresetForModel,
   runtimePresetIdFor,
+  withRuntimeModel,
   withClaudeReasoningEffort,
   withCodexReasoningEffort,
   type ClaudeReasoningEffort,
@@ -91,9 +96,9 @@ export interface AddActorModalProps {
   canAddActor: boolean;
   addActorDisabledReason: string;
 
-  onAddActor: (avatarFile?: File | null, defaultVariant?: OpenCodeDefaultVariant) => Promise<boolean> | boolean;
+  onAddActor: (avatarFile?: File | null, runtimeOptions?: ActorRuntimeOptions) => Promise<boolean> | boolean;
   onEditCreatedActor?: () => void;
-  onSaveAsProfile: (defaultVariant?: OpenCodeDefaultVariant) => void;
+  onSaveAsProfile: (runtimeOptions?: ActorRuntimeOptions) => void;
   onClose: () => void;
   onCancelAndReset: () => void;
 }
@@ -184,6 +189,7 @@ export function AddActorModal({
   const { t } = useTranslation("actors");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
@@ -191,10 +197,6 @@ export function AddActorModal({
   const primedRuntimeAuthRef = useRef("");
   const primedCommandRef = useRef("");
   const doneHubCodexApiKey = useDoneHubStore((state) => String(state.session?.codex_api_key || "").trim());
-  const runtimeChoiceGroups = useMemo(
-    () => buildRuntimeChoiceGroups(runtimes, runtimePriceMap, opencodeModels),
-    [runtimes, runtimePriceMap, opencodeModels],
-  );
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
   useEffect(() => {
@@ -222,6 +224,7 @@ export function AddActorModal({
   const handleClose = () => {
     setAvatarFile(null);
     setSelectedRuntimePresetId("");
+    setSelectedModel(null);
     onClose();
   };
 
@@ -236,7 +239,11 @@ export function AddActorModal({
       ? selectedRuntimePresetId
       : derivedRuntimePresetId;
   const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
-  const runtimeChoiceDescription = selectedRuntimePreset?.description || RUNTIME_INFO[newActorRuntime]?.desc || "";
+  const effectiveSelectedModel = modelFromRuntimeConfiguration(
+    newActorRuntime,
+    newActorCommand,
+    selectedModel === null && newActorRuntime === "kimi" ? defaultRuntimePresetFor("kimi", opencodeModels)?.model : selectedModel,
+  );
   const newActorSecretsPlaceholder = secretsPlaceholderForRuntime(newActorRuntime);
   const needsOneColleagueKey = !newActorUseProfile
     && needsDedicatedOneColleagueKey(newActorRuntime, newActorSecretsSetText);
@@ -250,6 +257,10 @@ export function AddActorModal({
   const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(newActorCommand) || "medium";
   const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(newActorCommand) || "high";
   const showOpenCodeReasoning = !newActorUseProfile && newActorRuntime === "opencode" && !!opencodeDeepSeekModelFromCommand(newActorCommand);
+  const currentRuntimeOptions: ActorRuntimeOptions = {
+    ...(effectiveSelectedModel ? { selected_model: effectiveSelectedModel } : {}),
+    ...(showOpenCodeReasoning ? { opencode: { default_variant: opencodeDefaultVariant } } : {}),
+  };
 
   useEffect(() => {
     if (!isOpen) {
@@ -312,7 +323,7 @@ export function AddActorModal({
 
   useEffect(() => {
     if (!isOpen || newActorUseProfile || newActorCommand.trim()) return;
-    const defaultPreset = defaultRuntimePresetFor(newActorRuntime);
+    const defaultPreset = defaultRuntimePresetFor(newActorRuntime, opencodeModels);
     const commandToPrime = defaultPreset
       ? commandForRuntimePreset(defaultPreset, runtimeInfo).trim()
       : defaultCommand.trim();
@@ -321,11 +332,8 @@ export function AddActorModal({
     if (primedCommandRef.current === primeKey) return;
     primedCommandRef.current = primeKey;
     // The modal defaults are derived from the selected runtime preset.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNewActorCommand(commandToPrime);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (defaultPreset) setSelectedRuntimePresetId(defaultPreset.id);
-  }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, setNewActorCommand]);
+  }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, opencodeModels, setNewActorCommand]);
 
   if (!isOpen) return null;
 
@@ -341,10 +349,11 @@ export function AddActorModal({
 
   const handleSubmit = async () => {
     try {
-      const ok = await Promise.resolve(onAddActor(avatarFile, showOpenCodeReasoning ? opencodeDefaultVariant : undefined));
+      const ok = await Promise.resolve(onAddActor(avatarFile, currentRuntimeOptions));
       if (ok) {
         setAvatarFile(null);
         setSelectedRuntimePresetId("");
+        setSelectedModel(null);
       }
     } catch (e) {
       setAddActorError(e instanceof Error ? e.message : t("failedToAddAgent"));
@@ -354,6 +363,7 @@ export function AddActorModal({
   const handleCancel = () => {
     setAvatarFile(null);
     setSelectedRuntimePresetId("");
+    setSelectedModel(null);
     setOpencodeDefaultVariant("high");
     onCancelAndReset();
   };
@@ -376,6 +386,49 @@ export function AddActorModal({
         : newActorCommand.trim() || defaultCommand.trim();
     setNewActorCommand(withClaudeReasoningEffort(baseCommand, effort));
     if (preset) setSelectedRuntimePresetId(preset.id);
+  };
+
+  const applyPresetSecrets = (preset: ReturnType<typeof runtimePresetForModel>) => {
+    if (!preset) return;
+    const apiKey = getCurrentDoneHubCodexApiKey();
+    setNewActorSecretsSetText(mergePresetSecrets(newActorSecretsSetText, preset, apiKey));
+    if (preset.envPrivate || (["codex", "opencode"].includes(preset.runtime) && apiKey)) {
+      setShowAdvancedActor(true);
+    }
+  };
+
+  const changeRuntime = (next: SupportedRuntime) => {
+    const nextInfo = runtimes.find((item) => item.name === next);
+    const preset = defaultRuntimePresetFor(next, opencodeModels);
+    const nextCommand = preset
+      ? commandForRuntimePreset(preset, nextInfo)
+      : String(nextInfo?.recommended_command || "").trim();
+    setNewActorRuntime(next);
+    if (!supportsStandardWebHeadlessRuntime(next)) setNewActorRunner("pty");
+    setNewActorCommand(nextCommand);
+    setSelectedRuntimePresetId(preset?.id || "");
+    setSelectedModel(String(preset?.model || ""));
+    const apiKey = doneHubCodexApiKey || getCurrentDoneHubCodexApiKey();
+    const clearedSecrets = clearKnownPresetSecrets(newActorSecretsSetText);
+    setNewActorSecretsSetText(
+      preset
+        ? mergePresetSecrets(clearedSecrets, preset, apiKey)
+        : mergeRuntimeAuthSecret(clearedSecrets, next, apiKey),
+    );
+    if (preset?.envPrivate || (["codex", "opencode"].includes(next) && apiKey)) setShowAdvancedActor(true);
+    setOpencodeDefaultVariant("high");
+  };
+
+  const changeModel = (model: string) => {
+    const normalized = model.trim();
+    const preset = runtimePresetForModel(newActorRuntime, normalized, opencodeModels);
+    const baseCommand = newActorCommand.trim() || defaultCommand.trim();
+    const nextCommand = withRuntimeModel(newActorRuntime, baseCommand, normalized);
+    setNewActorCommand(nextCommand);
+    setSelectedModel(normalized);
+    setSelectedRuntimePresetId(preset?.id || "");
+    applyPresetSecrets(preset);
+    if (!opencodeDeepSeekModelFromCommand(nextCommand)) setOpencodeDefaultVariant("high");
   };
 
   return (
@@ -493,54 +546,30 @@ export function AddActorModal({
                     </>
                   ) : (
                     <>
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <label className="text-sm font-medium text-[var(--color-text-muted)] sm:w-16 sm:shrink-0">{t("aiRuntime")}</label>
-                        <div className="min-w-0 flex-1">
-                          <select
-                            className="onecolleague-runtime-select w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
-                            value={effectiveRuntimePresetId || newActorRuntime}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              const preset = runtimePresetById(raw);
-                              const next = (preset?.runtime || raw) as SupportedRuntime;
-                              const nextRuntimeInfo = runtimes.find((r) => r.name === next);
-                              const presetCommand = preset ? commandForRuntimePreset(preset, nextRuntimeInfo) : "";
-                              setNewActorRuntime(next);
-                              if (!supportsStandardWebHeadlessRuntime(next)) setNewActorRunner("pty");
-                              setNewActorCommand(presetCommand);
-                              setSelectedRuntimePresetId(preset?.id || "");
-                              if (preset) {
-                                const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
-                                setNewActorSecretsSetText(
-                                  mergePresetSecrets(newActorSecretsSetText, preset, doneHubCodexApiKey)
-                                );
-                                if (
-                                  preset.envPrivate ||
-                                  (["codex", "opencode"].includes(preset.runtime) && doneHubCodexApiKey)
-                                ) {
-                                  setShowAdvancedActor(true);
-                                }
-                              }
-                            }}
-                          >
-                            {runtimeChoiceGroups.map((group) => (
-                              <optgroup key={group.labelKey} label={t(group.labelKey, { defaultValue: group.labelFallback })}>
-                                {group.options.map((option) => (
-                                  <option key={option.id} value={option.id} disabled={option.disabled}>
-                                    {option.label}
-                                    {option.disabled ? ` ${t("notInstalled")}` : ""}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                          {runtimeChoiceDescription ? (
-                            <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                              {runtimeChoiceDescription}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
+                      <RuntimeModelSelector
+                        runtime={newActorRuntime}
+                        model={effectiveSelectedModel}
+                        runtimes={runtimes}
+                        onRuntimeChange={changeRuntime}
+                        onModelChange={changeModel}
+                        priceMap={runtimePriceMap}
+                        opencodeModels={opencodeModels}
+                        disabled={busy === "actor-add"}
+                        labels={{
+                          runtime: t("runtime"),
+                          model: t("model"),
+                          runtimeSearch: t("searchRuntime"),
+                          modelSearch: t("searchModel"),
+                          noResults: t("noMatchingOptions"),
+                          defaultModel: t("useRuntimeDefaultModel"),
+                          customModel: t("enterOtherModel"),
+                          customPlaceholder: t("modelIdPlaceholder"),
+                          apply: t("applyModel"),
+                          notInstalled: t("notInstalled"),
+                          modelRequired: t("modelRequired"),
+                          modelInvalid: t("modelInvalid"),
+                        }}
+                      />
 
                       {newActorRuntime === "codex" ? (
                         <CodexReasoningEffortSelector value={selectedCodexReasoningEffort} onChange={updateCodexReasoningEffort} labelPlacement="inline" />
@@ -750,7 +779,7 @@ export function AddActorModal({
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() => onSaveAsProfile(showOpenCodeReasoning ? opencodeDefaultVariant : undefined)}
+                        onClick={() => onSaveAsProfile(currentRuntimeOptions)}
                         disabled={busy === "actor-profile-save" || busy === "actor-add"}
                       >
                         {busy === "actor-profile-save" ? t("savingProfile") : t("addToActorProfiles")}

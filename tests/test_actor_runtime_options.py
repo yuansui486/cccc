@@ -36,6 +36,18 @@ class TestActorRuntimeOptions(unittest.TestCase):
         payload = profile.model_dump(exclude_none=True)
         self.assertEqual(payload["runtime_options"]["opencode"]["default_variant"], "low")
 
+    def test_selected_model_round_trips_for_actor_and_profile(self) -> None:
+        actor = Actor(id="kimi", runtime="kimi", runtime_options={"selected_model": "kimi-k2.6"})
+        profile = ActorProfile(id="gemini", runtime="gemini", runtime_options={"selected_model": "gemini-2.5-pro"})
+        self.assertEqual(actor.runtime_options.selected_model, "kimi-k2.6")
+        self.assertEqual(profile.model_dump(exclude_none=True)["runtime_options"]["selected_model"], "gemini-2.5-pro")
+
+    def test_selected_model_is_trimmed_and_unsafe_values_are_rejected(self) -> None:
+        actor = Actor(id="trimmed", runtime="codex", runtime_options={"selected_model": "  gpt-5.5  "})
+        self.assertEqual(actor.runtime_options.selected_model, "gpt-5.5")
+        with self.assertRaises(ValidationError):
+            Actor(id="unsafe", runtime="codex", runtime_options={"selected_model": "gpt-5.5;whoami"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,24 +1,31 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRuntimeChoiceGroups } from "./runtimeChoiceGroups";
+import { buildRuntimeChoiceGroups, buildRuntimeModelOptions, buildRuntimeSelectorOptions } from "./runtimeChoiceGroups";
 import {
   claudeReasoningEffortFromCommand,
+  clearKnownPresetSecrets,
   commandHasModelFlag,
   codexReasoningEffortFromCommand,
   commandForRuntimePreset,
   defaultCommandForRuntime,
   defaultRuntimePresetFor,
   mergePresetSecrets,
+  mergeAllPresetUnsetKeys,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
+  modelFromRuntimeConfiguration,
   needsDedicatedOneColleagueKey,
   opencodeDeepSeekModelFromCommand,
   opencodeRuntimePreset,
   opencodeRuntimePresetId,
   runtimePresetById,
   runtimePresetIdFor,
+  runtimePresetForModel,
+  runtimeSupportsModelSelection,
+  validateRuntimeModelId,
   withClaudeReasoningEffort,
   withCodexReasoningEffort,
+  withRuntimeModel,
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
@@ -36,6 +43,54 @@ describe("runtime presets", () => {
     expect(defaultCommandForRuntime("gemini")).toBe("gemini --yolo");
     expect(defaultCommandForRuntime("custom-runtime")).toBe("custom-runtime");
     expect(defaultCommandForRuntime("  ")).toBe("");
+  });
+
+  it("separates runtime installation state from the selected runtime model", () => {
+    const runtimes = buildRuntimeSelectorOptions([
+      { name: "codex", display_name: "Codex CLI", available: true, recommended_command: "codex" },
+      { name: "claude", display_name: "Claude Code", available: false, recommended_command: "claude" },
+    ]);
+    expect(runtimes.find((item) => item.value === "codex")?.disabled).toBe(false);
+    expect(runtimes.find((item) => item.value === "claude")?.disabled).toBe(true);
+
+    const codexModels = buildRuntimeModelOptions("codex");
+    expect(codexModels.map((item) => item.value)).toEqual(["gpt-5.4", "gpt-5.5"]);
+    expect(buildRuntimeModelOptions("claude").every((item) => item.preset.runtime === "claude")).toBe(true);
+    expect(buildRuntimeModelOptions("opencode", null, ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
+  });
+
+  it("reads, replaces, and clears models using each known runtime protocol", () => {
+    expect(modelFromRuntimeConfiguration("codex", "codex --search -m gpt-5.5")).toBe("gpt-5.5");
+    expect(modelFromRuntimeConfiguration("opencode", "opencode -m onecolleague/deepseek-v4-pro")).toBe("deepseek-v4-pro");
+    expect(modelFromRuntimeConfiguration("kimi", "kimi --yolo", "kimi-k2.6")).toBe("kimi-k2.6");
+    expect(withRuntimeModel("codex", "codex -m old --search", "gpt-5.5")).toBe("codex --search -m gpt-5.5");
+    expect(withRuntimeModel("claude", "claude --model=old --effort high", "new-model")).toBe(
+      "claude --effort high --model new-model"
+    );
+    expect(withRuntimeModel("gemini", "gemini --model old --yolo", "")).toBe("gemini --yolo");
+    expect(withRuntimeModel("opencode", "opencode --auto", "new-model")).toBe(
+      "opencode --auto -m onecolleague/new-model"
+    );
+    expect(withRuntimeModel("kimi", "kimi --yolo", "kimi-k2.6")).toBe("kimi --yolo");
+  });
+
+  it("allows manual models only for known protocols and rejects unsafe IDs", () => {
+    expect(runtimeSupportsModelSelection("codex")).toBe(true);
+    expect(runtimeSupportsModelSelection("kimi")).toBe(true);
+    expect(runtimeSupportsModelSelection("droid")).toBe(false);
+    expect(validateRuntimeModelId("onecolleague/deepseek-v4-pro")).toBe("");
+    expect(validateRuntimeModelId(" model with spaces ")).not.toBe("");
+    expect(validateRuntimeModelId("model;Remove-Item")).not.toBe("");
+    expect(runtimePresetForModel("opencode", "new-model", ["new-model"])?.model).toBe("new-model");
+  });
+
+  it("clears stale preset secrets when switching to a runtime without a model preset", () => {
+    const current = 'ANTHROPIC_MODEL="old"\nONECOLLEAGUE_API_KEY="old-key"\nCUSTOM_FLAG="keep"';
+    expect(clearKnownPresetSecrets(current)).toBe('CUSTOM_FLAG="keep"');
+    const unset = mergeAllPresetUnsetKeys("CUSTOM_OLD");
+    expect(unset).toContain("ANTHROPIC_MODEL");
+    expect(unset).toContain("ONECOLLEAGUE_API_KEY");
+    expect(unset).toContain("CUSTOM_OLD");
   });
 
   it("warns when a Peer runtime only has an ordinary OpenAI key", () => {

@@ -14,21 +14,26 @@ import { HoverTooltip } from "../HoverTooltip";
 import { ActorAvatarField } from "../ActorAvatarField";
 import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector, OpenCodeReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
-import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
+import { RuntimeModelSelector } from "../RuntimeModelSelector";
 import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
+  clearKnownPresetSecrets,
   commandHasModelFlag,
   commandForRuntimePreset,
   codexReasoningEffortFromCommand,
   defaultRuntimePresetFor,
   mergePresetSecrets,
+  mergeAllPresetUnsetKeys,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
+  modelFromRuntimeConfiguration,
   OPENCODE_FALLBACK_MODELS,
   opencodeDeepSeekModelFromCommand,
   runtimePresetById,
+  runtimePresetForModel,
   runtimePresetIdFor,
+  withRuntimeModel,
   withClaudeReasoningEffort,
   withCodexReasoningEffort,
   type ClaudeReasoningEffort,
@@ -213,17 +218,15 @@ export function EditActorModal({
   const [secretsPrimed, setSecretsPrimed] = useState(false);
   const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
   const secretFetchSeqRef = useRef(0);
+  const selectedModelInitRef = useRef("");
   const presetSecretsPrimedRef = useRef("");
   const runtimeAuthPrimedRef = useRef("");
   const doneHubCodexApiKey = useDoneHubStore((state) => String(state.session?.codex_api_key || "").trim());
-  const runtimeChoiceGroups = useMemo(
-    () => buildRuntimeChoiceGroups(runtimes, runtimePriceMap, opencodeModels),
-    [runtimes, runtimePriceMap, opencodeModels],
-  );
   const modalStateRef = useRef<{
     groupId: string;
     actorId: string;
@@ -433,10 +436,19 @@ export function EditActorModal({
       ? selectedRuntimePresetId
       : derivedRuntimePresetId;
   const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
+  const effectiveSelectedModel = modelFromRuntimeConfiguration(
+    runtime,
+    command,
+    selectedModel === null ? runtimeOptions?.selected_model : selectedModel,
+  );
   const requireCommand = !effectiveLinked && editMode === "custom" && (runtime === "custom" || !available);
   const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(command) || "medium";
   const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(command) || "high";
   const showOpenCodeReasoning = editMode === "custom" && !effectiveLinked && runtime === "opencode" && !!opencodeDeepSeekModelFromCommand(command);
+  const currentRuntimeOptions: ActorRuntimeOptions = {
+    ...(effectiveSelectedModel ? { selected_model: effectiveSelectedModel } : {}),
+    ...(showOpenCodeReasoning ? { opencode: { default_variant: opencodeDefaultVariant } } : {}),
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -445,15 +457,27 @@ export function EditActorModal({
   }, [isOpen, groupId, actorId, runtimeOptions]);
 
   useEffect(() => {
+    if (!isOpen) {
+      selectedModelInitRef.current = "";
+      return;
+    }
+    const initKey = `${groupId}:${actorId}`;
+    if (selectedModelInitRef.current === initKey) return;
+    selectedModelInitRef.current = initKey;
+    // Initialize from persisted actor state once; subsequent runtime changes are controlled by this modal.
+    setSelectedModel(modelFromRuntimeConfiguration(runtime, command, runtimeOptions?.selected_model));
+  }, [isOpen, groupId, actorId, runtimeOptions?.selected_model, runtime, command]);
+
+  useEffect(() => {
     if (!isOpen) return;
     if (editMode !== "custom" || effectiveLinked || commandHasModelFlag(command)) return;
-    const defaultPreset = defaultRuntimePresetFor(runtime);
+    const defaultPreset = defaultRuntimePresetFor(runtime, opencodeModels);
     if (!defaultPreset) return;
     const normalizedCommand = commandForRuntimePreset(defaultPreset, rtInfo);
     if (!normalizedCommand.trim() || normalizedCommand.trim() === command.trim()) return;
     setSelectedRuntimePresetId(defaultPreset.id);
     onChangeCommand(normalizedCommand);
-  }, [isOpen, editMode, effectiveLinked, runtime, command, rtInfo, onChangeCommand]);
+  }, [isOpen, editMode, effectiveLinked, runtime, command, rtInfo, opencodeModels, onChangeCommand]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -521,7 +545,7 @@ export function EditActorModal({
     setSecretsError("");
     setLocalNotice("");
     try {
-      const result = await onSaveAsProfile(showOpenCodeReasoning ? { opencode: { default_variant: opencodeDefaultVariant } } : undefined);
+      const result = await onSaveAsProfile(currentRuntimeOptions);
       const profileId = String(result?.profileId || "").trim();
       if (profileId && result?.useNow) {
         setPendingConvertToCustom(false);
@@ -556,6 +580,49 @@ export function EditActorModal({
         : command.trim() || defaultCommand.trim();
     onChangeCommand(withClaudeReasoningEffort(baseCommand, effort));
     if (preset) setSelectedRuntimePresetId(preset.id);
+  };
+
+  const applyPresetSecrets = (preset: ReturnType<typeof runtimePresetForModel>) => {
+    if (!preset) return;
+    const apiKey = getCurrentDoneHubCodexApiKey();
+    setSecretsSetText((current) => mergePresetSecrets(current, preset, apiKey));
+    setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
+    if (preset.envPrivate || (["codex", "opencode"].includes(preset.runtime) && apiKey)) {
+      setSecretsPrimed(true);
+    }
+  };
+
+  const changeRuntime = (next: SupportedRuntime) => {
+    const nextInfo = runtimes.find((item) => item.name === next);
+    const preset = defaultRuntimePresetFor(next, opencodeModels);
+    const nextCommand = preset
+      ? commandForRuntimePreset(preset, nextInfo)
+      : String(nextInfo?.recommended_command || "").trim();
+    onChangeRuntime(next);
+    if (!supportsStandardWebHeadlessRuntime(next)) onChangeRunner("pty");
+    onChangeCommand(nextCommand);
+    setSelectedRuntimePresetId(preset?.id || "");
+    setSelectedModel(String(preset?.model || ""));
+    const apiKey = doneHubCodexApiKey || getCurrentDoneHubCodexApiKey();
+    setSecretsSetText((current) => {
+      const cleared = clearKnownPresetSecrets(current);
+      return preset ? mergePresetSecrets(cleared, preset, apiKey) : mergeRuntimeAuthSecret(cleared, next, apiKey);
+    });
+    setSecretsUnsetText((current) => preset ? mergePresetUnsetKeys(current, preset) : mergeAllPresetUnsetKeys(current));
+    if (preset?.envPrivate || (["codex", "opencode"].includes(next) && apiKey)) setSecretsPrimed(true);
+    setOpencodeDefaultVariant("high");
+  };
+
+  const changeModel = (model: string) => {
+    const normalized = model.trim();
+    const preset = runtimePresetForModel(runtime, normalized, opencodeModels);
+    const baseCommand = command.trim() || defaultCommand.trim();
+    const nextCommand = withRuntimeModel(runtime, baseCommand, normalized);
+    onChangeCommand(nextCommand);
+    setSelectedModel(normalized);
+    setSelectedRuntimePresetId(preset?.id || "");
+    applyPresetSecrets(preset);
+    if (!opencodeDeepSeekModelFromCommand(nextCommand)) setOpencodeDefaultVariant("high");
   };
 
   const handleUploadAvatar = async (file: File | null) => {
@@ -665,7 +732,7 @@ export function EditActorModal({
         clear: secretsClearAll,
         capabilityAutoload: parseCapabilityIdInput(capabilityAutoloadText),
         convertToCustom: linked && pendingConvertToCustom,
-        runtimeOptions: showOpenCodeReasoning ? { opencode: { default_variant: opencodeDefaultVariant } } : {},
+        runtimeOptions: currentRuntimeOptions,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
@@ -865,46 +932,30 @@ export function EditActorModal({
                   </Surface>
                 ) : (
                   <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("switchModel")}</label>
-                      <select
-                        className="onecolleague-runtime-select w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
-                        value={effectiveRuntimePresetId || runtime}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const preset = runtimePresetById(raw);
-                          const next = (preset?.runtime || raw) as SupportedRuntime;
-                          onChangeRuntime(next);
-                          if (!supportsStandardWebHeadlessRuntime(next)) onChangeRunner("pty");
-                          const nextInfo = runtimes.find((r) => r.name === next);
-                          const nextDefault = String(nextInfo?.recommended_command || "").trim();
-                          onChangeCommand(preset ? commandForRuntimePreset(preset, nextInfo) : nextDefault);
-                          setSelectedRuntimePresetId(preset?.id || "");
-                          if (preset) {
-                            const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
-                            setSecretsSetText((current) => mergePresetSecrets(current, preset, doneHubCodexApiKey));
-                            setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
-                            if (
-                              preset.envPrivate ||
-                              (["codex", "opencode"].includes(preset.runtime) && doneHubCodexApiKey)
-                            ) {
-                              setSecretsPrimed(true);
-                            }
-                          }
-                        }}
-                      >
-                        {runtimeChoiceGroups.map((group) => (
-                          <optgroup key={group.labelKey} label={t(group.labelKey, { defaultValue: group.labelFallback })}>
-                            {group.options.map((option) => (
-                              <option key={option.id} value={option.id} disabled={option.disabled}>
-                                {option.label}
-                                {option.disabled ? ` ${t("notInstalled")}` : ""}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </select>
-                    </div>
+                    <RuntimeModelSelector
+                      runtime={runtime}
+                      model={effectiveSelectedModel}
+                      runtimes={runtimes}
+                      onRuntimeChange={changeRuntime}
+                      onModelChange={changeModel}
+                      priceMap={runtimePriceMap}
+                      opencodeModels={opencodeModels}
+                      disabled={busy === "actor-update"}
+                      labels={{
+                        runtime: t("runtime"),
+                        model: t("model"),
+                        runtimeSearch: t("searchRuntime"),
+                        modelSearch: t("searchModel"),
+                        noResults: t("noMatchingOptions"),
+                        defaultModel: t("useRuntimeDefaultModel"),
+                        customModel: t("enterOtherModel"),
+                        customPlaceholder: t("modelIdPlaceholder"),
+                        apply: t("applyModel"),
+                        notInstalled: t("notInstalled"),
+                        modelRequired: t("modelRequired"),
+                        modelInvalid: t("modelInvalid"),
+                      }}
+                    />
 
                     {runtime === "codex" ? (
                       <CodexReasoningEffortSelector

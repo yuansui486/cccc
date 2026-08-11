@@ -10,6 +10,15 @@ from no1.kernel.runtime import get_onecolleague_mcp_stdio_command
 
 
 class TestMcpInstall(unittest.TestCase):
+    def test_prepare_runtime_mcp_env_injects_selected_kimi_model(self) -> None:
+        prepared = prepare_runtime_mcp_env(
+            "kimi",
+            {"KIMI_MODEL_NAME": "old-model", "KIMI_API_KEY": "secret"},
+            runtime_options={"selected_model": "kimi-k2.6"},
+        )
+        self.assertEqual(prepared["KIMI_MODEL_NAME"], "kimi-k2.6")
+        self.assertEqual(prepared["KIMI_API_KEY"], "secret")
+
     def test_is_mcp_installed_unknown_runtime_false(self) -> None:
         self.assertFalse(is_mcp_installed("unknown-runtime"))
 

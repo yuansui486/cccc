@@ -233,10 +233,10 @@ export function runtimePresetById(id: string): RuntimePreset | null {
   }
 }
 
-export function defaultRuntimePresetFor(runtime: string): RuntimePreset | null {
+export function defaultRuntimePresetFor(runtime: string, modelCatalog: string[] = []): RuntimePreset | null {
   const normalizedRuntime = String(runtime || "").trim();
   if (!normalizedRuntime) return null;
-  return RUNTIME_PRESETS.find((preset) => preset.runtime === normalizedRuntime) || null;
+  return runtimePresetsForModels(modelCatalog).find((preset) => preset.runtime === normalizedRuntime) || null;
 }
 
 export function runtimePresetIdFor(runtime: string, command: string | string[] | undefined): RuntimePresetId | "" {
@@ -265,6 +265,74 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
     if (modelId) return opencodeRuntimePresetId(modelId);
   }
   return "";
+}
+
+const MODEL_ARGUMENTS: Partial<Record<SupportedRuntime, "-m" | "--model">> = {
+  claude: "--model",
+  codex: "-m",
+  gemini: "--model",
+  opencode: "-m",
+};
+
+export function runtimeSupportsModelSelection(runtime: string): boolean {
+  const normalized = String(runtime || "").trim() as SupportedRuntime;
+  return normalized === "kimi" || Boolean(MODEL_ARGUMENTS[normalized]);
+}
+
+export function validateRuntimeModelId(value: string): string {
+  const model = String(value || "").trim();
+  if (!model) return "Model ID is required.";
+  if (/\s/.test(model) || Array.from(model).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {
+    return "Model ID cannot contain whitespace or control characters.";
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/.test(model)) return "Model ID contains unsafe command characters.";
+  return "";
+}
+
+export function modelFromRuntimeConfiguration(
+  runtime: string,
+  command: string | string[] | undefined,
+  selectedModel?: string | null,
+): string {
+  const normalizedRuntime = String(runtime || "").trim();
+  const persisted = String(selectedModel || "").trim();
+  if (normalizedRuntime === "kimi") return persisted;
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  let model = modelFromCommand(tokens);
+  if (normalizedRuntime === "opencode" && model.startsWith(`${OPENCODE_PROVIDER_ID}/`)) {
+    model = model.slice(OPENCODE_PROVIDER_ID.length + 1);
+  }
+  return model;
+}
+
+export function withRuntimeModel(
+  runtime: string,
+  command: string | string[] | undefined,
+  model: string,
+): string {
+  const normalizedRuntime = String(runtime || "").trim() as SupportedRuntime;
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  const cleaned = withoutCommandModel(tokens);
+  if (normalizedRuntime === "kimi") return cleaned.join(" ");
+  const flag = MODEL_ARGUMENTS[normalizedRuntime];
+  const normalizedModel = String(model || "").trim();
+  if (!flag || !normalizedModel) return cleaned.join(" ");
+  const commandModel = normalizedRuntime === "opencode" && !normalizedModel.includes("/")
+    ? `${OPENCODE_PROVIDER_ID}/${normalizedModel}`
+    : normalizedModel;
+  return [...cleaned, flag, commandModel].join(" ");
+}
+
+export function runtimePresetForModel(runtime: string, model: string, modelCatalog: string[] = []): RuntimePreset | null {
+  const normalizedModel = String(model || "").trim().toLowerCase();
+  if (!normalizedModel) return null;
+  return runtimePresetsForModels(modelCatalog).find(
+    (preset) => preset.runtime === runtime && String(preset.model || "").trim().toLowerCase() === normalizedModel,
+  ) || null;
 }
 
 export function commandHasModelFlag(command: string | string[] | undefined): boolean {
@@ -470,6 +538,32 @@ function authSecretKeyForRuntime(runtime: string): string {
   return "";
 }
 
+export function clearKnownPresetSecrets(existing: string): string {
+  const presetKeys = knownAllPresetSecretKeys();
+  return String(existing || "")
+    .split("\n")
+    .filter((line) => {
+      const key = line.match(/^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=/i)?.[1];
+      return !key || !presetKeys.has(key);
+    })
+    .join("\n")
+    .trim();
+}
+
+export function mergeAllPresetUnsetKeys(existing: string): string {
+  const seen = new Set<string>();
+  return [...String(existing || "").split("\n"), ...knownAllPresetSecretKeys()]
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      const key = line.match(/^\s*(?:unset\s+|remove-item\s+env:|\$env:)?([A-Za-z_][A-Za-z0-9_]*)/i)?.[1] || line;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join("\n");
+}
+
 function withCommandModel(command: string[], model: string, preferredFlag: "-m" | "--model"): string[] {
   const cleaned = command.filter(Boolean);
   const modelName = String(model || "").trim();
@@ -493,6 +587,20 @@ function modelFromCommand(command: string[]): string {
     if (item.startsWith("--model=")) return item.split("=", 2)[1] || "";
   }
   return "";
+}
+
+function withoutCommandModel(command: string[]): string[] {
+  const cleaned: string[] = [];
+  for (let idx = 0; idx < command.length; idx += 1) {
+    const item = command[idx];
+    if (item === "-m" || item === "--model") {
+      idx += 1;
+      continue;
+    }
+    if (item.startsWith("--model=")) continue;
+    cleaned.push(item);
+  }
+  return cleaned;
 }
 
 export function opencodeDeepSeekModelFromCommand(command: string | string[] | undefined): string {

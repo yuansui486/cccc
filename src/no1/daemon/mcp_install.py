@@ -246,7 +246,11 @@ def prepare_runtime_mcp_env(
 ) -> Dict[str, str]:
     """Prepare runtime-scoped MCP environment without changing user config."""
     result = {str(k): str(v) for k, v in (env or {}).items() if isinstance(k, str)}
-    if str(runtime or "").strip().lower() != "opencode":
+    normalized_runtime = str(runtime or "").strip().lower()
+    selected_model = str((runtime_options or {}).get("selected_model") or "").strip()
+    if normalized_runtime == "kimi" and selected_model:
+        result["KIMI_MODEL_NAME"] = selected_model
+    if normalized_runtime != "opencode":
         return result
     doc = _read_opencode_inline_config(result)
     doc = merge_opencode_provider_config(doc, result)

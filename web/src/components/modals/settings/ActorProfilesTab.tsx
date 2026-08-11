@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ActorProfile, ActorProfileUsage, OpenCodeDefaultVariant, RUNTIME_INFO, SUPPORTED_RUNTIMES } from "../../../types";
+import { ActorProfile, ActorProfileUsage, OpenCodeDefaultVariant, RuntimeInfo, RUNTIME_INFO, SupportedRuntime, SUPPORTED_RUNTIMES } from "../../../types";
 import * as api from "../../../services/api";
 import { parsePrivateEnvSetText, parsePrivateEnvUnsetText } from "../../../utils/privateEnvInput";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../../utils/capabilityAutoload";
@@ -23,7 +23,23 @@ import {
 import { CapabilityPicker } from "../../CapabilityPicker";
 import { OpenCodeReasoningEffortSelector } from "../../ReasoningEffortSelector";
 import { BodyPortal } from "../../ui/BodyPortal";
-import { defaultCommandForRuntime, opencodeDeepSeekModelFromCommand } from "../../../utils/runtimePresets";
+import { RuntimeModelSelector } from "../../RuntimeModelSelector";
+import {
+  commandForRuntimePreset,
+  clearKnownPresetSecrets,
+  defaultCommandForRuntime,
+  defaultRuntimePresetFor,
+  mergePresetSecrets,
+  mergeAllPresetUnsetKeys,
+  mergePresetUnsetKeys,
+  modelFromRuntimeConfiguration,
+  OPENCODE_FALLBACK_MODELS,
+  opencodeDeepSeekModelFromCommand,
+  runtimePresetForModel,
+  withRuntimeModel,
+} from "../../../utils/runtimePresets";
+import { buildRuntimePriceMap, type RuntimePriceMap } from "../../../utils/runtimePrices";
+import { fetchDoneHubModels, fetchDoneHubPrices } from "../../../services/doneHub";
 
 interface ActorProfilesTabProps {
   isDark: boolean;
@@ -38,6 +54,7 @@ type EditorState = {
   runtime: string;
   runner: "pty" | "headless";
   command: string;
+  selectedModel: string;
   opencodeDefaultVariant: OpenCodeDefaultVariant;
   submit: "enter" | "newline" | "none";
   capabilityAutoloadText: string;
@@ -70,6 +87,7 @@ function buildEditor(profile?: ActorProfile | null): EditorState {
     runtime,
     runner,
     command,
+    selectedModel: modelFromRuntimeConfiguration(runtime, command, profile?.runtime_options?.selected_model),
     opencodeDefaultVariant: profile?.runtime_options?.opencode?.default_variant || "high",
     submit: (String(profile?.submit || "enter") as "enter" | "newline" | "none"),
     capabilityAutoloadText: formatCapabilityIdInput(profile?.capability_defaults?.autoload_capabilities),
@@ -87,6 +105,7 @@ function buildEditor(profile?: ActorProfile | null): EditorState {
 export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabProps) {
   const { t } = useTranslation("settings");
   const groups = useGroupStore((s) => s.groups);
+  const discoveredRuntimes = useGroupStore((s) => s.runtimes);
   const refreshGroups = useGroupStore((s) => s.refreshGroups);
   const refreshActors = useGroupStore((s) => s.refreshActors);
   const [profiles, setProfiles] = useState<ActorProfile[]>([]);
@@ -106,6 +125,9 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
   const [secretClear, setSecretClear] = useState(false);
   const [duplicateSourceProfileId, setDuplicateSourceProfileId] = useState("");
   const [sessionUserId, setSessionUserId] = useState("");
+  const [runtimeCatalog, setRuntimeCatalog] = useState<RuntimeInfo[]>([]);
+  const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
+  const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
 
   const isMyScope = scope === "my";
   const profileScope: api.ProfileScope = isMyScope ? "user" : "global";
@@ -144,6 +166,24 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
     () => defaultCommandForRuntime(editor.runtime),
     [editor.runtime]
   );
+  const effectiveRuntimes = runtimeCatalog.length ? runtimeCatalog : discoveredRuntimes;
+
+  useEffect(() => {
+    if (!isActive || runtimePriceMap) return;
+    let cancelled = false;
+    void Promise.all([api.fetchRuntimes(), fetchDoneHubPrices(), fetchDoneHubModels()]).then(([runtimeResp, priceResp, modelResp]) => {
+      if (cancelled) return;
+      setRuntimeCatalog(runtimeResp.ok ? runtimeResp.result?.runtimes || [] : []);
+      setRuntimePriceMap(priceResp.ok ? buildRuntimePriceMap(priceResp.result?.items || []) : {});
+      const models = modelResp.ok
+        ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
+        : [];
+      setOpencodeModels(models.length ? models : [...OPENCODE_FALLBACK_MODELS]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive, runtimePriceMap]);
 
   const ensureSessionContext = async () => {
     try {
@@ -174,6 +214,50 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
   const closeEditor = () => {
     setDuplicateSourceProfileId("");
     setEditorOpen(false);
+  };
+
+  const applyProfilePreset = (preset: ReturnType<typeof runtimePresetForModel>) => {
+    if (!preset) return;
+    setSecretSetText((current) => mergePresetSecrets(current, preset, ""));
+    setSecretUnsetText((current) => mergePresetUnsetKeys(current, preset));
+  };
+
+  const changeEditorRuntime = (next: SupportedRuntime) => {
+    const info = effectiveRuntimes.find((item) => item.name === next);
+    const preset = defaultRuntimePresetFor(next, opencodeModels);
+    const command = preset
+      ? commandForRuntimePreset(preset, info)
+      : String(info?.recommended_command || defaultCommandForRuntime(next)).trim();
+    setEditor((prev) => ({
+      ...prev,
+      runtime: next,
+      runner: supportsStandardWebHeadlessRuntime(next) ? prev.runner : "pty",
+      command,
+      selectedModel: String(preset?.model || ""),
+      opencodeDefaultVariant: "high",
+    }));
+    setSecretSetText((current) => {
+      const cleared = clearKnownPresetSecrets(current);
+      return preset ? mergePresetSecrets(cleared, preset, "") : cleared;
+    });
+    setSecretUnsetText((current) => preset ? mergePresetUnsetKeys(current, preset) : mergeAllPresetUnsetKeys(current));
+  };
+
+  const changeEditorModel = (model: string) => {
+    const normalized = model.trim();
+    const preset = runtimePresetForModel(editor.runtime, normalized, opencodeModels);
+    const nextCommand = withRuntimeModel(
+      editor.runtime,
+      editor.command.trim() || editorDefaultCommand,
+      normalized,
+    );
+    setEditor((prev) => ({
+      ...prev,
+      command: nextCommand,
+      selectedModel: normalized,
+      opencodeDefaultVariant: opencodeDeepSeekModelFromCommand(nextCommand) ? prev.opencodeDefaultVariant : "high",
+    }));
+    applyProfilePreset(preset);
   };
 
   const editorModal = editorOpen ? (
@@ -218,28 +302,32 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass()}>{t("actorProfiles.runtime")}</label>
-              <select
-                value={editor.runtime}
-                onChange={(e) => {
-                  const nextRuntime = String(e.target.value || "");
-                  setEditor((prev) => {
-                    const nextDefault = defaultCommandForRuntime(nextRuntime);
-                    return {
-                      ...prev,
-                      runtime: nextRuntime,
-                      runner: supportsStandardWebHeadlessRuntime(nextRuntime) ? prev.runner : "pty",
-                      command: prev.command.trim() ? prev.command : nextDefault,
-                    };
-                  });
+            <div className="sm:col-span-2">
+              <RuntimeModelSelector
+                runtime={editor.runtime as SupportedRuntime}
+                model={modelFromRuntimeConfiguration(editor.runtime, editor.command, editor.selectedModel)}
+                runtimes={effectiveRuntimes}
+                allowedRuntimes={SUPPORTED_RUNTIMES}
+                onRuntimeChange={changeEditorRuntime}
+                onModelChange={changeEditorModel}
+                priceMap={runtimePriceMap}
+                opencodeModels={opencodeModels}
+                disabled={editorBusy}
+                labels={{
+                  runtime: t("actorProfiles.runtime"),
+                  model: t("actorProfiles.model"),
+                  runtimeSearch: t("actorProfiles.searchRuntime"),
+                  modelSearch: t("actorProfiles.searchModel"),
+                  noResults: t("actorProfiles.noMatchingOptions"),
+                  defaultModel: t("actorProfiles.useRuntimeDefaultModel"),
+                  customModel: t("actorProfiles.enterOtherModel"),
+                  customPlaceholder: t("actorProfiles.modelIdPlaceholder"),
+                  apply: t("actorProfiles.applyModel"),
+                  notInstalled: t("actorProfiles.notInstalled"),
+                  modelRequired: t("actorProfiles.modelRequired"),
+                  modelInvalid: t("actorProfiles.modelInvalid"),
                 }}
-                className={inputClass()}
-              >
-                {SUPPORTED_RUNTIMES.map((rt) => (
-                  <option key={rt} value={rt}>{RUNTIME_INFO[rt]?.label || rt}</option>
-                ))}
-              </select>
+              />
             </div>
 
             <div>
@@ -269,21 +357,32 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
             </div>
           </div>
 
-          <div>
-            <label className={labelClass()}>{t("actorProfiles.commandOverrideOptional")}</label>
-            <input
-              value={editor.command}
-              onChange={(e) => setEditor((prev) => ({ ...prev, command: e.target.value }))}
-              className={`${inputClass()} font-mono`}
-              placeholder={editorDefaultCommand || "codex"}
-            />
-            {editorDefaultCommand ? (
-              <div className="text-[10px] mt-1 text-[var(--color-text-muted)]">
-                {t("actorProfiles.default")}{" "}
-                <code className="px-1 rounded bg-[var(--color-bg-secondary)]">{editorDefaultCommand}</code>
-              </div>
-            ) : null}
-          </div>
+          <details className="rounded-lg border border-[var(--glass-border-subtle)] px-3 py-2">
+            <summary className="cursor-pointer text-xs font-medium text-[var(--color-text-muted)]">
+              {t("actorProfiles.commandOverrideOptional")}
+            </summary>
+            <div className="mt-3">
+              <input
+                value={editor.command}
+                onChange={(e) => {
+                  const command = e.target.value;
+                  setEditor((prev) => ({
+                    ...prev,
+                    command,
+                    selectedModel: modelFromRuntimeConfiguration(prev.runtime, command, prev.selectedModel),
+                  }));
+                }}
+                className={`${inputClass()} font-mono`}
+                placeholder={editorDefaultCommand || "codex"}
+              />
+              {editorDefaultCommand ? (
+                <div className="text-[10px] mt-1 text-[var(--color-text-muted)]">
+                  {t("actorProfiles.default")}{" "}
+                  <code className="px-1 rounded bg-[var(--color-bg-secondary)]">{editorDefaultCommand}</code>
+                </div>
+              ) : null}
+            </div>
+          </details>
 
           {editor.runtime === "opencode" && opencodeDeepSeekModelFromCommand(editor.command) ? (
             <OpenCodeReasoningEffortSelector
@@ -694,10 +793,14 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
         runtime: editor.runtime,
         runner: editorSupportsHeadlessRunner ? editor.runner : "pty",
         command: editor.command.trim(),
-        runtime_options:
-          editor.runtime === "opencode" && opencodeDeepSeekModelFromCommand(editor.command)
+        runtime_options: {
+          ...(modelFromRuntimeConfiguration(editor.runtime, editor.command, editor.selectedModel)
+            ? { selected_model: modelFromRuntimeConfiguration(editor.runtime, editor.command, editor.selectedModel) }
+            : {}),
+          ...(editor.runtime === "opencode" && opencodeDeepSeekModelFromCommand(editor.command)
             ? { opencode: { default_variant: editor.opencodeDefaultVariant } }
-            : {},
+            : {}),
+        },
         submit: editor.submit,
         env: {},
         capability_defaults: {

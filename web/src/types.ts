@@ -328,6 +328,7 @@ export type ActorProfile = {
 export type OpenCodeDefaultVariant = "none" | "low" | "high" | "max";
 
 export type ActorRuntimeOptions = {
+  selected_model?: string;
   opencode?: {
     default_variant?: OpenCodeDefaultVariant;
   };

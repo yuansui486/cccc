@@ -15,6 +15,50 @@ export type RuntimeChoiceGroup = {
 const GROUP_ORDER = ["codex", "claude", "gemini", "kimi", "opencode"] as const;
 type GroupKey = typeof GROUP_ORDER[number];
 const VISIBLE_RUNTIME_CHOICES = new Set<SupportedRuntime>(["gemini", "opencode"]);
+export const ACTOR_RUNTIME_CHOICES: SupportedRuntime[] = ["codex", "claude", "gemini", "kimi", "opencode"];
+
+export type RuntimeSelectorOption = {
+  value: SupportedRuntime;
+  label: string;
+  description: string;
+  disabled: boolean;
+};
+
+export type RuntimeModelOption = {
+  value: string;
+  label: string;
+  preset: RuntimePreset;
+};
+
+export function buildRuntimeSelectorOptions(
+  runtimes: RuntimeInfo[],
+  allowedRuntimes: readonly SupportedRuntime[] = ACTOR_RUNTIME_CHOICES,
+): RuntimeSelectorOption[] {
+  const byName = new Map(runtimes.map((item) => [item.name, item]));
+  return allowedRuntimes.map((runtime) => {
+    const info = byName.get(runtime);
+    return {
+      value: runtime,
+      label: info?.display_name || RUNTIME_INFO[runtime]?.label || runtime,
+      description: RUNTIME_INFO[runtime]?.desc || "",
+      disabled: runtime === "custom" || runtime === "web_model" ? false : !info?.available,
+    };
+  });
+}
+
+export function buildRuntimeModelOptions(
+  runtime: SupportedRuntime | string,
+  priceMap?: RuntimePriceMap | null,
+  modelCatalog?: string[],
+): RuntimeModelOption[] {
+  return runtimePresetsForModels(modelCatalog || [])
+    .filter((preset) => preset.runtime === runtime && Boolean(preset.model))
+    .map((preset) => ({
+      value: String(preset.model || ""),
+      label: runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
+      preset,
+    }));
+}
 
 const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }> = {
   claude: { labelKey: "runtimeGroupClaude", labelFallback: "Claude Code" },

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ...util.time import utc_now_iso
 
@@ -44,7 +45,22 @@ class OpenCodeRuntimeOptions(BaseModel):
 
 
 class ActorRuntimeOptions(BaseModel):
+    selected_model: Optional[str] = None
     opencode: Optional[OpenCodeRuntimeOptions] = None
+
+    @field_validator("selected_model", mode="before")
+    @classmethod
+    def validate_selected_model(cls, value: object) -> Optional[str]:
+        if value is None:
+            return None
+        model = str(value).strip()
+        if not model:
+            return None
+        if len(model) > 256 or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in model):
+            raise ValueError("selected_model contains whitespace or control characters")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]*", model) is None:
+            raise ValueError("selected_model contains unsafe command characters")
+        return model
 
     model_config = ConfigDict(extra="forbid")
 
