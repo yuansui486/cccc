@@ -327,6 +327,10 @@ def start_actor_process(
         runtime_options=dict(actor.get("runtime_options") or {}),
     )
 
+    runtime_error = runtime_start_preflight_error(runtime, effective_cmd, runner=effective_runner)
+    if runtime_error:
+        return {"success": False, "error": runtime_error}
+
     if effective_runner != "headless":
         if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):
             error_message = pty_support_error_message() or "PTY runner is not supported in this environment."
@@ -343,10 +347,6 @@ def start_actor_process(
             return {"success": False, "error": f"failed to install MCP: {e}"}
         if not mcp_ready:
             return {"success": False, "error": f"failed to install MCP for runtime: {runtime}"}
-
-    runtime_error = runtime_start_preflight_error(runtime, effective_cmd, runner=effective_runner)
-    if runtime_error:
-        return {"success": False, "error": runtime_error}
 
     try:
         if runtime == "web_model" and effective_runner == "headless":

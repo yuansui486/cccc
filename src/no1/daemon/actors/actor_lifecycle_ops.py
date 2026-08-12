@@ -400,6 +400,9 @@ def handle_actor_restart(
             command=list(launch_spec["effective_command"]),
             runtime_options=dict((launch_spec.get("actor") or {}).get("runtime_options") or {}),
         )
+        runtime_error = runtime_start_preflight_error(runtime, launch_spec["effective_command"], runner=runner_effective)
+        if runtime_error:
+            return _error("runtime_unavailable", runtime_error, details={"runtime": runtime, "actor_id": actor_id})
         if runner_effective != "headless":
             try:
                 mcp_ready = bool(

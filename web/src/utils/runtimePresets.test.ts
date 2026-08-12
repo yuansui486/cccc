@@ -88,6 +88,17 @@ describe("runtime presets", () => {
     expect(runtimePresetForModel("opencode", "new-model", ["new-model"])?.model).toBe("new-model");
   });
 
+  it("configures Hermes models through the OneColleague provider", () => {
+    const preset = runtimePresetForModel("hermes", "deepseek-v4-pro", ["deepseek-v4-pro"]);
+    expect(preset).toBeTruthy();
+    expect(preset?.envPrivate).toEqual({
+      ONECOLLEAGUE_OPENCODE_BASE_URL: "https://peer.shierkeji.com/v1",
+    });
+    const secrets = mergePresetSecrets("", preset!, "done-hub-key");
+    expect(secrets).toContain('ONECOLLEAGUE_OPENCODE_BASE_URL="https://peer.shierkeji.com/v1"');
+    expect(secrets).toContain('ONECOLLEAGUE_API_KEY="done-hub-key"');
+  });
+
   it("clears stale preset secrets when switching to a runtime without a model preset", () => {
     const current = 'ANTHROPIC_MODEL="old"\nONECOLLEAGUE_API_KEY="old-key"\nCUSTOM_FLAG="keep"';
     expect(clearKnownPresetSecrets(current)).toBe('CUSTOM_FLAG="keep"');

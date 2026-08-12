@@ -208,6 +208,9 @@ def handle_group_start(
                 command=list(launch_spec["effective_command"]),
                 runtime_options=dict(actor.get("runtime_options") or {}),
             )
+            runtime_error = runtime_start_preflight_error(runtime, launch_spec["effective_command"], runner=runner_effective)
+            if runtime_error:
+                return _error("runtime_unavailable", runtime_error, details={"runtime": runtime, "actor_id": aid})
             if runner_effective != "headless":
                 try:
                     mcp_ready = bool(
@@ -221,18 +224,6 @@ def handle_group_start(
                     raise RuntimeError(f"failed to install MCP for actor {aid}: {e}") from e
                 if not mcp_ready:
                     raise RuntimeError(f"failed to install MCP for actor {aid} (runtime={runtime})")
-                runtime_error = runtime_start_preflight_error(runtime, launch_spec["effective_command"], runner=runner_effective)
-                if runtime_error:
-                    return _error(
-                        "runtime_unavailable",
-                        runtime_error,
-                        details={
-                            "group_id": group.group_id,
-                            "actor_id": aid,
-                            "runtime": runtime,
-                        },
-                    )
-
             if runtime == "web_model" and runner_effective == "headless":
                 try:
                     write_headless_state(group.group_id, aid)

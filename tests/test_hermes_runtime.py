@@ -103,18 +103,38 @@ class TestHermesRuntime(unittest.TestCase):
         provider = merged["providers"]["onecolleague"]
         self.assertEqual(provider["base_url"], "https://peer.example/v1")
         self.assertEqual(provider["key_env"], "ONECOLLEAGUE_API_KEY")
+        self.assertEqual(provider["api_mode"], "chat_completions")
         self.assertNotIn("must-not-be-persisted", yaml.safe_dump(merged))
+
+    def test_provider_status_rejects_wrong_endpoint_or_transport(self) -> None:
+        from no1.kernel.hermes_runtime import _inspect_onecolleague_provider
+
+        status = _inspect_onecolleague_provider(
+            {
+                "providers": {
+                    "onecolleague": {
+                        "name": "OneColleague",
+                        "base_url": "https://wrong.example/v1",
+                        "key_env": "ONECOLLEAGUE_API_KEY",
+                        "api_mode": "anthropic_messages",
+                    }
+                }
+            }
+        )
+        self.assertEqual(status["status"], "missing")
+        self.assertEqual(status["expected_api_mode"], "chat_completions")
 
     def test_launch_command_uses_per_actor_model_without_duplicates(self) -> None:
         from no1.kernel.hermes_runtime import normalize_hermes_launch_command
 
+        command = normalize_hermes_launch_command(
+            ["hermes", "--tui", "--yolo"],
+            selected_model="deepseek-v4-pro",
+        )
+        self.assertIn(Path(command[0]).name.lower(), {"hermes", "hermes.exe", "hermes.cmd", "hermes.bat"})
         self.assertEqual(
-            normalize_hermes_launch_command(
-                ["hermes", "--tui", "--yolo"],
-                selected_model="deepseek-v4-pro",
-            ),
+            command[1:],
             [
-                "hermes",
                 "--tui",
                 "--yolo",
                 "--provider",
@@ -123,13 +143,12 @@ class TestHermesRuntime(unittest.TestCase):
                 "deepseek-v4-pro",
             ],
         )
-        self.assertEqual(
-            normalize_hermes_launch_command(
-                ["hermes", "--provider", "custom:manual", "--model", "manual-model", "--tui"],
-                selected_model="ignored-model",
-            ),
+        manual = normalize_hermes_launch_command(
             ["hermes", "--provider", "custom:manual", "--model", "manual-model", "--tui"],
+            selected_model="ignored-model",
         )
+        self.assertIn(Path(manual[0]).name.lower(), {"hermes", "hermes.exe", "hermes.cmd", "hermes.bat"})
+        self.assertEqual(manual[1:], ["--provider", "custom:manual", "--model", "manual-model", "--tui"])
 
     def test_status_respects_explicit_hermes_home_env(self) -> None:
         from no1.kernel.hermes_runtime import hermes_runtime_status
@@ -212,6 +231,9 @@ class TestHermesRuntime(unittest.TestCase):
             ), patch(
                 "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
                 return_value=command,
+            ), patch(
+                "no1.kernel.hermes_runtime._hermes_mcp_sdk_status",
+                return_value={"available": True, "python": "/usr/bin/python"},
             ), patch.object(hermes_runtime, "_run_hermes_cli", side_effect=fake_run):
                 result = hermes_runtime.prepare_hermes_runtime(home=cccc_home, auto_enable_tools=True)
 
@@ -225,8 +247,6 @@ class TestHermesRuntime(unittest.TestCase):
                     "onecolleague",
                     "--command",
                     "/abs/onecolleague",
-                    "--args",
-                    "mcp",
                     "--env",
                     f"ONECOLLEAGUE_HOME={cccc_home}",
                     "ONECOLLEAGUE_GROUP_ID=g_probe",
@@ -234,6 +254,8 @@ class TestHermesRuntime(unittest.TestCase):
                     f"CCCC_HOME={cccc_home}",
                     "CCCC_GROUP_ID=g_probe",
                     "CCCC_ACTOR_ID=hermes-probe",
+                    "--args",
+                    "mcp",
                 ],
             )
             doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -261,11 +283,105 @@ class TestHermesRuntime(unittest.TestCase):
             ), patch(
                 "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
                 return_value=command,
+            ), patch(
+                "no1.kernel.hermes_runtime._hermes_mcp_sdk_status",
+                return_value={"available": True, "python": "/usr/bin/python"},
             ), patch.object(hermes_runtime, "_run_hermes_cli") as mock_run:
                 result = hermes_runtime.prepare_hermes_runtime(home=cccc_home, auto_enable_tools=True)
 
             self.assertTrue(result.get("ok"), result)
             mock_run.assert_not_called()
+        finally:
+            cleanup()
+
+    def test_prepare_installs_missing_hermes_mcp_sdk_before_discovery(self) -> None:
+        from no1.kernel import hermes_runtime
+
+        cccc_home, cleanup = self._with_home()
+        user_home = cccc_home / "user"
+        command = ["/abs/onecolleague", "mcp"]
+        config_path = user_home / ".hermes" / "config.yaml"
+        sdk_states = iter(
+            [
+                {"available": False, "python": "/hermes/venv/python"},
+                {"available": True, "python": "/hermes/venv/python"},
+            ]
+        )
+
+        def fake_run(argv, **kwargs):
+            if argv[:4] == ["hermes", "mcp", "add", "onecolleague"]:
+                config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                config["mcp_servers"] = {
+                    "onecolleague": {
+                        "command": command[0],
+                        "args": command[1:],
+                        "env": dict(hermes_runtime.HERMES_MCP_ENV_PLACEHOLDERS),
+                        "enabled": True,
+                    }
+                }
+                config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+            return Mock(returncode=0, stdout="", stderr="")
+
+        try:
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
+                return_value="/hermes/venv/bin/hermes",
+            ), patch(
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
+                return_value=command,
+            ), patch(
+                "no1.kernel.hermes_runtime._hermes_mcp_sdk_status",
+                side_effect=lambda *_args, **_kwargs: next(sdk_states),
+            ), patch(
+                "no1.kernel.hermes_runtime._install_hermes_mcp_sdk",
+                return_value=(
+                    ["uv", "pip", "install", "mcp==1.28.1"],
+                    Mock(returncode=0, stdout="installed", stderr=""),
+                ),
+            ) as install, patch.object(hermes_runtime, "_run_hermes_cli", side_effect=fake_run):
+                result = hermes_runtime.prepare_hermes_runtime(home=cccc_home, auto_enable_tools=True)
+
+            self.assertTrue(result.get("ok"), result)
+            install.assert_called_once()
+            self.assertEqual(result["commands_run"][0]["name"], "mcp_sdk_install")
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            self.assertEqual(
+                config["providers"]["onecolleague"]["base_url"],
+                "https://peer.shierkeji.com/v1",
+            )
+        finally:
+            cleanup()
+
+    def test_prepare_keeps_provider_when_mcp_sdk_install_fails(self) -> None:
+        from no1.kernel import hermes_runtime
+
+        cccc_home, cleanup = self._with_home()
+        user_home = cccc_home / "user"
+        config_path = user_home / ".hermes" / "config.yaml"
+        try:
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
+                return_value="/hermes/venv/bin/hermes",
+            ), patch(
+                "no1.kernel.hermes_runtime._hermes_mcp_sdk_status",
+                return_value={"available": False, "python": "/hermes/venv/python"},
+            ), patch(
+                "no1.kernel.hermes_runtime._install_hermes_mcp_sdk",
+                return_value=(
+                    ["uv", "pip", "install", "mcp==1.28.1"],
+                    Mock(returncode=1, stdout="", stderr="offline"),
+                ),
+            ):
+                result = hermes_runtime.prepare_hermes_runtime(home=cccc_home, auto_enable_tools=True)
+
+            self.assertFalse(result.get("ok"), result)
+            self.assertEqual(result["error"]["code"], "hermes_mcp_sdk_install_failed")
+            self.assertIn("offline", result["error"]["message"])
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            self.assertEqual(
+                config["providers"]["onecolleague"]["base_url"],
+                "https://peer.shierkeji.com/v1",
+            )
         finally:
             cleanup()
 

@@ -340,6 +340,9 @@ def handle_actor_update(
                     command=list(launch_spec["effective_command"]),
                     runtime_options=dict(actor.get("runtime_options") or {}),
                 )
+                runtime_error = runtime_start_preflight_error(runtime, launch_spec["effective_command"], runner=runner_effective)
+                if runtime_error:
+                    return _error("runtime_unavailable", runtime_error, details={"runtime": runtime, "actor_id": actor_id})
                 if runner_effective != "headless":
                     if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):
                         return _error("actor_update_failed", pty_support_error_message() or "PTY runner is not supported in this environment.")
@@ -355,10 +358,6 @@ def handle_actor_update(
                         return _error("actor_update_failed", f"failed to install MCP: {e}")
                     if not mcp_ready:
                         return _error("actor_update_failed", f"failed to install MCP for runtime: {runtime}")
-                    runtime_error = runtime_start_preflight_error(runtime, launch_spec["effective_command"], runner=runner_effective)
-                    if runtime_error:
-                        return _error("runtime_unavailable", runtime_error)
-
                 if actor_uses_codex_app_server_state(actor):
                     session = codex_app_supervisor.start_pty_app_actor(
                         group_id=group.group_id,

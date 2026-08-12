@@ -27,6 +27,7 @@ HERMES_ONECOLLEAGUE_PROVIDER_RUNTIME_ID = "custom:onecolleague"
 HERMES_ONECOLLEAGUE_BASE_URL = "https://peer.shierkeji.com/v1"
 HERMES_ONECOLLEAGUE_API_KEY_ENV = "ONECOLLEAGUE_API_KEY"
 HERMES_MCP_SERVER_NAME = "onecolleague"
+HERMES_MCP_REQUIREMENTS = ("mcp==1.28.1", "starlette==1.3.1")
 
 HERMES_MCP_ENV_PLACEHOLDERS: Dict[str, str] = {
     "ONECOLLEAGUE_HOME": "${ONECOLLEAGUE_HOME}",
@@ -41,6 +42,16 @@ HERMES_DISCOVERY_ACTOR_ID = "hermes-probe"
 
 
 def user_hermes_home() -> Path:
+    if os.name == "nt":
+        local_appdata = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        if local_appdata:
+            # Keep tests and explicitly mocked homes deterministic while using
+            # the official native Windows location for the real user profile.
+            try:
+                if Path.home().expanduser() in Path(local_appdata).expanduser().parents:
+                    return (Path(local_appdata) / "hermes").expanduser()
+            except Exception:
+                return (Path(local_appdata) / "hermes").expanduser()
     return (Path.home() / ".hermes").expanduser()
 
 
@@ -103,6 +114,8 @@ def normalize_hermes_launch_command(command: Iterable[str], *, selected_model: O
         cmd.extend(["--provider", HERMES_ONECOLLEAGUE_PROVIDER_RUNTIME_ID])
     if selected and not has_model:
         cmd.extend(["--model", selected])
+    if cmd and Path(str(cmd[0])).name.lower() in {"hermes", "hermes.exe", "hermes.cmd", "hermes.bat"}:
+        cmd[0] = find_subprocess_executable("hermes") or cmd[0]
     return cmd
 
 
@@ -123,12 +136,14 @@ def build_hermes_mcp_add_command(
         cmd = ["onecolleague", "mcp"]
     out = ["hermes", "mcp", "add", HERMES_MCP_SERVER_NAME, "--command", str(cmd[0])]
     args = [str(part) for part in cmd[1:] if str(part).strip()]
-    if args:
-        out.append("--args")
-        out.extend(args)
+    # Hermes argparse defines --args with REMAINDER semantics; it must be the
+    # final option or every following --env token becomes an MCP server arg.
     out.append("--env")
     env = dict(env_values or HERMES_MCP_ENV_PLACEHOLDERS)
     out.extend(f"{key}={env.get(key, value)}" for key, value in HERMES_MCP_ENV_PLACEHOLDERS.items())
+    if args:
+        out.append("--args")
+        out.extend(args)
     return out
 
 
@@ -180,6 +195,7 @@ def merge_hermes_onecolleague_provider(
             "name": "OneColleague",
             "base_url": hermes_onecolleague_base_url(env),
             "key_env": HERMES_ONECOLLEAGUE_API_KEY_ENV,
+            "api_mode": "chat_completions",
         }
     )
     providers[HERMES_ONECOLLEAGUE_PROVIDER_ID] = current
@@ -193,7 +209,12 @@ def _inspect_onecolleague_provider(config: Dict[str, Any]) -> Dict[str, Any]:
     entry = entry if isinstance(entry, dict) else {}
     base_url = str(entry.get("base_url") or entry.get("url") or entry.get("api") or "").strip()
     key_env = str(entry.get("key_env") or entry.get("api_key_env") or "").strip()
-    ready = bool(base_url and key_env == HERMES_ONECOLLEAGUE_API_KEY_ENV)
+    ready = bool(
+        base_url.rstrip("/") == HERMES_ONECOLLEAGUE_BASE_URL
+        and key_env == HERMES_ONECOLLEAGUE_API_KEY_ENV
+        and str(entry.get("api_mode") or entry.get("transport") or "chat_completions").strip().lower()
+        in {"chat_completions", "chat-completions", "openai"}
+    )
     return {
         "status": "ready" if ready else "missing",
         "configured": bool(entry),
@@ -203,6 +224,8 @@ def _inspect_onecolleague_provider(config: Dict[str, Any]) -> Dict[str, Any]:
         "key_env": key_env,
         "expected_base_url": HERMES_ONECOLLEAGUE_BASE_URL,
         "expected_key_env": HERMES_ONECOLLEAGUE_API_KEY_ENV,
+        "api_mode": str(entry.get("api_mode") or entry.get("transport") or "").strip(),
+        "expected_api_mode": "chat_completions",
     }
 
 
@@ -538,6 +561,8 @@ def _run_hermes_cli(
     kwargs: Dict[str, Any] = {
         "capture_output": True,
         "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
         "timeout": timeout,
         "env": env,
     }
@@ -548,12 +573,107 @@ def _run_hermes_cli(
     return subprocess.run(resolve_subprocess_argv(argv), **kwargs)
 
 
+def _hermes_python(hermes_executable: str) -> Optional[Path]:
+    executable = Path(str(hermes_executable or "")).expanduser()
+    if not executable.is_absolute():
+        return None
+    scripts_dir = executable.parent
+    candidates = (
+        scripts_dir / "python.exe",
+        scripts_dir / "python",
+        scripts_dir.parent / "bin" / "python",
+        scripts_dir.parent / "bin" / "python3",
+    )
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
+def _hermes_mcp_sdk_status(hermes_executable: str, *, timeout: int = 30) -> Dict[str, Any]:
+    python = _hermes_python(hermes_executable)
+    if python is None:
+        return {
+            "available": False,
+            "python": "",
+            "message": "Hermes Python environment could not be located",
+        }
+    probe = subprocess.run(
+        resolve_subprocess_argv(
+            [
+                str(python),
+                "-c",
+                "import mcp; print(getattr(mcp, '__version__', 'installed'))",
+            ]
+        ),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+    return {
+        "available": probe.returncode == 0,
+        "python": str(python),
+        "returncode": int(probe.returncode),
+        "stdout": str(probe.stdout or ""),
+        "stderr": str(probe.stderr or ""),
+        "message": "ready" if probe.returncode == 0 else "Hermes MCP SDK is not installed",
+    }
+
+
+def _install_hermes_mcp_sdk(
+    hermes_executable: str,
+    *,
+    cwd: Optional[Path] = None,
+    timeout: int = 600,
+) -> tuple[list[str], subprocess.CompletedProcess[str]]:
+    python = _hermes_python(hermes_executable)
+    if python is None:
+        raise RuntimeError("Hermes Python environment could not be located")
+    uv = find_subprocess_executable("uv")
+    if uv:
+        command = [uv, "pip", "install", "--python", str(python), *HERMES_MCP_REQUIREMENTS]
+    else:
+        command = [str(python), "-m", "pip", "install", *HERMES_MCP_REQUIREMENTS]
+    result = subprocess.run(
+        resolve_subprocess_argv(command),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        cwd=str(cwd) if cwd is not None else None,
+    )
+    return command, result
+
+
+def _merge_hermes_provider_config(
+    *,
+    hermes_home_override: Optional[Path],
+    provider_env: Optional[Dict[str, Any]],
+) -> None:
+    config_path = hermes_profile_config_path(hermes_home_override=hermes_home_override)
+    current_config = _read_yaml(config_path)
+    merged_config = merge_hermes_onecolleague_provider(current_config, env=provider_env)
+    if merged_config != current_config:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            yaml.safe_dump(merged_config, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
+
 def _completed_summary(result: subprocess.CompletedProcess[str]) -> Dict[str, Any]:
     return {
         "returncode": int(result.returncode),
         "stdout": str(result.stdout or ""),
         "stderr": str(result.stderr or ""),
     }
+
+
+def _completed_failure_detail(result: subprocess.CompletedProcess[str], *, limit: int = 800) -> str:
+    text = str(result.stderr or "").strip() or str(result.stdout or "").strip()
+    if len(text) > limit:
+        text = text[-limit:]
+    return " ".join(text.split())
 
 
 def prepare_hermes_runtime(
@@ -570,7 +690,8 @@ def prepare_hermes_runtime(
     lock = None
     commands_run: list[Dict[str, Any]] = []
     try:
-        if not find_subprocess_executable("hermes"):
+        hermes_executable = find_subprocess_executable("hermes")
+        if not hermes_executable:
             return {
                 "ok": False,
                 "error": {"code": "hermes_cli_missing", "message": "Hermes CLI is not installed or not in PATH"},
@@ -583,6 +704,14 @@ def prepare_hermes_runtime(
         lock_dir = root / "daemon"
         lock_dir.mkdir(parents=True, exist_ok=True)
         lock = acquire_lockfile(lock_dir / "hermes-runtime-setup.lock", blocking=True)
+
+        # Provider configuration is independent from MCP discovery. Persist it
+        # first so a missing optional MCP dependency cannot leave Hermes with
+        # neither the selected endpoint nor the OneColleague provider.
+        _merge_hermes_provider_config(
+            hermes_home_override=hermes_home_override,
+            provider_env=provider_env,
+        )
 
         status = hermes_runtime_status(
             home=root,
@@ -600,6 +729,62 @@ def prepare_hermes_runtime(
                     "commands_run": commands_run,
                     "status": status,
                 }
+            sdk_status = _hermes_mcp_sdk_status(hermes_executable)
+            if not sdk_status.get("available"):
+                install_cmd, install_result = _install_hermes_mcp_sdk(
+                    hermes_executable,
+                    cwd=cwd,
+                )
+                commands_run.append(
+                    {
+                        "name": "mcp_sdk_install",
+                        "argv": install_cmd,
+                        "result": _completed_summary(install_result),
+                    }
+                )
+                sdk_status = _hermes_mcp_sdk_status(hermes_executable)
+                if install_result.returncode != 0 or not sdk_status.get("available"):
+                    failure_detail = _completed_failure_detail(install_result)
+                    message = (
+                        "Hermes is installed without its optional MCP SDK and "
+                        "OneColleague could not install the official MCP dependencies"
+                    )
+                    if failure_detail:
+                        message = f"{message}: {failure_detail}"
+                    return {
+                        "ok": False,
+                        "error": {
+                            "code": "hermes_mcp_sdk_install_failed",
+                            "message": message,
+                            "details": sdk_status,
+                        },
+                        "commands_run": commands_run,
+                        "status": hermes_runtime_status(
+                            home=root,
+                            include_version=False,
+                            hermes_home_override=hermes_home_override,
+                        ),
+                    }
+            mcp_status = status.get("mcp") if isinstance(status.get("mcp"), dict) else {}
+            if bool(mcp_status.get("configured")):
+                remove_cmd = ["hermes", "mcp", "remove", HERMES_MCP_SERVER_NAME]
+                remove_result = _run_hermes_cli(
+                    remove_cmd,
+                    hermes_home_path=hermes_home_override,
+                    cwd=cwd,
+                    timeout=60,
+                )
+                commands_run.append({"name": "mcp_remove", "argv": remove_cmd, "result": _completed_summary(remove_result)})
+                if remove_result.returncode != 0:
+                    return {
+                        "ok": False,
+                        "error": {
+                            "code": "hermes_mcp_remove_failed",
+                            "message": "failed to remove stale Hermes OneColleague MCP server",
+                        },
+                        "commands_run": commands_run,
+                        "status": status,
+                    }
             cmd = build_hermes_mcp_add_command(
                 env_values={
                     "ONECOLLEAGUE_HOME": str(root),
@@ -622,25 +807,16 @@ def prepare_hermes_runtime(
                 hermes_home_override=hermes_home_override,
             )
             if result.returncode != 0 or ((status.get("mcp") or {}).get("status") != "ready"):
+                failure_detail = _completed_failure_detail(result)
+                message = "failed to configure Hermes OneColleague MCP server"
+                if failure_detail:
+                    message = f"{message}: {failure_detail}"
                 return {
                     "ok": False,
-                    "error": {"code": "hermes_mcp_add_failed", "message": "failed to configure Hermes OneColleague MCP server"},
+                    "error": {"code": "hermes_mcp_add_failed", "message": message},
                     "commands_run": commands_run,
                     "status": status,
                 }
-
-        # Provider setup is independent from MCP discovery. It is safe to
-        # merge after MCP setup (or on an already-ready profile) and never
-        # persists the API key itself.
-        config_path = hermes_profile_config_path(hermes_home_override=hermes_home_override)
-        current_config = _read_yaml(config_path)
-        merged_config = merge_hermes_onecolleague_provider(current_config, env=provider_env)
-        if merged_config != current_config:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(
-                yaml.safe_dump(merged_config, allow_unicode=True, sort_keys=False),
-                encoding="utf-8",
-            )
 
         return {
             "ok": True,

@@ -78,10 +78,30 @@ def _iter_windows_user_bin_dirs() -> list[Path]:
     ]
     local_appdata = str(os.environ.get("LOCALAPPDATA") or "").strip()
     appdata = str(os.environ.get("APPDATA") or "").strip()
+    hermes_home = str(os.environ.get("HERMES_HOME") or "").strip()
     if local_appdata:
         candidates.append(Path(local_appdata) / "Microsoft" / "WinGet" / "Links")
+        # The official native Windows Hermes installer uses a managed venv
+        # under %LOCALAPPDATA% and PATH changes are not visible to an already
+        # running OneColleague daemon.
+        candidates.extend(
+            [
+                Path(local_appdata) / "hermes" / "hermes-agent" / "venv" / "Scripts",
+                Path(local_appdata) / "hermes" / "bin",
+            ]
+        )
     if appdata:
         candidates.append(Path(appdata) / "npm")
+        candidates.append(Path(appdata) / "Python" / "Scripts")
+    if hermes_home:
+        configured = Path(hermes_home).expanduser()
+        candidates.extend(
+            [
+                configured / "hermes-agent" / "venv" / "Scripts",
+                configured / "venv" / "Scripts",
+                configured / "bin",
+            ]
+        )
 
     unique: list[Path] = []
     seen: set[str] = set()

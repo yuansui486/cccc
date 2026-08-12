@@ -283,7 +283,14 @@ def _stop_existing_daemon(home: Path) -> bool:
 
 
 def _print_json(obj: Any) -> None:
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
+    rendered = json.dumps(obj, ensure_ascii=False, indent=2)
+    try:
+        print(rendered)
+    except UnicodeEncodeError:
+        # Windows consoles may still use GBK even when subprocess output is
+        # UTF-8. Keep CLI JSON machine-readable instead of failing after the
+        # requested operation has already completed.
+        print(json.dumps(obj, ensure_ascii=True, indent=2))
 
 def _parse_json_object_arg(raw: Any, *, field: str) -> dict[str, Any]:
     text = str(raw or "").strip()

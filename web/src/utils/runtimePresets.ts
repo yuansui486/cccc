@@ -212,6 +212,9 @@ export function hermesRuntimePreset(model: string, label?: string): RuntimePrese
     label: String(label || normalized).trim() || normalized,
     runtime: "hermes",
     model: normalized,
+    envPrivate: {
+      ONECOLLEAGUE_OPENCODE_BASE_URL: "https://peer.shierkeji.com/v1",
+    },
   };
 }
 
@@ -530,6 +533,7 @@ export function knownPresetSecretKeysForRuntime(runtime: string): Set<string> {
     out.add("ONECOLLEAGUE_API_KEY");
     out.add("OPENAI_API_KEY");
   }
+  if (runtime === "hermes") out.add("ONECOLLEAGUE_OPENCODE_BASE_URL");
   if (runtime === "kimi") out.add("KIMI_API_KEY");
   return out;
 }
@@ -543,6 +547,7 @@ function knownAllPresetSecretKeys(): Set<string> {
   }
   out.add(CLAUDE_LEGACY_EFFORT_ENV_KEY);
   out.add("OPENAI_API_KEY");
+  out.add("ONECOLLEAGUE_OPENCODE_BASE_URL");
   return out;
 }
 

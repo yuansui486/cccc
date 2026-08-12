@@ -418,6 +418,19 @@ class TestMcpInstall(unittest.TestCase):
                 provider_env=env,
             )
 
+    def test_ensure_mcp_installed_hermes_surfaces_prepare_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cwd = Path(td)
+            with patch("no1.daemon.mcp_install._runtime_mcp_state", return_value="missing"), patch(
+                "no1.daemon.mcp_install.prepare_hermes_runtime",
+                return_value={
+                    "ok": False,
+                    "error": {"code": "hermes_cli_missing", "message": "Hermes CLI is not installed or not in PATH"},
+                },
+            ):
+                with self.assertRaisesRegex(RuntimeError, "hermes_cli_missing"):
+                    ensure_mcp_installed("hermes", cwd, auto_mcp_runtimes=("hermes",), env={})
+
     def test_ensure_mcp_installed_returns_false_when_initial_probe_times_out(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             cwd = Path(td)

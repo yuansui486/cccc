@@ -49,14 +49,15 @@ class TestRuntimeCommandDefaults(unittest.TestCase):
     def test_daemon_launch_normalizer_applies_hermes_provider_and_model(self) -> None:
         from no1.daemon import server as daemon_server
 
+        command = daemon_server._normalize_runtime_command(
+            "hermes",
+            ["hermes", "--tui", "--yolo"],
+            env={"HERMES_SELECTED_MODEL": "deepseek-v4-pro"},
+        )
+        self.assertIn(Path(command[0]).name.lower(), {"hermes", "hermes.exe", "hermes.cmd", "hermes.bat"})
         self.assertEqual(
-            daemon_server._normalize_runtime_command(
-                "hermes",
-                ["hermes", "--tui", "--yolo"],
-                env={"HERMES_SELECTED_MODEL": "deepseek-v4-pro"},
-            ),
+            command[1:],
             [
-                "hermes",
                 "--tui",
                 "--yolo",
                 "--provider",
@@ -65,6 +66,18 @@ class TestRuntimeCommandDefaults(unittest.TestCase):
                 "deepseek-v4-pro",
             ],
         )
+
+    def test_windows_hermes_install_dir_is_discovered_without_path_refresh(self) -> None:
+        from no1.util import process
+
+        with patch.object(process.os, "name", "nt"), patch.object(process.Path, "home", return_value=Path(r"C:\Users\tester")), patch.dict(
+            process.os.environ,
+            {"LOCALAPPDATA": r"C:\Users\tester\AppData\Local", "APPDATA": r"C:\Users\tester\AppData\Roaming"},
+            clear=False,
+        ), patch.object(process.Path, "exists", return_value=False):
+            candidates = process._iter_windows_user_bin_dirs()
+
+        self.assertIn(Path(r"C:\Users\tester\AppData\Local\hermes\hermes-agent\venv\Scripts"), candidates)
 
     def test_onecolleague_mcp_stdio_command_prefers_unresolved_venv_entrypoint(self) -> None:
         from no1.kernel.runtime import get_onecolleague_mcp_stdio_command

@@ -549,9 +549,19 @@ def ensure_mcp_installed(
                 hermes_home_override=_hermes_home_override(env),
                 provider_env=env,
             )
-            return bool(result.get("ok")) and _runtime_mcp_state(runtime, env=env) == "ready"
-        except Exception:
-            return False
+            if not bool(result.get("ok")):
+                error = result.get("error") if isinstance(result.get("error"), dict) else {}
+                code = str(error.get("code") or "hermes_mcp_setup_failed").strip()
+                message = str(error.get("message") or "failed to configure Hermes MCP").strip()
+                raise RuntimeError(f"{code}: {message}")
+            final_state = _runtime_mcp_state(runtime, env=env)
+            if final_state != "ready":
+                raise RuntimeError(f"hermes_mcp_setup_incomplete: final MCP state is {final_state}")
+            return True
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"hermes_mcp_setup_failed: {exc}") from exc
     try:
         state = _runtime_mcp_state(runtime, env=env)
         if not _remove_legacy_mcp_servers(runtime, cwd, env=env):
