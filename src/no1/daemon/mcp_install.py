@@ -250,6 +250,8 @@ def prepare_runtime_mcp_env(
     selected_model = str((runtime_options or {}).get("selected_model") or "").strip()
     if normalized_runtime == "kimi" and selected_model:
         result["KIMI_MODEL_NAME"] = selected_model
+    if normalized_runtime == "hermes" and selected_model:
+        result["HERMES_SELECTED_MODEL"] = selected_model
     if normalized_runtime != "opencode":
         return result
     doc = _read_opencode_inline_config(result)
@@ -531,13 +533,21 @@ def ensure_mcp_installed(
         try:
             state = _runtime_mcp_state(runtime, env=env)
             if state == "ready":
-                return True
+                status = hermes_runtime_status(
+                    home=_cccc_home_dir(env),
+                    include_version=False,
+                    hermes_home_override=_hermes_home_override(env),
+                )
+                provider = status.get("onecolleague_provider") if isinstance(status.get("onecolleague_provider"), dict) else {}
+                if provider.get("status") == "ready":
+                    return True
             result = prepare_hermes_runtime(
                 home=_cccc_home_dir(env),
                 cwd=cwd,
                 auto_enable_tools=True,
                 force_mcp=(state == "stale"),
                 hermes_home_override=_hermes_home_override(env),
+                provider_env=env,
             )
             return bool(result.get("ok")) and _runtime_mcp_state(runtime, env=env) == "ready"
         except Exception:

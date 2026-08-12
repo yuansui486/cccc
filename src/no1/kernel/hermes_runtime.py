@@ -22,6 +22,10 @@ from ..util.process import find_subprocess_executable, resolve_subprocess_argv
 from .runtime import get_onecolleague_mcp_stdio_command
 
 HERMES_PROVIDER_ID = "xai-oauth"
+HERMES_ONECOLLEAGUE_PROVIDER_ID = "onecolleague"
+HERMES_ONECOLLEAGUE_PROVIDER_RUNTIME_ID = "custom:onecolleague"
+HERMES_ONECOLLEAGUE_BASE_URL = "https://peer.shierkeji.com/v1"
+HERMES_ONECOLLEAGUE_API_KEY_ENV = "ONECOLLEAGUE_API_KEY"
 HERMES_MCP_SERVER_NAME = "onecolleague"
 
 HERMES_MCP_ENV_PLACEHOLDERS: Dict[str, str] = {
@@ -54,6 +58,20 @@ def hermes_profile_config_path(*, hermes_home_override: Optional[Path] = None) -
     return hermes_profile_dir(hermes_home_override=hermes_home_override) / "config.yaml"
 
 
+def hermes_configured_model(*, hermes_home_override: Optional[Path] = None) -> str:
+    try:
+        data = yaml.safe_load(
+            hermes_profile_config_path(hermes_home_override=hermes_home_override).read_text(encoding="utf-8")
+        ) or {}
+    except Exception:
+        data = {}
+    config = data if isinstance(data, dict) else {}
+    model = config.get("model")
+    if isinstance(model, dict):
+        return str(model.get("default") or model.get("name") or "").strip()
+    return str(model or "").strip()
+
+
 def build_hermes_auth_add_command(*, no_browser: bool = False) -> list[str]:
     cmd = ["hermes", "auth", "add", HERMES_PROVIDER_ID]
     if no_browser:
@@ -65,8 +83,27 @@ def build_hermes_mcp_test_command() -> list[str]:
     return ["hermes", "mcp", "test", HERMES_MCP_SERVER_NAME]
 
 
-def build_hermes_launch_command() -> list[str]:
-    return ["hermes", "--tui", "--yolo"]
+def build_hermes_launch_command(*, model: Optional[str] = None) -> list[str]:
+    cmd = ["hermes", "--tui", "--yolo"]
+    selected = str(model or "").strip()
+    if selected:
+        cmd.extend(["--provider", HERMES_ONECOLLEAGUE_PROVIDER_RUNTIME_ID, "--model", selected])
+    return cmd
+
+
+def normalize_hermes_launch_command(command: Iterable[str], *, selected_model: Optional[str] = None) -> list[str]:
+    """Add a per-Actor Hermes provider/model override without mutating storage."""
+    cmd = [str(item) for item in (command or []) if str(item).strip()]
+    if not cmd:
+        cmd = build_hermes_launch_command(model=selected_model)
+    selected = str(selected_model or "").strip()
+    has_model = any(item == "--model" or item.startswith("--model=") for item in cmd)
+    has_provider = any(item == "--provider" or item.startswith("--provider=") for item in cmd)
+    if not has_provider:
+        cmd.extend(["--provider", HERMES_ONECOLLEAGUE_PROVIDER_RUNTIME_ID])
+    if selected and not has_model:
+        cmd.extend(["--model", selected])
+    return cmd
 
 
 def _effective_hermes_home_override(hermes_home_override: Optional[Path]) -> Optional[Path]:
@@ -117,6 +154,56 @@ def _read_json(path: Path) -> Dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def hermes_onecolleague_base_url(env: Optional[Dict[str, Any]] = None) -> str:
+    values = env if isinstance(env, dict) else os.environ
+    raw = str(values.get("ONECOLLEAGUE_OPENCODE_BASE_URL") or HERMES_ONECOLLEAGUE_BASE_URL).strip()
+    return raw.rstrip("/") or HERMES_ONECOLLEAGUE_BASE_URL
+
+
+def merge_hermes_onecolleague_provider(
+    config: Dict[str, Any], *, env: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Merge the managed OpenAI-compatible OneColleague provider.
+
+    Hermes resolves ``key_env`` at process launch, so the API key never needs
+    to be persisted in the shared Hermes config.
+    """
+    result = dict(config or {})
+    providers = result.get("providers")
+    providers = dict(providers) if isinstance(providers, dict) else {}
+    current = providers.get(HERMES_ONECOLLEAGUE_PROVIDER_ID)
+    current = dict(current) if isinstance(current, dict) else {}
+    current.update(
+        {
+            "name": "OneColleague",
+            "base_url": hermes_onecolleague_base_url(env),
+            "key_env": HERMES_ONECOLLEAGUE_API_KEY_ENV,
+        }
+    )
+    providers[HERMES_ONECOLLEAGUE_PROVIDER_ID] = current
+    result["providers"] = providers
+    return result
+
+
+def _inspect_onecolleague_provider(config: Dict[str, Any]) -> Dict[str, Any]:
+    providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
+    entry = providers.get(HERMES_ONECOLLEAGUE_PROVIDER_ID) if isinstance(providers, dict) else None
+    entry = entry if isinstance(entry, dict) else {}
+    base_url = str(entry.get("base_url") or entry.get("url") or entry.get("api") or "").strip()
+    key_env = str(entry.get("key_env") or entry.get("api_key_env") or "").strip()
+    ready = bool(base_url and key_env == HERMES_ONECOLLEAGUE_API_KEY_ENV)
+    return {
+        "status": "ready" if ready else "missing",
+        "configured": bool(entry),
+        "provider": HERMES_ONECOLLEAGUE_PROVIDER_ID,
+        "runtime_provider": HERMES_ONECOLLEAGUE_PROVIDER_RUNTIME_ID,
+        "base_url": base_url,
+        "key_env": key_env,
+        "expected_base_url": HERMES_ONECOLLEAGUE_BASE_URL,
+        "expected_key_env": HERMES_ONECOLLEAGUE_API_KEY_ENV,
+    }
 
 
 def _normalize_args(value: Any) -> list[str]:
@@ -329,6 +416,7 @@ def hermes_runtime_status(
     hermes_path = find_subprocess_executable("hermes")
 
     mcp = _inspect_mcp_config(config, expected_cmd=expected_cmd)
+    onecolleague_provider = _inspect_onecolleague_provider(config)
     auth = _inspect_auth(profile_dir)
     issues: list[str] = []
     if not hermes_path:
@@ -339,8 +427,8 @@ def hermes_runtime_status(
         issues.append("config_missing")
     if mcp.get("status") != "ready":
         issues.append("onecolleague_mcp_config_not_ready")
-    if auth.get("status") != "present":
-        issues.append("xai_oauth_missing")
+    if onecolleague_provider.get("status") != "ready":
+        issues.append("onecolleague_provider_not_ready")
 
     gates = [
         {
@@ -360,8 +448,13 @@ def hermes_runtime_status(
         },
         {
             "id": "xai_oauth_present",
-            "status": "pass" if auth.get("status") == "present" else "fail",
+            "status": "pass" if auth.get("status") == "present" else "pending",
             "evidence": auth.get("auth_path"),
+        },
+        {
+            "id": "onecolleague_provider_ready",
+            "status": "pass" if onecolleague_provider.get("status") == "ready" else "fail",
+            "evidence": onecolleague_provider,
         },
         {
             "id": "concurrent_actor_attribution",
@@ -402,9 +495,9 @@ def hermes_runtime_status(
         "runtime": "hermes",
         "phase": "phase1_pty_runtime_mvp",
         "user_facing_actor_runtime_enabled": True,
-        "setup_ready": bool(profile_dir.exists() and mcp.get("status") == "ready"),
+        "setup_ready": bool(profile_dir.exists() and mcp.get("status") == "ready" and onecolleague_provider.get("status") == "ready"),
         "auth_ready": bool(auth.get("status") == "present"),
-        "launch_ready": bool(hermes_path and profile_dir.exists() and mcp.get("status") == "ready"),
+        "launch_ready": bool(hermes_path and profile_dir.exists() and mcp.get("status") == "ready" and onecolleague_provider.get("status") == "ready"),
         "hermes_cli": {
             "available": bool(hermes_path),
             "path": hermes_path,
@@ -420,6 +513,7 @@ def hermes_runtime_status(
         },
         "user_hermes_home": str(normal_home),
         "mcp": mcp,
+        "onecolleague_provider": onecolleague_provider,
         "auth": auth,
         "commands": commands,
         "phase0_gates": gates,
@@ -469,6 +563,7 @@ def prepare_hermes_runtime(
     auto_enable_tools: bool = False,
     force_mcp: bool = False,
     hermes_home_override: Optional[Path] = None,
+    provider_env: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     hermes_home_override = _effective_hermes_home_override(hermes_home_override)
     root = Path(home).expanduser().resolve() if home is not None else ensure_home()
@@ -533,6 +628,19 @@ def prepare_hermes_runtime(
                     "commands_run": commands_run,
                     "status": status,
                 }
+
+        # Provider setup is independent from MCP discovery. It is safe to
+        # merge after MCP setup (or on an already-ready profile) and never
+        # persists the API key itself.
+        config_path = hermes_profile_config_path(hermes_home_override=hermes_home_override)
+        current_config = _read_yaml(config_path)
+        merged_config = merge_hermes_onecolleague_provider(current_config, env=provider_env)
+        if merged_config != current_config:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                yaml.safe_dump(merged_config, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
 
         return {
             "ok": True,

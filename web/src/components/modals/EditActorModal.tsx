@@ -130,7 +130,7 @@ const SECRETS_PLACEHOLDER: Record<string, { set: string; unset: string }> = {
     unset: "GOOGLE_API_KEY",
   },
   hermes: {
-    set: "# Configure Hermes providers, OAuth, and tools in your Hermes profile.",
+    set: 'ONECOLLEAGUE_API_KEY="..."',
     unset: "",
   },
 };
@@ -500,7 +500,7 @@ export function EditActorModal({
     });
     if (
       selectedRuntimePreset.envPrivate ||
-      (["codex", "opencode"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
+      (["codex", "opencode", "hermes"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
     ) {
       setSecretsPrimed(true);
     }
@@ -526,7 +526,7 @@ export function EditActorModal({
       const next = mergeRuntimeAuthSecret(current, runtime, currentDoneHubCodexApiKey);
       return next === current ? current : next;
     });
-    if (["codex", "opencode"].includes(runtime) && currentDoneHubCodexApiKey) {
+    if (["codex", "opencode", "hermes"].includes(runtime) && currentDoneHubCodexApiKey) {
       setSecretsPrimed(true);
     }
   }, [isOpen, editMode, effectiveLinked, runtime, doneHubCodexApiKey]);
@@ -587,7 +587,7 @@ export function EditActorModal({
     const apiKey = getCurrentDoneHubCodexApiKey();
     setSecretsSetText((current) => mergePresetSecrets(current, preset, apiKey));
     setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
-    if (preset.envPrivate || (["codex", "opencode"].includes(preset.runtime) && apiKey)) {
+    if (preset.envPrivate || (["codex", "opencode", "hermes"].includes(preset.runtime) && apiKey)) {
       setSecretsPrimed(true);
     }
   };
@@ -609,7 +609,7 @@ export function EditActorModal({
       return preset ? mergePresetSecrets(cleared, preset, apiKey) : mergeRuntimeAuthSecret(cleared, next, apiKey);
     });
     setSecretsUnsetText((current) => preset ? mergePresetUnsetKeys(current, preset) : mergeAllPresetUnsetKeys(current));
-    if (preset?.envPrivate || (["codex", "opencode"].includes(next) && apiKey)) setSecretsPrimed(true);
+    if (preset?.envPrivate || (["codex", "opencode", "hermes"].includes(next) && apiKey)) setSecretsPrimed(true);
     setOpencodeDefaultVariant("high");
   };
 

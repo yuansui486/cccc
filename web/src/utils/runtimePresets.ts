@@ -38,7 +38,7 @@ function envTextHasAssignment(text: string, key: string): boolean {
 
 export function needsDedicatedOneColleagueKey(runtime: string, secretsText: string): boolean {
   const normalizedRuntime = String(runtime || "").trim().toLowerCase();
-  if (normalizedRuntime !== "codex" && normalizedRuntime !== "opencode") return false;
+  if (!["codex", "opencode", "hermes"].includes(normalizedRuntime)) return false;
   return envTextHasAssignment(secretsText, "OPENAI_API_KEY")
     && !envTextHasAssignment(secretsText, "ONECOLLEAGUE_API_KEY");
 }
@@ -50,7 +50,7 @@ const FALLBACK_RUNTIME_COMMANDS: Partial<Record<SupportedRuntime, string[]>> = {
   codex: ["codex", "-c", "shell_environment_policy.inherit=all", "--dangerously-bypass-approvals-and-sandbox", "--search"],
   droid: ["droid", "--auto", "high"],
   gemini: ["gemini", "--yolo"],
-  hermes: ["hermes"],
+  hermes: ["hermes", "--tui", "--yolo"],
   kimi: ["kimi", "--yolo"],
   neovate: ["neovate"],
   opencode: ["opencode", "--auto"],
@@ -200,6 +200,21 @@ export function opencodeRuntimePreset(model: string, label?: string): RuntimePre
   };
 }
 
+export function hermesRuntimePresetId(model: string): RuntimePresetId {
+  return `model:hermes:${encodeURIComponent(String(model || "").trim())}`;
+}
+
+export function hermesRuntimePreset(model: string, label?: string): RuntimePreset | null {
+  const normalized = String(model || "").trim();
+  if (!normalized) return null;
+  return {
+    id: hermesRuntimePresetId(normalized),
+    label: String(label || normalized).trim() || normalized,
+    runtime: "hermes",
+    model: normalized,
+  };
+}
+
 export function runtimePresetsForModels(models: string[]): RuntimePreset[] {
   const normalizedModels = models
     .map((model) => String(model || "").trim())
@@ -214,9 +229,9 @@ export function runtimePresetsForModels(models: string[]): RuntimePreset[] {
       seen.add(key);
       return true;
     })
-    .map((model) => opencodeRuntimePreset(model))
+    .flatMap((model) => [opencodeRuntimePreset(model), hermesRuntimePreset(model)])
     .filter((preset): preset is RuntimePreset => Boolean(preset));
-  return [...RUNTIME_PRESETS.filter((preset) => preset.runtime !== "opencode"), ...dynamic];
+  return [...RUNTIME_PRESETS.filter((preset) => preset.runtime !== "opencode" && preset.runtime !== "hermes"), ...dynamic];
 }
 
 export function runtimePresetById(id: string): RuntimePreset | null {
@@ -224,10 +239,11 @@ export function runtimePresetById(id: string): RuntimePreset | null {
   if (!needle) return null;
   const existing = RUNTIME_PRESETS.find((preset) => preset.id === needle);
   if (existing) return existing;
-  const prefix = "model:opencode:";
+  const prefix = needle.startsWith("model:hermes:") ? "model:hermes:" : "model:opencode:";
   if (!needle.startsWith(prefix)) return null;
   try {
-    return opencodeRuntimePreset(decodeURIComponent(needle.slice(prefix.length)));
+    const model = decodeURIComponent(needle.slice(prefix.length));
+    return prefix === "model:hermes:" ? hermesRuntimePreset(model) : opencodeRuntimePreset(model);
   } catch {
     return null;
   }
@@ -264,6 +280,7 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
       : model;
     if (modelId) return opencodeRuntimePresetId(modelId);
   }
+  if (normalizedRuntime === "hermes" && model) return hermesRuntimePresetId(model);
   return "";
 }
 
@@ -272,6 +289,7 @@ const MODEL_ARGUMENTS: Partial<Record<SupportedRuntime, "-m" | "--model">> = {
   codex: "-m",
   gemini: "--model",
   opencode: "-m",
+  hermes: "--model",
 };
 
 export function runtimeSupportsModelSelection(runtime: string): boolean {
@@ -296,7 +314,11 @@ export function modelFromRuntimeConfiguration(
 ): string {
   const normalizedRuntime = String(runtime || "").trim();
   const persisted = String(selectedModel || "").trim();
-  if (normalizedRuntime === "kimi") return persisted;
+  if (normalizedRuntime === "kimi" || normalizedRuntime === "hermes") return persisted || modelFromCommand(
+    Array.isArray(command)
+      ? command.map((item) => String(item || "").trim()).filter(Boolean)
+      : splitCommand(String(command || "").trim()),
+  );
   const tokens = Array.isArray(command)
     ? command.map((item) => String(item || "").trim()).filter(Boolean)
     : splitCommand(String(command || "").trim());
@@ -317,7 +339,7 @@ export function withRuntimeModel(
     ? command.map((item) => String(item || "").trim()).filter(Boolean)
     : splitCommand(String(command || "").trim());
   const cleaned = withoutCommandModel(tokens);
-  if (normalizedRuntime === "kimi") return cleaned.join(" ");
+  if (normalizedRuntime === "kimi" || normalizedRuntime === "hermes") return cleaned.join(" ");
   const flag = MODEL_ARGUMENTS[normalizedRuntime];
   const normalizedModel = String(model || "").trim();
   if (!flag || !normalizedModel) return cleaned.join(" ");
@@ -504,7 +526,7 @@ export function knownPresetSecretKeysForRuntime(runtime: string): Set<string> {
     for (const key of Object.keys(preset.envPrivate || {})) out.add(key);
   }
   if (runtime === "claude") out.add("ANTHROPIC_AUTH_TOKEN");
-  if (runtime === "codex" || runtime === "opencode") {
+  if (runtime === "codex" || runtime === "opencode" || runtime === "hermes") {
     out.add("ONECOLLEAGUE_API_KEY");
     out.add("OPENAI_API_KEY");
   }
@@ -534,7 +556,7 @@ function authSecretKeyForRuntimePreset(preset: RuntimePreset): string {
 }
 
 function authSecretKeyForRuntime(runtime: string): string {
-  if (["codex", "opencode"].includes(String(runtime || "").trim())) return "ONECOLLEAGUE_API_KEY";
+  if (["codex", "opencode", "hermes"].includes(String(runtime || "").trim())) return "ONECOLLEAGUE_API_KEY";
   return "";
 }
 

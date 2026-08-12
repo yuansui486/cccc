@@ -19,6 +19,15 @@ class TestMcpInstall(unittest.TestCase):
         self.assertEqual(prepared["KIMI_MODEL_NAME"], "kimi-k2.6")
         self.assertEqual(prepared["KIMI_API_KEY"], "secret")
 
+    def test_prepare_runtime_mcp_env_injects_selected_hermes_model(self) -> None:
+        prepared = prepare_runtime_mcp_env(
+            "hermes",
+            {"ONECOLLEAGUE_API_KEY": "secret"},
+            runtime_options={"selected_model": "deepseek-v4-pro"},
+        )
+        self.assertEqual(prepared["HERMES_SELECTED_MODEL"], "deepseek-v4-pro")
+        self.assertEqual(prepared["ONECOLLEAGUE_API_KEY"], "secret")
+
     def test_is_mcp_installed_unknown_runtime_false(self) -> None:
         self.assertFalse(is_mcp_installed("unknown-runtime"))
 
@@ -377,6 +386,7 @@ class TestMcpInstall(unittest.TestCase):
                 auto_enable_tools=True,
                 force_mcp=False,
                 hermes_home_override=None,
+                provider_env=env,
             )
 
     def test_ensure_mcp_installed_hermes_respects_explicit_hermes_home(self) -> None:
@@ -405,6 +415,7 @@ class TestMcpInstall(unittest.TestCase):
                 auto_enable_tools=True,
                 force_mcp=False,
                 hermes_home_override=hermes_home,
+                provider_env=env,
             )
 
     def test_ensure_mcp_installed_returns_false_when_initial_probe_times_out(self) -> None:

@@ -15,7 +15,7 @@ export type RuntimeChoiceGroup = {
 const GROUP_ORDER = ["codex", "claude", "gemini", "kimi", "opencode"] as const;
 type GroupKey = typeof GROUP_ORDER[number];
 const VISIBLE_RUNTIME_CHOICES = new Set<SupportedRuntime>(["gemini", "opencode"]);
-export const ACTOR_RUNTIME_CHOICES: SupportedRuntime[] = ["codex", "claude", "gemini", "kimi", "opencode"];
+export const ACTOR_RUNTIME_CHOICES: SupportedRuntime[] = ["codex", "claude", "gemini", "hermes", "kimi", "opencode"];
 
 export type RuntimeSelectorOption = {
   value: SupportedRuntime;

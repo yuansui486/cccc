@@ -46,6 +46,26 @@ class TestRuntimeCommandDefaults(unittest.TestCase):
             ["opencode", "--auto", "-m", "onecolleague/gpt-5.4"],
         )
 
+    def test_daemon_launch_normalizer_applies_hermes_provider_and_model(self) -> None:
+        from no1.daemon import server as daemon_server
+
+        self.assertEqual(
+            daemon_server._normalize_runtime_command(
+                "hermes",
+                ["hermes", "--tui", "--yolo"],
+                env={"HERMES_SELECTED_MODEL": "deepseek-v4-pro"},
+            ),
+            [
+                "hermes",
+                "--tui",
+                "--yolo",
+                "--provider",
+                "custom:onecolleague",
+                "--model",
+                "deepseek-v4-pro",
+            ],
+        )
+
     def test_onecolleague_mcp_stdio_command_prefers_unresolved_venv_entrypoint(self) -> None:
         from no1.kernel.runtime import get_onecolleague_mcp_stdio_command
 

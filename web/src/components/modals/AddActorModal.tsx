@@ -138,7 +138,7 @@ function secretsPlaceholderForRuntime(runtime: SupportedRuntime): string {
     return 'GOOGLE_API_KEY="..."';
   }
   if (runtime === "hermes") {
-    return "# Configure Hermes providers, OAuth, and tools in your Hermes profile.";
+    return 'ONECOLLEAGUE_API_KEY="..."';
   }
   return 'ANTHROPIC_AUTH_TOKEN="..."\nANTHROPIC_BASE_URL="..."';
 }
@@ -280,7 +280,7 @@ export function AddActorModal({
     }
     if (
       selectedRuntimePreset.envPrivate ||
-      (["codex", "opencode"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
+      (["codex", "opencode", "hermes"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
     ) {
       setShowAdvancedActor(true);
     }
@@ -308,7 +308,7 @@ export function AddActorModal({
     if (nextSecrets !== newActorSecretsSetText) {
       setNewActorSecretsSetText(nextSecrets);
     }
-    if (["codex", "opencode"].includes(newActorRuntime) && currentDoneHubCodexApiKey) {
+    if (["codex", "opencode", "hermes"].includes(newActorRuntime) && currentDoneHubCodexApiKey) {
       setShowAdvancedActor(true);
     }
   }, [
@@ -392,7 +392,7 @@ export function AddActorModal({
     if (!preset) return;
     const apiKey = getCurrentDoneHubCodexApiKey();
     setNewActorSecretsSetText(mergePresetSecrets(newActorSecretsSetText, preset, apiKey));
-    if (preset.envPrivate || (["codex", "opencode"].includes(preset.runtime) && apiKey)) {
+    if (preset.envPrivate || (["codex", "opencode", "hermes"].includes(preset.runtime) && apiKey)) {
       setShowAdvancedActor(true);
     }
   };
@@ -415,7 +415,7 @@ export function AddActorModal({
         ? mergePresetSecrets(clearedSecrets, preset, apiKey)
         : mergeRuntimeAuthSecret(clearedSecrets, next, apiKey),
     );
-    if (preset?.envPrivate || (["codex", "opencode"].includes(next) && apiKey)) setShowAdvancedActor(true);
+    if (preset?.envPrivate || (["codex", "opencode", "hermes"].includes(next) && apiKey)) setShowAdvancedActor(true);
     setOpencodeDefaultVariant("high");
   };
 

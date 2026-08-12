@@ -194,6 +194,42 @@ class TestActorRuntimeOps(unittest.TestCase):
         self.assertNotIn("HERMES_HOME", spec["merged_env"])
         self.assertEqual(spec["effective_command"], ["hermes", "--profile", "other", "--tui", "--yolo"])
 
+    def test_resolve_launch_spec_passes_hermes_selected_model_to_normalizer(self) -> None:
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_spec
+
+        with tempfile.TemporaryDirectory() as td:
+            group = SimpleNamespace(
+                group_id="g-test",
+                doc={
+                    "active_scope_key": "scope1",
+                    "actors": [
+                        {
+                            "id": "hermes-1",
+                            "default_scope_key": "scope1",
+                            "runner": "pty",
+                            "runtime": "hermes",
+                            "command": ["hermes", "--tui", "--yolo"],
+                            "runtime_options": {"selected_model": "deepseek-v4-pro"},
+                        }
+                    ],
+                },
+            )
+            spec = resolve_actor_launch_spec(
+                group,
+                "hermes-1",
+                command=[],
+                env={},
+                runner="pty",
+                runtime="hermes",
+                find_scope_url=lambda _group, _scope_key: td,
+                effective_runner_kind=lambda runner: runner,
+                normalize_runtime_command=lambda _runtime, command, *, env: [*command, env["HERMES_SELECTED_MODEL"]],
+                supported_runtimes=("hermes",),
+            )
+
+        self.assertEqual(spec["effective_command"][-1], "deepseek-v4-pro")
+        self.assertEqual(spec["merged_env"]["HERMES_SELECTED_MODEL"], "deepseek-v4-pro")
+
     def test_codex_launch_env_does_not_reuse_openai_api_key(self) -> None:
         from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_config
 

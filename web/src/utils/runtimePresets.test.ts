@@ -57,12 +57,14 @@ describe("runtime presets", () => {
     expect(codexModels.map((item) => item.value)).toEqual(["gpt-5.4", "gpt-5.5"]);
     expect(buildRuntimeModelOptions("claude").every((item) => item.preset.runtime === "claude")).toBe(true);
     expect(buildRuntimeModelOptions("opencode", null, ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
+    expect(buildRuntimeModelOptions("hermes", null, ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
   });
 
   it("reads, replaces, and clears models using each known runtime protocol", () => {
     expect(modelFromRuntimeConfiguration("codex", "codex --search -m gpt-5.5")).toBe("gpt-5.5");
     expect(modelFromRuntimeConfiguration("opencode", "opencode -m onecolleague/deepseek-v4-pro")).toBe("deepseek-v4-pro");
     expect(modelFromRuntimeConfiguration("kimi", "kimi --yolo", "kimi-k2.6")).toBe("kimi-k2.6");
+    expect(modelFromRuntimeConfiguration("hermes", "hermes --tui", "deepseek-v4-pro")).toBe("deepseek-v4-pro");
     expect(withRuntimeModel("codex", "codex -m old --search", "gpt-5.5")).toBe("codex --search -m gpt-5.5");
     expect(withRuntimeModel("claude", "claude --model=old --effort high", "new-model")).toBe(
       "claude --effort high --model new-model"
@@ -72,11 +74,13 @@ describe("runtime presets", () => {
       "opencode --auto -m onecolleague/new-model"
     );
     expect(withRuntimeModel("kimi", "kimi --yolo", "kimi-k2.6")).toBe("kimi --yolo");
+    expect(withRuntimeModel("hermes", "hermes --tui --yolo", "deepseek-v4-pro")).toBe("hermes --tui --yolo");
   });
 
   it("allows manual models only for known protocols and rejects unsafe IDs", () => {
     expect(runtimeSupportsModelSelection("codex")).toBe(true);
     expect(runtimeSupportsModelSelection("kimi")).toBe(true);
+    expect(runtimeSupportsModelSelection("hermes")).toBe(true);
     expect(runtimeSupportsModelSelection("droid")).toBe(false);
     expect(validateRuntimeModelId("onecolleague/deepseek-v4-pro")).toBe("");
     expect(validateRuntimeModelId(" model with spaces ")).not.toBe("");

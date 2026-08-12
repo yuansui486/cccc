@@ -83,6 +83,54 @@ class TestHermesRuntime(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_onecolleague_provider_merge_keeps_secrets_out_of_config(self) -> None:
+        from no1.kernel.hermes_runtime import merge_hermes_onecolleague_provider
+
+        config = {
+            "model": {"provider": "xai-oauth", "default": "grok-code-fast-1"},
+            "providers": {"other": {"base_url": "https://other.example/v1"}},
+        }
+        merged = merge_hermes_onecolleague_provider(
+            config,
+            env={
+                "ONECOLLEAGUE_OPENCODE_BASE_URL": "https://peer.example/v1/",
+                "ONECOLLEAGUE_API_KEY": "must-not-be-persisted",
+            },
+        )
+
+        self.assertEqual(merged["model"], config["model"])
+        self.assertEqual(merged["providers"]["other"], config["providers"]["other"])
+        provider = merged["providers"]["onecolleague"]
+        self.assertEqual(provider["base_url"], "https://peer.example/v1")
+        self.assertEqual(provider["key_env"], "ONECOLLEAGUE_API_KEY")
+        self.assertNotIn("must-not-be-persisted", yaml.safe_dump(merged))
+
+    def test_launch_command_uses_per_actor_model_without_duplicates(self) -> None:
+        from no1.kernel.hermes_runtime import normalize_hermes_launch_command
+
+        self.assertEqual(
+            normalize_hermes_launch_command(
+                ["hermes", "--tui", "--yolo"],
+                selected_model="deepseek-v4-pro",
+            ),
+            [
+                "hermes",
+                "--tui",
+                "--yolo",
+                "--provider",
+                "custom:onecolleague",
+                "--model",
+                "deepseek-v4-pro",
+            ],
+        )
+        self.assertEqual(
+            normalize_hermes_launch_command(
+                ["hermes", "--provider", "custom:manual", "--model", "manual-model", "--tui"],
+                selected_model="ignored-model",
+            ),
+            ["hermes", "--provider", "custom:manual", "--model", "manual-model", "--tui"],
+        )
+
     def test_status_respects_explicit_hermes_home_env(self) -> None:
         from no1.kernel.hermes_runtime import hermes_runtime_status
 

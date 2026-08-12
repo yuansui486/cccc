@@ -29,6 +29,7 @@ from ..kernel.settings import (
 from ..kernel.terminal_transcript import get_terminal_transcript_settings
 from ..kernel.messaging import disabled_recipient_actor_ids, enabled_recipient_actor_ids
 from ..kernel.runtime import ensure_opencode_auto_command
+from ..kernel.hermes_runtime import hermes_configured_model, normalize_hermes_launch_command
 from ..kernel.runtime_state_source import actor_uses_codex_app_server_state
 from ..paths import ensure_home
 from ..runners import pty as pty_runner
@@ -342,6 +343,21 @@ def _normalize_runtime_command(runtime: str, command: list[str], *, env: Dict[st
     cmd = [str(x) for x in (command or []) if str(x).strip()]
     if rt == "opencode":
         return ensure_opencode_auto_command(cmd)
+    if rt == "hermes":
+        effective_env = dict(os.environ if env is None else env)
+        selected_model = str(effective_env.get("HERMES_SELECTED_MODEL") or "").strip()
+        if not selected_model:
+            raw_home = str(effective_env.get("HERMES_HOME") or "").strip()
+            selected_model = hermes_configured_model(
+                hermes_home_override=Path(raw_home).expanduser() if raw_home else None
+            )
+        if not selected_model:
+            from .opencode_provider import load_opencode_model_catalog
+
+            catalog = load_opencode_model_catalog(effective_env)
+            if catalog:
+                selected_model = str(catalog[0].get("model") or "").strip()
+        return normalize_hermes_launch_command(cmd, selected_model=selected_model)
     if not cmd:
         return []
 

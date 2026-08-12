@@ -164,6 +164,12 @@ def resolve_actor_launch_config(
         merged_env.update(private_env)
     else:
         merged_env = dict(public_env)
+    if resolved_runtime == "hermes":
+        selected_model = str((actor.get("runtime_options") or {}).get("selected_model") or "").strip()
+        if selected_model:
+            # Runtime-only hint consumed by the command normalizer; never
+            # persisted as a public environment variable.
+            merged_env["HERMES_SELECTED_MODEL"] = selected_model
     return {
         "actor": dict(actor),
         "runtime": resolved_runtime,
