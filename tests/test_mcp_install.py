@@ -10,6 +10,19 @@ from no1.kernel.runtime import get_onecolleague_mcp_stdio_command
 
 
 class TestMcpInstall(unittest.TestCase):
+    def test_prepare_runtime_mcp_env_marks_claude_as_host_managed(self) -> None:
+        prepared = prepare_runtime_mcp_env(
+            "claude",
+            {
+                "ANTHROPIC_BASE_URL": "https://peer.example/claude",
+                "ANTHROPIC_AUTH_TOKEN": "actor-token",
+            },
+        )
+
+        self.assertEqual(prepared["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"], "1")
+        self.assertEqual(prepared["ANTHROPIC_BASE_URL"], "https://peer.example/claude")
+        self.assertEqual(prepared["ANTHROPIC_AUTH_TOKEN"], "actor-token")
+
     def test_prepare_runtime_mcp_env_injects_selected_kimi_model(self) -> None:
         prepared = prepare_runtime_mcp_env(
             "kimi",

@@ -583,6 +583,9 @@ class ClaudeAppSession:
             env["ONECOLLEAGUE_ACTOR_ID"] = self.actor_id
             env["CCCC_GROUP_ID"] = self.group_id
             env["CCCC_ACTOR_ID"] = self.actor_id
+            # Claude Code otherwise lets ~/.claude/settings.json env entries
+            # replace the host-provided provider endpoint and credentials.
+            env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1"
             env = with_node_deprecation_warnings_suppressed(env)
             if not ensure_mcp_installed("claude", self.cwd, auto_mcp_runtimes=("claude",), env=env):
                 raise RuntimeError("failed to install MCP for runtime: claude")
@@ -1087,6 +1090,7 @@ class ClaudeAppSession:
         env["ONECOLLEAGUE_ACTOR_ID"] = self.actor_id
         env["CCCC_GROUP_ID"] = self.group_id
         env["CCCC_ACTOR_ID"] = self.actor_id
+        env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1"
         env = with_node_deprecation_warnings_suppressed(env)
 
         launch_cmd, runtime_doc, launch_kind = prepare_claude_headless_launch_command(

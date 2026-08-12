@@ -248,6 +248,12 @@ def prepare_runtime_mcp_env(
     result = {str(k): str(v) for k, v in (env or {}).items() if isinstance(k, str)}
     normalized_runtime = str(runtime or "").strip().lower()
     selected_model = str((runtime_options or {}).get("selected_model") or "").strip()
+    # Claude Code normally lets settings.json env entries replace values
+    # inherited from the host process.  OneColleague is the host for managed
+    # actors, so ask Claude to honor the provider routing and credentials we
+    # inject here (ANTHROPIC_BASE_URL, ANTHROPIC_*_KEY/TOKEN, model vars).
+    if normalized_runtime == "claude":
+        result["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1"
     if normalized_runtime == "kimi" and selected_model:
         result["KIMI_MODEL_NAME"] = selected_model
     if normalized_runtime == "hermes" and selected_model:
