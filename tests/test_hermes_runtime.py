@@ -150,6 +150,91 @@ class TestHermesRuntime(unittest.TestCase):
         self.assertIn(Path(manual[0]).name.lower(), {"hermes", "hermes.exe", "hermes.cmd", "hermes.bat"})
         self.assertEqual(manual[1:], ["--provider", "custom:manual", "--model", "manual-model", "--tui"])
 
+    def test_prebuilt_tui_dir_finds_bundle_from_hermes_venv(self) -> None:
+        from no1.kernel.hermes_runtime import hermes_prebuilt_tui_dir
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "hermes-agent"
+            executable = root / "venv" / "Scripts" / "hermes.exe"
+            tui_dir = root / "ui-tui"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("", encoding="utf-8")
+            (tui_dir / "dist").mkdir(parents=True)
+            (tui_dir / "dist" / "entry.js").write_text("", encoding="utf-8")
+            (tui_dir / "node_modules").mkdir()
+            (tui_dir / "node_modules" / "undici").mkdir()
+
+            with patch("no1.kernel.hermes_runtime.find_subprocess_executable", return_value=str(executable)):
+                self.assertEqual(
+                    hermes_prebuilt_tui_dir(["hermes", "--tui", "--yolo"]),
+                    tui_dir,
+                )
+
+    def test_prebuilt_tui_dir_requires_tui_flag_and_complete_bundle(self) -> None:
+        from no1.kernel.hermes_runtime import hermes_prebuilt_tui_dir
+
+        with tempfile.TemporaryDirectory() as td:
+            executable = Path(td) / "hermes-agent" / "venv" / "Scripts" / "hermes.exe"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("", encoding="utf-8")
+            with patch("no1.kernel.hermes_runtime.find_subprocess_executable", return_value=str(executable)):
+                self.assertIsNone(hermes_prebuilt_tui_dir(["hermes", "--yolo"]))
+                self.assertIsNone(hermes_prebuilt_tui_dir(["hermes", "--tui", "--yolo"]))
+
+    def test_status_accepts_existing_onecolleague_entrypoint_after_install_path_changes(self) -> None:
+        from no1.kernel.hermes_runtime import hermes_runtime_status
+
+        cccc_home, cleanup = self._with_home()
+        user_home = cccc_home / "user"
+        installed = cccc_home / "packaged" / "onecolleague.exe"
+        current = cccc_home / "source" / "onecolleague.exe"
+        installed.parent.mkdir(parents=True)
+        current.parent.mkdir(parents=True)
+        installed.write_text("", encoding="utf-8")
+        current.write_text("", encoding="utf-8")
+        try:
+            self._write_ready_config(user_home / ".hermes" / "config.yaml", [str(installed), "mcp"])
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
+                return_value=[str(current), "mcp"],
+            ), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
+                return_value="/usr/bin/hermes",
+            ):
+                status = hermes_runtime_status(home=cccc_home, include_version=False)
+
+            self.assertEqual(status["mcp"]["status"], "ready")
+            self.assertTrue(status["mcp"]["command_matches"])
+        finally:
+            cleanup()
+
+    def test_status_rejects_missing_alternate_onecolleague_entrypoint(self) -> None:
+        from no1.kernel.hermes_runtime import hermes_runtime_status
+
+        cccc_home, cleanup = self._with_home()
+        user_home = cccc_home / "user"
+        current = cccc_home / "source" / "onecolleague.exe"
+        current.parent.mkdir(parents=True)
+        current.write_text("", encoding="utf-8")
+        try:
+            self._write_ready_config(
+                user_home / ".hermes" / "config.yaml",
+                [str(cccc_home / "missing" / "onecolleague.exe"), "mcp"],
+            )
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
+                return_value=[str(current), "mcp"],
+            ), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
+                return_value="/usr/bin/hermes",
+            ):
+                status = hermes_runtime_status(home=cccc_home, include_version=False)
+
+            self.assertEqual(status["mcp"]["status"], "stale")
+            self.assertFalse(status["mcp"]["command_matches"])
+        finally:
+            cleanup()
+
     def test_status_respects_explicit_hermes_home_env(self) -> None:
         from no1.kernel.hermes_runtime import hermes_runtime_status
 
@@ -293,6 +378,57 @@ class TestHermesRuntime(unittest.TestCase):
             mock_run.assert_not_called()
         finally:
             cleanup()
+
+    def test_prepare_installs_missing_sdk_without_readding_ready_mcp(self) -> None:
+        from no1.kernel import hermes_runtime
+
+        cccc_home, cleanup = self._with_home()
+        user_home = cccc_home / "user"
+        command = ["/abs/onecolleague", "mcp"]
+        sdk_states = iter(
+            [
+                {"available": False, "python": "/hermes/venv/python"},
+                {"available": True, "python": "/hermes/venv/python"},
+            ]
+        )
+        try:
+            self._write_ready_config(user_home / ".hermes" / "config.yaml", command)
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
+                return_value="/hermes/venv/bin/hermes",
+            ), patch(
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
+                return_value=command,
+            ), patch(
+                "no1.kernel.hermes_runtime._hermes_mcp_sdk_status",
+                side_effect=lambda *_args, **_kwargs: next(sdk_states),
+            ), patch(
+                "no1.kernel.hermes_runtime._install_hermes_mcp_sdk",
+                return_value=(
+                    ["uv", "pip", "install", "mcp==1.28.1"],
+                    Mock(returncode=0, stdout="installed", stderr=""),
+                ),
+            ) as install, patch.object(hermes_runtime, "_run_hermes_cli") as mock_run:
+                result = hermes_runtime.prepare_hermes_runtime(home=cccc_home, auto_enable_tools=True)
+
+            self.assertTrue(result.get("ok"), result)
+            install.assert_called_once()
+            mock_run.assert_not_called()
+            self.assertEqual([item["name"] for item in result["commands_run"]], ["mcp_sdk_install"])
+        finally:
+            cleanup()
+
+    def test_mcp_test_reports_connection_failure_despite_zero_exit_code(self) -> None:
+        from no1.kernel import hermes_runtime
+
+        with patch.object(
+            hermes_runtime,
+            "_run_hermes_cli",
+            return_value=Mock(returncode=0, stdout="Connection failed: MCP SDK missing", stderr=""),
+        ):
+            result = hermes_runtime.run_hermes_mcp_test()
+
+        self.assertFalse(result["ok"])
 
     def test_prepare_installs_missing_hermes_mcp_sdk_before_discovery(self) -> None:
         from no1.kernel import hermes_runtime

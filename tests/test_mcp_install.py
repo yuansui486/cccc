@@ -33,13 +33,37 @@ class TestMcpInstall(unittest.TestCase):
         self.assertEqual(prepared["KIMI_API_KEY"], "secret")
 
     def test_prepare_runtime_mcp_env_injects_selected_hermes_model(self) -> None:
-        prepared = prepare_runtime_mcp_env(
-            "hermes",
-            {"ONECOLLEAGUE_API_KEY": "secret"},
-            runtime_options={"selected_model": "deepseek-v4-pro"},
-        )
+        with patch("no1.daemon.mcp_install.hermes_prebuilt_tui_dir", return_value=None):
+            prepared = prepare_runtime_mcp_env(
+                "hermes",
+                {"ONECOLLEAGUE_API_KEY": "secret"},
+                runtime_options={"selected_model": "deepseek-v4-pro"},
+            )
         self.assertEqual(prepared["HERMES_SELECTED_MODEL"], "deepseek-v4-pro")
         self.assertEqual(prepared["ONECOLLEAGUE_API_KEY"], "secret")
+
+    def test_prepare_runtime_mcp_env_injects_prebuilt_hermes_tui(self) -> None:
+        tui_dir = Path("/opt/hermes/ui-tui")
+        with patch("no1.daemon.mcp_install.hermes_prebuilt_tui_dir", return_value=tui_dir) as discover:
+            prepared = prepare_runtime_mcp_env(
+                "hermes",
+                {"ONECOLLEAGUE_API_KEY": "secret"},
+                command=["hermes", "--tui", "--yolo"],
+            )
+
+        self.assertEqual(prepared["HERMES_TUI_DIR"], str(tui_dir))
+        discover.assert_called_once_with(["hermes", "--tui", "--yolo"])
+
+    def test_prepare_runtime_mcp_env_preserves_explicit_hermes_tui(self) -> None:
+        with patch("no1.daemon.mcp_install.hermes_prebuilt_tui_dir") as discover:
+            prepared = prepare_runtime_mcp_env(
+                "hermes",
+                {"HERMES_TUI_DIR": "/custom/tui"},
+                command=["hermes", "--tui", "--yolo"],
+            )
+
+        self.assertEqual(prepared["HERMES_TUI_DIR"], "/custom/tui")
+        discover.assert_not_called()
 
     def test_is_mcp_installed_unknown_runtime_false(self) -> None:
         self.assertFalse(is_mcp_installed("unknown-runtime"))

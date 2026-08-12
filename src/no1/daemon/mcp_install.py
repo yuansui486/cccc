@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from ..kernel.hermes_runtime import hermes_runtime_status, prepare_hermes_runtime
+from ..kernel.hermes_runtime import hermes_prebuilt_tui_dir, hermes_runtime_status, prepare_hermes_runtime
 from ..kernel.runtime import get_onecolleague_mcp_stdio_command
 from ..util.conv import coerce_bool
 from ..util.fs import read_json
@@ -258,6 +258,10 @@ def prepare_runtime_mcp_env(
         result["KIMI_MODEL_NAME"] = selected_model
     if normalized_runtime == "hermes" and selected_model:
         result["HERMES_SELECTED_MODEL"] = selected_model
+    if normalized_runtime == "hermes" and not str(result.get("HERMES_TUI_DIR") or "").strip():
+        tui_dir = hermes_prebuilt_tui_dir(command or [])
+        if tui_dir is not None:
+            result["HERMES_TUI_DIR"] = str(tui_dir)
     if normalized_runtime != "opencode":
         return result
     doc = _read_opencode_inline_config(result)

@@ -149,6 +149,7 @@ _REQUEST_FAST_QUEUE_OPS = {"send", "reply", "chat_ack"}
 _REQUEST_READ_QUEUE_OPS = {
     "branding_get",
     "capability_overview",
+    "capability_state",
     "context_get",
     "groups",
     "group_space_status",

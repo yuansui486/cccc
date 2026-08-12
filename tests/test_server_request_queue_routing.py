@@ -49,3 +49,15 @@ class TestServerRequestQueueRouting(unittest.TestCase):
         selected = _request_queue_for(req, read_queue=read_queue, fast_queue=fast_queue, slow_queue=slow_queue)
 
         self.assertIs(selected, read_queue)
+
+    def test_capability_state_uses_read_queue_during_actor_start(self) -> None:
+        from no1.daemon.server import _request_queue_for
+
+        read_queue = object()
+        fast_queue = object()
+        slow_queue = object()
+        req = SimpleNamespace(op="capability_state", args={"group_id": "g1", "actor_id": "peer1"})
+
+        selected = _request_queue_for(req, read_queue=read_queue, fast_queue=fast_queue, slow_queue=slow_queue)
+
+        self.assertIs(selected, read_queue)

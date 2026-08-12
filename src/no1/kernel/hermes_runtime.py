@@ -119,6 +119,36 @@ def normalize_hermes_launch_command(command: Iterable[str], *, selected_model: O
     return cmd
 
 
+def hermes_prebuilt_tui_dir(command: Iterable[str]) -> Optional[Path]:
+    """Return Hermes' ready-to-run TUI bundle for a managed launch."""
+    cmd = [str(item) for item in (command or []) if str(item).strip()]
+    if "--tui" not in cmd:
+        return None
+
+    executable = str(cmd[0] if cmd else "").strip()
+    resolved = find_subprocess_executable(executable or "hermes")
+    if not resolved:
+        return None
+
+    executable_path = Path(resolved).expanduser()
+    candidates: list[Path] = []
+    for parent in executable_path.parents:
+        candidates.append(parent / "ui-tui")
+        if len(candidates) >= 5:
+            break
+
+    for candidate in candidates:
+        node_modules = candidate / "node_modules"
+        if not (candidate / "dist" / "entry.js").is_file() or not node_modules.is_dir():
+            continue
+        try:
+            if any(node_modules.iterdir()):
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 def _effective_hermes_home_override(hermes_home_override: Optional[Path]) -> Optional[Path]:
     if hermes_home_override is not None:
         return Path(hermes_home_override).expanduser()
@@ -239,6 +269,21 @@ def _normalize_args(value: Any) -> list[str]:
     return [str(part) for part in str(value or "").split() if str(part).strip()]
 
 
+def _onecolleague_mcp_entrypoint(command: str, args: list[str]) -> bool:
+    if args != ["mcp"]:
+        return False
+    path = Path(str(command or "").strip()).expanduser()
+    if path.name.lower() not in {
+        "onecolleague",
+        "onecolleague.exe",
+        "onecolleague.cmd",
+        "onecolleague.bat",
+        "onecolleague-script.py",
+    }:
+        return False
+    return path.is_file()
+
+
 def _auth_doc_mentions_provider(value: Any) -> bool:
     needle = HERMES_PROVIDER_ID.lower()
     if isinstance(value, dict):
@@ -277,6 +322,11 @@ def _inspect_mcp_config(config: Dict[str, Any], *, expected_cmd: list[str]) -> D
     expected_command = str(expected_cmd[0] if expected_cmd else "").strip()
     expected_args = [str(part) for part in expected_cmd[1:]]
     command_ok = bool(command and expected_command and Path(command).expanduser() == Path(expected_command).expanduser())
+    if not command_ok:
+        command_ok = bool(
+            _onecolleague_mcp_entrypoint(command, args)
+            and _onecolleague_mcp_entrypoint(expected_command, expected_args)
+        )
     args_ok = args == expected_args
     env_ok = all(str(env.get(key) or "").strip() == value for key, value in HERMES_MCP_ENV_PLACEHOLDERS.items())
     enabled_ok = str(entry.get("enabled", True)).strip().lower() not in {"0", "false", "no"}
@@ -718,17 +768,19 @@ def prepare_hermes_runtime(
             include_version=False,
             hermes_home_override=hermes_home_override,
         )
-        if force_mcp or ((status.get("mcp") or {}).get("status") != "ready"):
-            if not auto_enable_tools:
-                return {
-                    "ok": False,
-                    "error": {
-                        "code": "hermes_mcp_setup_requires_confirmation",
-                        "message": "Hermes MCP setup is discovery-first; rerun with auto_enable_tools/--yes to enable discovered OneColleague tools.",
-                    },
-                    "commands_run": commands_run,
-                    "status": status,
-                }
+        needs_mcp_config = bool(force_mcp or ((status.get("mcp") or {}).get("status") != "ready"))
+        if needs_mcp_config and not auto_enable_tools:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "hermes_mcp_setup_requires_confirmation",
+                    "message": "Hermes MCP setup is discovery-first; rerun with auto_enable_tools/--yes to enable discovered OneColleague tools.",
+                },
+                "commands_run": commands_run,
+                "status": status,
+            }
+
+        if auto_enable_tools:
             sdk_status = _hermes_mcp_sdk_status(hermes_executable)
             if not sdk_status.get("available"):
                 install_cmd, install_result = _install_hermes_mcp_sdk(
@@ -765,6 +817,8 @@ def prepare_hermes_runtime(
                             hermes_home_override=hermes_home_override,
                         ),
                     }
+
+        if needs_mcp_config:
             mcp_status = status.get("mcp") if isinstance(status.get("mcp"), dict) else {}
             if bool(mcp_status.get("configured")):
                 remove_cmd = ["hermes", "mcp", "remove", HERMES_MCP_SERVER_NAME]
@@ -872,8 +926,9 @@ def run_hermes_mcp_test(
         )
     except Exception as exc:
         return {"ok": False, "argv": cmd, "error": {"code": "hermes_mcp_test_failed", "message": str(exc)}}
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
     return {
-        "ok": result.returncode == 0,
+        "ok": result.returncode == 0 and "connection failed" not in output,
         "argv": cmd,
         "result": _completed_summary(result),
     }
