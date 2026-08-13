@@ -67,6 +67,9 @@ class TestDaemonCoreOps(unittest.TestCase):
                             "peer_runtime": "hidden",
                             "assistant_runtime": "hidden",
                         },
+                        "terminal_ui": {
+                            "color_scheme": "light",
+                        },
                     },
                 },
             )
@@ -88,6 +91,29 @@ class TestDaemonCoreOps(unittest.TestCase):
             runtime_visibility = obs.get("runtime_visibility") if isinstance(obs.get("runtime_visibility"), dict) else {}
             self.assertEqual(str(runtime_visibility.get("peer_runtime") or ""), "hidden")
             self.assertEqual(str(runtime_visibility.get("assistant_runtime") or ""), "hidden")
+            terminal_ui = obs.get("terminal_ui") if isinstance(obs.get("terminal_ui"), dict) else {}
+            self.assertEqual(str(terminal_ui.get("color_scheme") or ""), "light")
+        finally:
+            cleanup()
+
+    def test_observability_terminal_color_scheme_defaults_and_rejects_invalid_values(self) -> None:
+        from no1.kernel.settings import (
+            get_observability_settings,
+            save_settings,
+            update_observability_settings,
+        )
+
+        _, cleanup = self._with_home()
+        try:
+            save_settings({"observability": {"terminal_ui": {"scrollback_lines": 9000}}})
+            terminal_ui = get_observability_settings().get("terminal_ui") or {}
+            self.assertEqual(terminal_ui.get("color_scheme"), "dark")
+
+            updated = update_observability_settings({"terminal_ui": {"color_scheme": "light"}})
+            self.assertEqual((updated.get("terminal_ui") or {}).get("color_scheme"), "light")
+
+            invalid = update_observability_settings({"terminal_ui": {"color_scheme": "sepia"}})
+            self.assertEqual((invalid.get("terminal_ui") or {}).get("color_scheme"), "light")
         finally:
             cleanup()
 

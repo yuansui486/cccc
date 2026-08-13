@@ -4,7 +4,7 @@ const DEVICE_ATTRIBUTES_RE = /^\x1b\[(?:\?|>)\d+(?:;\d+)*c/;
 const FOCUS_EVENT_RE = /^\x1b\[[IO]/;
 const OSC_COLOR_RE = /^\x1b\](?:4;\d+|10|11);rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)/;
 
-const RESPONSE_FILTERED_RUNTIMES = new Set(["droid", "gemini", "neovate", "opencode"]);
+const RESPONSE_FILTERED_RUNTIMES = new Set(["codex", "droid", "gemini", "neovate", "opencode"]);
 const FOCUS_FILTERED_RUNTIMES = new Set(["codex", "droid", "gemini", "neovate"]);
 
 function normalizedRuntime(runtime: string | undefined): string {

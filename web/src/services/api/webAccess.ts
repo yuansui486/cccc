@@ -20,6 +20,7 @@ export interface Observability {
   };
   terminal_ui?: {
     scrollback_lines?: number;
+    color_scheme?: "light" | "dark" | string;
   };
   runtime_visibility?: {
     peer_runtime?: "hidden" | "visible" | string;
@@ -42,10 +43,11 @@ export async function fetchObservability() {
 }
 
 export async function updateObservability(args: {
-  developerMode: boolean;
-  logLevel: "INFO" | "DEBUG";
+  developerMode?: boolean;
+  logLevel?: "INFO" | "DEBUG";
   terminalTranscriptPerActorBytes?: number;
   terminalUiScrollbackLines?: number;
+  terminalUiColorScheme?: "light" | "dark";
   peerRuntimeVisibility?: "hidden" | "visible";
   assistantRuntimeVisibility?: "hidden" | "visible";
 }) {
@@ -58,6 +60,7 @@ export async function updateObservability(args: {
       log_level: args.logLevel,
       terminal_transcript_per_actor_bytes: args.terminalTranscriptPerActorBytes,
       terminal_ui_scrollback_lines: args.terminalUiScrollbackLines,
+      terminal_ui_color_scheme: args.terminalUiColorScheme,
       peer_runtime_visibility: args.peerRuntimeVisibility,
       assistant_runtime_visibility: args.assistantRuntimeVisibility,
     }),

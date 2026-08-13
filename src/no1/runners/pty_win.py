@@ -19,6 +19,7 @@ from .pty_lifecycle import LifecycleGate
 from .pty_snapshot import PtyBacklogSnapshot, PtyBacklogSnapshotCache
 from .pty_attach import PtyAttachBusyError, PtyAttachReservation
 from .terminal_queries import terminal_query_responses
+from ..kernel.settings import get_observability_settings
 from ..util.process import terminate_pid
 
 _WINPTY_PROCESS = load_winpty_process_class()
@@ -74,6 +75,8 @@ class PtySession:
         self.group_id = group_id
         self.actor_id = actor_id
         self._runtime = str(runtime or "")
+        terminal_ui = get_observability_settings().get("terminal_ui") or {}
+        self._color_scheme = str(terminal_ui.get("color_scheme") or "dark").strip().lower()
         self._on_exit = on_exit
         self._started_at = time.monotonic()
         self._first_output_at: Optional[float] = None
@@ -414,6 +417,7 @@ class PtySession:
                 chunk,
                 runtime=self._runtime,
                 active_writer=active_writer,
+                color_scheme=self._color_scheme,
             )
         for response in responses:
             self.write_input(response)

@@ -20,6 +20,7 @@ import { useViewportHeight } from "./hooks/useViewportHeight";
 import { useAppChrome } from "./hooks/useAppChrome";
 import { useAppGroupLifecycle } from "./hooks/useAppGroupLifecycle";
 import { useAppTabState } from "./hooks/useAppTabState";
+import { syncTerminalColorScheme } from "./utils/terminalThemeSync";
 import * as api from "./services/api";
 import { getEffectiveComposerDestGroupId } from "./stores/useComposerStore";
 import { getChatSession } from "./stores/useUIStore";
@@ -68,9 +69,13 @@ function countEnabledGroupSkillsFromState(
 }
 
 export default function App() {
-  const { theme, setTheme, isDark } = useTheme();
+  const { theme, resolvedTheme, setTheme, isDark } = useTheme();
   const { textScale, setTextScale } = useTextScale();
   useViewportHeight();
+
+  useEffect(() => {
+    void syncTerminalColorScheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   const groups = useGroupStore((state) => state.groups);
   const groupOrder = useGroupStore((state) => state.groupOrder);

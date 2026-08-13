@@ -485,6 +485,7 @@ class ObservabilityUpdateRequest(BaseModel):
     logger_levels: Optional[Dict[str, str]] = None
     terminal_transcript_per_actor_bytes: Optional[int] = None
     terminal_ui_scrollback_lines: Optional[int] = None
+    terminal_ui_color_scheme: Optional[Literal["light", "dark"]] = None
     peer_runtime_visibility: Optional[Literal["hidden", "visible"]] = None
     assistant_runtime_visibility: Optional[Literal["hidden", "visible"]] = None
 

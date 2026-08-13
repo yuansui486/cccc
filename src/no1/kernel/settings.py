@@ -141,6 +141,7 @@ DEFAULT_OBSERVABILITY: Dict[str, Any] = {
     # Web terminal UI preferences (global).
     "terminal_ui": {
         "scrollback_lines": 8000,
+        "color_scheme": "dark",
     },
     # Runtime surfaces exposed in the standard Web UI.
     "runtime_visibility": {
@@ -227,6 +228,13 @@ def _as_runtime_visibility(v: Any, default: str) -> str:
     return default
 
 
+def _as_terminal_color_scheme(v: Any, default: str) -> str:
+    s = str(v or "").strip().lower()
+    if s in {"light", "dark"}:
+        return s
+    return default
+
+
 def _merge_observability(raw: Any) -> Dict[str, Any]:
     """Merge/validate observability settings with defaults."""
     base = dict(DEFAULT_OBSERVABILITY)
@@ -269,6 +277,10 @@ def _merge_observability(raw: Any) -> Dict[str, Any]:
             int(tui_base["scrollback_lines"]),
             min_value=1000,
             max_value=200_000,
+        )
+        tui_base["color_scheme"] = _as_terminal_color_scheme(
+            tui.get("color_scheme"),
+            str(tui_base["color_scheme"]),
         )
     base["terminal_ui"] = tui_base
 
@@ -389,6 +401,11 @@ def update_observability_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
                     int(tui.get("scrollback_lines", 8000)),
                     min_value=1000,
                     max_value=200_000,
+                )
+            if "color_scheme" in tui_patch:
+                tui["color_scheme"] = _as_terminal_color_scheme(
+                    tui_patch.get("color_scheme"),
+                    str(tui.get("color_scheme", "dark")),
                 )
             merged["terminal_ui"] = tui
     if "runtime_visibility" in patch:

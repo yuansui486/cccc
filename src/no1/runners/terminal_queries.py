@@ -36,6 +36,10 @@ _XTERM_PALETTE = (
 )
 _DEFAULT_FOREGROUND = "d4d4d4"
 _DEFAULT_BACKGROUND = "1e1e1e"
+_TERMINAL_COLORS = {
+    "light": ("1e293b", "fafafa"),
+    "dark": ("e2e8f0", "0f172a"),
+}
 
 
 def _osc_rgb(hex_color: str) -> str:
@@ -64,6 +68,7 @@ def terminal_query_responses(
     *,
     runtime: str,
     active_writer: bool,
+    color_scheme: str = "dark",
 ) -> tuple[bytes, list[bytes]]:
     """Return a bounded overlap tail and terminal responses for newly seen queries."""
 
@@ -75,7 +80,7 @@ def terminal_query_responses(
     data = prior + incoming
     previous_length = len(prior)
     runtime_id = str(runtime or "").strip().lower()
-    backend_handles_device_attributes = runtime_id in {"droid", "gemini", "neovate", "opencode"}
+    backend_handles_device_attributes = runtime_id in {"codex", "droid", "gemini", "neovate", "opencode"}
     responses: list[bytes] = []
 
     for query, response in _iter_new_fixed_queries(data, previous_length):
@@ -86,12 +91,21 @@ def terminal_query_responses(
             continue
         responses.append(response)
 
-    if runtime_id == "opencode":
+    if runtime_id in {"codex", "opencode"}:
+        if runtime_id == "codex":
+            foreground, background = _TERMINAL_COLORS.get(
+                str(color_scheme or "").strip().lower(),
+                _TERMINAL_COLORS["dark"],
+            )
+        else:
+            foreground, background = _DEFAULT_FOREGROUND, _DEFAULT_BACKGROUND
         for match in _OSC_QUERY_RE.finditer(data):
             if match.end() <= previous_length:
                 continue
             kind = match.group(1).decode("ascii", errors="ignore")
             if kind.startswith("4;"):
+                if runtime_id != "opencode":
+                    continue
                 index_text = (match.group(2) or b"0").decode("ascii", errors="ignore")
                 try:
                     index = int(index_text)
@@ -100,8 +114,8 @@ def terminal_query_responses(
                 color = _XTERM_PALETTE[index] if 0 <= index < len(_XTERM_PALETTE) else "000000"
                 responses.append(f"\x1b]4;{index_text};rgb:{_osc_rgb(color)}\x07".encode("ascii"))
             elif kind == "10":
-                responses.append(f"\x1b]10;rgb:{_osc_rgb(_DEFAULT_FOREGROUND)}\x07".encode("ascii"))
+                responses.append(f"\x1b]10;rgb:{_osc_rgb(foreground)}\x07".encode("ascii"))
             elif kind == "11":
-                responses.append(f"\x1b]11;rgb:{_osc_rgb(_DEFAULT_BACKGROUND)}\x07".encode("ascii"))
+                responses.append(f"\x1b]11;rgb:{_osc_rgb(background)}\x07".encode("ascii"))
 
     return data[-_QUERY_TAIL_BYTES:], responses

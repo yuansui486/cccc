@@ -1501,6 +1501,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch.setdefault("terminal_transcript", {})["per_actor_bytes"] = int(req.terminal_transcript_per_actor_bytes)
         if req.terminal_ui_scrollback_lines is not None:
             patch.setdefault("terminal_ui", {})["scrollback_lines"] = int(req.terminal_ui_scrollback_lines)
+        if req.terminal_ui_color_scheme is not None:
+            patch.setdefault("terminal_ui", {})["color_scheme"] = str(req.terminal_ui_color_scheme)
         if req.peer_runtime_visibility is not None:
             patch.setdefault("runtime_visibility", {})["peer_runtime"] = str(req.peer_runtime_visibility)
         if req.assistant_runtime_visibility is not None:

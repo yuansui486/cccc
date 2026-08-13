@@ -45,18 +45,18 @@ describe("filterTerminalInputChunk", () => {
     expect(filterTerminalInputChunk("", "\x1b[1;2R", "opencode")).toEqual({ data: "\x1b[1;2R", pending: "" });
   });
 
-  it("preserves Codex terminal replies but filters focus events", () => {
+  it("filters Codex terminal replies and focus events", () => {
     expect(filterTerminalInputChunk("", `${da1}${color10}${color11}\x1b[O`, "codex")).toEqual({
-      data: `${da1}${color10}${color11}`,
+      data: "",
       pending: "",
     });
   });
 
-  it("preserves fragmented Codex color replies", () => {
+  it("filters fragmented Codex color replies", () => {
     const first = filterTerminalInputChunk("", color11.slice(0, 12), "codex");
-    expect(first).toEqual({ data: color11.slice(0, 12), pending: "" });
+    expect(first).toEqual({ data: "", pending: color11.slice(0, 12) });
     expect(filterTerminalInputChunk(first.pending, color11.slice(12), "codex")).toEqual({
-      data: color11.slice(12),
+      data: "",
       pending: "",
     });
   });
