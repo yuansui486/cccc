@@ -91,8 +91,11 @@ export function ScheduledReminderModal({
             devActors={devActors}
             busy={busy}
             {...automationPolicyDraft}
-            onSavePolicies={automationPolicyDraft.savePolicies}
-            onResetPolicies={automationPolicyDraft.resetPoliciesDraft}
+            onSaveBuiltinPolicies={automationPolicyDraft.saveBuiltinPolicies}
+            onSaveTaskReminderSettings={automationPolicyDraft.saveTaskReminderSettings}
+            onSaveTaskReminderEnabled={automationPolicyDraft.saveTaskReminderEnabled}
+            onResetBuiltinPolicies={automationPolicyDraft.resetBuiltinPoliciesDraft}
+            onResetTaskReminder={automationPolicyDraft.resetTaskReminderDraft}
           />
         </div>
       </div>

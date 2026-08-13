@@ -12,6 +12,7 @@ import type {
   AutomationRuleStatus,
   AutomationSnippetCatalog,
 } from "../../../types";
+import { BellIcon, ChevronRightIcon, SettingsIcon } from "../../Icons";
 import {
   Section,
   SparkIcon,
@@ -21,10 +22,11 @@ import {
   isValidId,
   nowId,
 } from "./automationUtils";
-import { AutomationPoliciesSection } from "./AutomationPoliciesSection";
+import { BuiltinAutomationSettingsModal } from "./BuiltinAutomationSettingsModal";
 import { AutomationRuleEditorModal } from "./AutomationRuleEditorModal";
 import { AutomationRuleList } from "./AutomationRuleList";
 import { AutomationSnippetModal } from "./AutomationSnippetModal";
+import { TaskReminderSettingsModal } from "./TaskReminderSettingsModal";
 import {
   dangerButtonClass,
   secondaryButtonClass,
@@ -76,8 +78,11 @@ interface AutomationTabProps {
   setTaskActiveOverdueMilestonesSeconds: (v: number[]) => void;
   taskPlannedUnassignedMilestonesSeconds: number[];
   setTaskPlannedUnassignedMilestonesSeconds: (v: number[]) => void;
-  onSavePolicies: () => void;
-  onResetPolicies: () => void;
+  onSaveBuiltinPolicies: () => Promise<boolean>;
+  onSaveTaskReminderSettings: () => Promise<boolean>;
+  onSaveTaskReminderEnabled: (enabled: boolean) => Promise<boolean>;
+  onResetBuiltinPolicies: () => void;
+  onResetTaskReminder: () => void;
 }
 
 type PersistCopy = {
@@ -119,6 +124,9 @@ export function AutomationTab(props: AutomationTabProps) {
   const [supportedVars, setSupportedVars] = useState<string[]>([]);
 
   const [snippetManagerOpen, setSnippetManagerOpen] = useState(false);
+  const [builtinSettingsOpen, setBuiltinSettingsOpen] = useState(false);
+  const [taskReminderSettingsOpen, setTaskReminderSettingsOpen] = useState(false);
+  const [taskReminderToggleBusy, setTaskReminderToggleBusy] = useState(false);
   const [newSnippetId, setNewSnippetId] = useState("");
   const [templateErr, setTemplateErr] = useState("");
   const [snippetDrafts, setSnippetDrafts] = useState<Record<string, string>>({});
@@ -556,6 +564,16 @@ export function AutomationTab(props: AutomationTabProps) {
     }
   };
 
+  const toggleTaskReminder = async () => {
+    if (taskReminderToggleBusy || props.busy) return;
+    setTaskReminderToggleBusy(true);
+    try {
+      await props.onSaveTaskReminderEnabled(!props.taskReminderEnabled);
+    } finally {
+      setTaskReminderToggleBusy(false);
+    }
+  };
+
   if (!props.groupId) {
     return (
       <div className={settingsWorkspacePanelClass(isDark)}>
@@ -639,7 +657,105 @@ export function AutomationTab(props: AutomationTabProps) {
         </div>
       </Section>
 
-      <AutomationPoliciesSection
+      <Section
+        isDark={isDark}
+        icon={BellIcon}
+        title={t("policies.taskRuntimeAlerts")}
+        description={t("policies.taskReminderSummary")}
+        actions={(
+          <button
+            type="button"
+            role="switch"
+            aria-checked={props.taskReminderEnabled}
+            aria-label={t("policies.taskRuntimeAlertsEnabled")}
+            disabled={props.busy || taskReminderToggleBusy}
+            onClick={() => void toggleTaskReminder()}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+              props.taskReminderEnabled
+                ? "bg-blue-600 dark:bg-blue-500"
+                : "bg-gray-300 dark:bg-slate-600"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                props.taskReminderEnabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        )}
+      >
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3.5 py-3 text-left transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={props.busy}
+          onClick={() => setTaskReminderSettingsOpen(true)}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-[var(--color-text-primary)]">
+              {t("policies.taskReminderSettings")}
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              {t("policies.taskReminderStatus", {
+                status: props.taskReminderEnabled
+                  ? t("policies.statusEnabled")
+                  : t("policies.statusDisabled"),
+                activeCount: props.taskActiveOverdueMilestonesSeconds.length,
+                plannedCount: props.taskPlannedUnassignedMilestonesSeconds.length,
+              })}
+            </div>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--color-accent-primary)]">
+            {t("policies.openSettings")}
+            <ChevronRightIcon className="h-4 w-4" />
+          </span>
+        </button>
+      </Section>
+
+      <Section
+        isDark={isDark}
+        icon={SettingsIcon}
+        title={t("policies.title")}
+        description={t("policies.compactDescription")}
+      >
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3.5 py-3 text-left transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={props.busy}
+          onClick={() => setBuiltinSettingsOpen(true)}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-[var(--color-text-primary)]">
+              {t("policies.builtinSettings")}
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              {t("policies.builtinSummary")}
+            </div>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--color-accent-primary)]">
+            {t("policies.openSettings")}
+            <ChevronRightIcon className="h-4 w-4" />
+          </span>
+        </button>
+      </Section>
+
+      <TaskReminderSettingsModal
+        open={taskReminderSettingsOpen}
+        isDark={isDark}
+        busy={props.busy}
+        taskReminderEnabled={props.taskReminderEnabled}
+        taskEmptyCooldownSeconds={props.taskEmptyCooldownSeconds}
+        setTaskEmptyCooldownSeconds={props.setTaskEmptyCooldownSeconds}
+        taskActiveOverdueMilestonesSeconds={props.taskActiveOverdueMilestonesSeconds}
+        setTaskActiveOverdueMilestonesSeconds={props.setTaskActiveOverdueMilestonesSeconds}
+        taskPlannedUnassignedMilestonesSeconds={props.taskPlannedUnassignedMilestonesSeconds}
+        setTaskPlannedUnassignedMilestonesSeconds={props.setTaskPlannedUnassignedMilestonesSeconds}
+        onClose={() => setTaskReminderSettingsOpen(false)}
+        onReset={props.onResetTaskReminder}
+        onSave={props.onSaveTaskReminderSettings}
+      />
+
+      <BuiltinAutomationSettingsModal
+        open={builtinSettingsOpen}
         isDark={isDark}
         busy={props.busy}
         nudgeSeconds={props.nudgeSeconds}
@@ -668,16 +784,9 @@ export function AutomationTab(props: AutomationTabProps) {
         setIdleSeconds={props.setIdleSeconds}
         silenceSeconds={props.silenceSeconds}
         setSilenceSeconds={props.setSilenceSeconds}
-        taskReminderEnabled={props.taskReminderEnabled}
-        setTaskReminderEnabled={props.setTaskReminderEnabled}
-        taskEmptyCooldownSeconds={props.taskEmptyCooldownSeconds}
-        setTaskEmptyCooldownSeconds={props.setTaskEmptyCooldownSeconds}
-        taskActiveOverdueMilestonesSeconds={props.taskActiveOverdueMilestonesSeconds}
-        setTaskActiveOverdueMilestonesSeconds={props.setTaskActiveOverdueMilestonesSeconds}
-        taskPlannedUnassignedMilestonesSeconds={props.taskPlannedUnassignedMilestonesSeconds}
-        setTaskPlannedUnassignedMilestonesSeconds={props.setTaskPlannedUnassignedMilestonesSeconds}
-        onSavePolicies={props.onSavePolicies}
-        onResetPolicies={props.onResetPolicies}
+        onClose={() => setBuiltinSettingsOpen(false)}
+        onReset={props.onResetBuiltinPolicies}
+        onSave={props.onSaveBuiltinPolicies}
       />
 
       <AutomationRuleEditorModal
