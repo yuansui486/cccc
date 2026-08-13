@@ -36,6 +36,16 @@ describe("terminalThemeSync", () => {
     expect(updateObservability).toHaveBeenCalledWith({ terminalUiColorScheme: "light" });
   });
 
+  it("forces launch-time synchronization when another client may have overwritten the setting", async () => {
+    updateObservability.mockResolvedValue({ ok: true, result: { observability: {} } });
+
+    await expect(syncTerminalColorScheme("dark")).resolves.toBe(true);
+    await expect(syncTerminalColorScheme("dark", { force: true })).resolves.toBe(true);
+
+    expect(updateObservability).toHaveBeenCalledTimes(2);
+    expect(updateObservability).toHaveBeenNthCalledWith(2, { terminalUiColorScheme: "dark" });
+  });
+
   it("coalesces changes while a sync is in flight", async () => {
     let finishFirst: ((value: unknown) => void) | undefined;
     updateObservability
@@ -49,6 +59,21 @@ describe("terminalThemeSync", () => {
     await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
     expect(updateObservability).toHaveBeenNthCalledWith(1, { terminalUiColorScheme: "dark" });
     expect(updateObservability).toHaveBeenNthCalledWith(2, { terminalUiColorScheme: "light" });
+  });
+
+  it("reconfirms a forced launch sync requested during an in-flight update", async () => {
+    let finishFirst: ((value: unknown) => void) | undefined;
+    updateObservability
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }))
+      .mockResolvedValueOnce({ ok: true, result: { observability: {} } });
+
+    const backgroundSync = syncTerminalColorScheme("dark");
+    const launchSync = syncTerminalColorScheme("dark", { force: true });
+    finishFirst?.({ ok: true, result: { observability: {} } });
+
+    await expect(Promise.all([backgroundSync, launchSync])).resolves.toEqual([true, true]);
+    expect(updateObservability).toHaveBeenCalledTimes(2);
+    expect(updateObservability).toHaveBeenNthCalledWith(2, { terminalUiColorScheme: "dark" });
   });
 
   it("allows retry after a failed non-blocking sync", async () => {

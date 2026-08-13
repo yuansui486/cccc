@@ -6,6 +6,8 @@ export type TerminalColorScheme = "light" | "dark";
 let desiredScheme: TerminalColorScheme | null = null;
 let lastSyncedScheme: TerminalColorScheme | null = null;
 let drainPromise: Promise<boolean> | null = null;
+let requestedForceVersion = 0;
+let completedForceVersion = 0;
 
 export function getSystemColorScheme(): TerminalColorScheme {
   if (typeof window === "undefined") return "dark";
@@ -36,8 +38,12 @@ export function getStoredTerminalColorScheme(): TerminalColorScheme {
 
 async function drainThemeSync(): Promise<boolean> {
   let succeeded = true;
-  while (desiredScheme && desiredScheme !== lastSyncedScheme) {
+  while (
+    desiredScheme &&
+    (desiredScheme !== lastSyncedScheme || completedForceVersion < requestedForceVersion)
+  ) {
     const target = desiredScheme;
+    const forceVersion = requestedForceVersion;
     try {
       const response = await updateObservability({ terminalUiColorScheme: target });
       if (!response.ok) {
@@ -45,6 +51,7 @@ async function drainThemeSync(): Promise<boolean> {
         break;
       }
       lastSyncedScheme = target;
+      completedForceVersion = forceVersion;
     } catch {
       succeeded = false;
       break;
@@ -53,9 +60,17 @@ async function drainThemeSync(): Promise<boolean> {
   return succeeded;
 }
 
-export function syncTerminalColorScheme(scheme: TerminalColorScheme): Promise<boolean> {
+export function syncTerminalColorScheme(
+  scheme: TerminalColorScheme,
+  options?: { force?: boolean },
+): Promise<boolean> {
   desiredScheme = scheme;
-  if (lastSyncedScheme === scheme && !drainPromise) return Promise.resolve(true);
+  if (options?.force) requestedForceVersion += 1;
+  if (
+    lastSyncedScheme === scheme &&
+    completedForceVersion >= requestedForceVersion &&
+    !drainPromise
+  ) return Promise.resolve(true);
   if (!drainPromise) {
     drainPromise = drainThemeSync().finally(() => {
       drainPromise = null;
@@ -64,9 +79,9 @@ export function syncTerminalColorScheme(scheme: TerminalColorScheme): Promise<bo
   return drainPromise;
 }
 
-export function syncStoredTerminalColorScheme(): Promise<boolean> {
+export function syncStoredTerminalColorScheme(options?: { force?: boolean }): Promise<boolean> {
   try {
-    return syncTerminalColorScheme(getStoredTerminalColorScheme());
+    return syncTerminalColorScheme(getStoredTerminalColorScheme(), options);
   } catch {
     return Promise.resolve(false);
   }
@@ -76,4 +91,6 @@ export function resetTerminalThemeSyncForTests(): void {
   desiredScheme = null;
   lastSyncedScheme = null;
   drainPromise = null;
+  requestedForceVersion = 0;
+  completedForceVersion = 0;
 }

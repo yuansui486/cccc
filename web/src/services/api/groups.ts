@@ -1577,7 +1577,7 @@ export async function attachScope(groupId: string, path: string) {
 }
 
 export async function startGroup(groupId: string) {
-  await syncStoredTerminalColorScheme();
+  await syncStoredTerminalColorScheme({ force: true });
   clearActorsReadOnlyRequest(groupId);
   clearGroupsReadRequest();
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/start?by=user`, {

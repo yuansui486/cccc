@@ -197,7 +197,7 @@ export async function removeActor(groupId: string, actorId: string) {
 }
 
 export async function startActor(groupId: string, actorId: string) {
-  await syncStoredTerminalColorScheme();
+  await syncStoredTerminalColorScheme({ force: true });
   clearActorsReadOnlyRequest(groupId);
   clearGroupsReadRequest();
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/start`, {
@@ -214,7 +214,7 @@ export async function stopActor(groupId: string, actorId: string) {
 }
 
 export async function restartActor(groupId: string, actorId: string) {
-  await syncStoredTerminalColorScheme();
+  await syncStoredTerminalColorScheme({ force: true });
   clearActorsReadOnlyRequest(groupId);
   clearGroupsReadRequest();
   return apiJson(
