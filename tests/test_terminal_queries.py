@@ -78,7 +78,7 @@ def test_pending_writer_is_not_treated_as_active() -> None:
     assert _feed([b"\x1b[6n"], runtime="codex", active_writer=False) == [b"\x1b[1;1R"]
 
 
-def test_codex_answers_light_and_dark_color_queries() -> None:
+def test_codex_answers_light_and_dark_color_queries_with_active_writer() -> None:
     query = b"\x1b]10;?\x1b\\\x1b]11;?\x07"
 
     assert _feed([query], runtime="codex", active_writer=True, color_scheme="light") == [
@@ -88,6 +88,15 @@ def test_codex_answers_light_and_dark_color_queries() -> None:
     assert _feed([query], runtime="codex", active_writer=True, color_scheme="dark") == [
         b"\x1b]10;rgb:e2e2/e8e8/f0f0\x07",
         b"\x1b]11;rgb:0f0f/1717/2a2a\x07",
+    ]
+
+
+def test_codex_answers_color_queries_without_active_writer() -> None:
+    query = b"\x1b]10;?\x1b\\\x1b]11;?\x07"
+
+    assert _feed([query], runtime="codex", active_writer=False, color_scheme="light") == [
+        b"\x1b]10;rgb:1e1e/2929/3b3b\x07",
+        b"\x1b]11;rgb:fafa/fafa/fafa\x07",
     ]
 
 
