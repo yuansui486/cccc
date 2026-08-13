@@ -182,7 +182,7 @@ export function GroupSidebar({
   const computerControlTitle = !computerControlAvailability
     ? "正在检查电脑控制可用性"
     : computerControlSupported
-      ? "电脑控制"
+      ? "控制电脑"
       : computerControlAvailability.reason === "windows_only"
         ? "电脑控制仅支持 Windows"
         : "电脑控制暂不可用";
@@ -1074,6 +1074,17 @@ export function GroupSidebar({
             </button>
             <button
               type="button"
+              onClick={onOpenExperience}
+              disabled={!selectedGroupId}
+              className={navButtonClass(false)}
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
+                <BookOpenIcon size={24} strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t("experience")}</span>
+            </button>
+            <button
+              type="button"
               onClick={onOpenScheduledReminder}
               disabled={!selectedGroupId}
               className={navButtonClass(false)}
@@ -1096,17 +1107,6 @@ export function GroupSidebar({
             </button>
             <button
               type="button"
-              onClick={onOpenExperience}
-              disabled={!selectedGroupId}
-              className={navButtonClass(false)}
-            >
-              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
-                <BookOpenIcon size={24} strokeWidth={1.8} />
-              </span>
-              <span className="min-w-0 flex-1 truncate">{t("experience")}</span>
-            </button>
-            <button
-              type="button"
               onClick={() => computerControlSupported && handleTabSelect(COMPUTER_CONTROL_TAB)}
               disabled={!computerControlSupported}
               className={classNames(
@@ -1116,7 +1116,7 @@ export function GroupSidebar({
               title={computerControlTitle}
             >
               <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><Laptop size={22} strokeWidth={1.8} /></span>
-              <span className="min-w-0 flex-1 truncate">电脑控制</span>
+              <span className="min-w-0 flex-1 truncate">控制电脑</span>
             </button>
           </div>
         </section>
