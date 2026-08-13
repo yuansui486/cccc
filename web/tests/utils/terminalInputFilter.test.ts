@@ -45,8 +45,29 @@ describe("filterTerminalInputChunk", () => {
     expect(filterTerminalInputChunk("", "\x1b[1;2R", "opencode")).toEqual({ data: "\x1b[1;2R", pending: "" });
   });
 
-  it("filters Codex terminal replies with the shared parser", () => {
-    expect(filterTerminalInputChunk("", `${da1}${color10}\x1b[O`, "codex")).toEqual({ data: "", pending: "" });
+  it("preserves Codex terminal replies but filters focus events", () => {
+    expect(filterTerminalInputChunk("", `${da1}${color10}${color11}\x1b[O`, "codex")).toEqual({
+      data: `${da1}${color10}${color11}`,
+      pending: "",
+    });
+  });
+
+  it("preserves fragmented Codex color replies", () => {
+    const first = filterTerminalInputChunk("", color11.slice(0, 12), "codex");
+    expect(first).toEqual({ data: color11.slice(0, 12), pending: "" });
+    expect(filterTerminalInputChunk(first.pending, color11.slice(12), "codex")).toEqual({
+      data: color11.slice(12),
+      pending: "",
+    });
+  });
+
+  it("filters fragmented Codex focus events without swallowing ordinary escape input", () => {
+    const focusPrefix = filterTerminalInputChunk("", "\x1b[", "codex");
+    expect(focusPrefix).toEqual({ data: "", pending: "\x1b[" });
+    expect(filterTerminalInputChunk(focusPrefix.pending, "I", "codex")).toEqual({ data: "", pending: "" });
+
+    const arrowPrefix = filterTerminalInputChunk("", "\x1b[", "codex");
+    expect(filterTerminalInputChunk(arrowPrefix.pending, "A", "codex")).toEqual({ data: "\x1b[A", pending: "" });
   });
 
   it("frames only bytes left after fragmented provider response filtering", () => {

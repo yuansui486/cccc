@@ -4,19 +4,19 @@ const DEVICE_ATTRIBUTES_RE = /^\x1b\[(?:\?|>)\d+(?:;\d+)*c/;
 const FOCUS_EVENT_RE = /^\x1b\[[IO]/;
 const OSC_COLOR_RE = /^\x1b\](?:4;\d+|10|11);rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)/;
 
-const RESPONSE_FILTERED_RUNTIMES = new Set(["codex", "droid", "gemini", "neovate", "opencode"]);
+const RESPONSE_FILTERED_RUNTIMES = new Set(["droid", "gemini", "neovate", "opencode"]);
 const FOCUS_FILTERED_RUNTIMES = new Set(["codex", "droid", "gemini", "neovate"]);
 
 function normalizedRuntime(runtime: string | undefined): string {
   return String(runtime || "").trim().toLowerCase();
 }
 
-function isPotentialDevicePrefix(value: string, filterFocus: boolean): boolean {
+function isPotentialDevicePrefix(value: string, filterResponses: boolean, filterFocus: boolean): boolean {
   if (!value.startsWith("\x1b[")) return false;
   const body = value.slice(2);
-  if (!body) return true;
+  if (!body) return filterResponses || filterFocus;
   if (filterFocus && (body === "I" || body === "O")) return true;
-  return /^[?>][0-9;]*$/.test(body);
+  return filterResponses && /^[?>][0-9;]*$/.test(body);
 }
 
 function isPotentialOscPrefix(value: string): boolean {
@@ -31,8 +31,11 @@ function isPotentialOscPrefix(value: string): boolean {
   );
 }
 
-function isPotentialResponsePrefix(value: string, filterFocus: boolean): boolean {
-  return isPotentialDevicePrefix(value, filterFocus) || isPotentialOscPrefix(value);
+function isPotentialResponsePrefix(value: string, filterResponses: boolean, filterFocus: boolean): boolean {
+  return (
+    isPotentialDevicePrefix(value, filterResponses, filterFocus) ||
+    (filterResponses && isPotentialOscPrefix(value))
+  );
 }
 
 export type TerminalInputFilterResult = {
@@ -47,8 +50,9 @@ export function filterTerminalInputChunk(
   runtime?: string,
 ): TerminalInputFilterResult {
   const runtimeId = normalizedRuntime(runtime);
-  if (!RESPONSE_FILTERED_RUNTIMES.has(runtimeId)) return { data: chunk, pending: "" };
+  const filterResponses = RESPONSE_FILTERED_RUNTIMES.has(runtimeId);
   const filterFocus = FOCUS_FILTERED_RUNTIMES.has(runtimeId);
+  if (!filterResponses && !filterFocus) return { data: chunk, pending: "" };
 
   const combined = `${previousPending}${chunk || ""}`;
   let data = "";
@@ -61,16 +65,16 @@ export function filterTerminalInputChunk(
     }
 
     const remaining = combined.slice(index);
-    const deviceMatch = remaining.match(DEVICE_ATTRIBUTES_RE);
+    const deviceMatch = filterResponses ? remaining.match(DEVICE_ATTRIBUTES_RE) : null;
     const focusMatch = filterFocus ? remaining.match(FOCUS_EVENT_RE) : null;
-    const oscMatch = remaining.match(OSC_COLOR_RE);
+    const oscMatch = filterResponses ? remaining.match(OSC_COLOR_RE) : null;
     const match = deviceMatch || focusMatch || oscMatch;
     if (match) {
       index += match[0].length;
       continue;
     }
 
-    if (isPotentialResponsePrefix(remaining, filterFocus)) {
+    if (isPotentialResponsePrefix(remaining, filterResponses, filterFocus)) {
       return { data, pending: remaining };
     }
 
