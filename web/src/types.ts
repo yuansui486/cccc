@@ -794,6 +794,27 @@ export type ExperienceDocument = {
   content: string;
   revision: string;
   created?: boolean;
+  distillation?: ExperienceDistillationStatus;
+};
+
+export type ExperienceDistillationStatus = {
+  enabled: boolean;
+  reminder_every_user_messages: number;
+  force_review_after_unwritten_reminders: number;
+  messages_since_reminder: number;
+  messages_until_reminder: number;
+  consecutive_unwritten: number;
+  active_cycle?: {
+    cycle_id: string;
+    state: string;
+    forced: boolean;
+    foreman_id: string;
+    requested_peers: number;
+    received_peers: number;
+    deadline_at?: string;
+  } | null;
+  last_result?: { result: "written" | "no_change" | "failed"; at: string; summary?: string } | null;
+  history: Array<{ result: string; at: string; forced?: boolean; summary?: string; cycle_id?: string }>;
 };
 
 export type GroupSettings = {
@@ -819,6 +840,7 @@ export type GroupSettings = {
   auto_mark_on_delivery: boolean;
   experience_reminder_enabled: boolean;
   experience_reminder_every_user_messages: number;
+  experience_force_review_after_unwritten_reminders: number;
 
   terminal_transcript_visibility: "off" | "foreman" | "all";
   terminal_transcript_notify_tail: boolean;

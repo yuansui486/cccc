@@ -69,8 +69,8 @@ describe("AutomationTab policy navigation", () => {
     const builtinIndex = html.indexOf("policies.builtinSettings");
 
     expect(rulesIndex).toBeGreaterThanOrEqual(0);
+    expect(rulesIndex).toBeGreaterThan(builtinIndex);
     expect(reminderIndex).toBeGreaterThan(rulesIndex);
-    expect(builtinIndex).toBeGreaterThan(reminderIndex);
     expect(html).not.toContain("policies.needReplyFollowup");
     expect(html).not.toContain("policies.taskEmptyCooldown");
   });

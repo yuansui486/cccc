@@ -246,6 +246,7 @@ class GroupSettingsRequest(BaseModel):
     auto_mark_on_delivery: Optional[bool] = None  # auto-mark messages as read after delivery
     experience_reminder_enabled: Optional[bool] = None
     experience_reminder_every_user_messages: Optional[int] = None
+    experience_force_review_after_unwritten_reminders: Optional[int] = None
 
     # Terminal transcript (group-scoped policy)
     terminal_transcript_visibility: Optional[Literal["off", "foreman", "all"]] = None

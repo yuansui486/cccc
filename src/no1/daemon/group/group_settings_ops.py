@@ -127,6 +127,12 @@ def _settings_payload(group: Any) -> Dict[str, Any]:
             min_value=1,
             max_value=1000,
         ),
+        "experience_force_review_after_unwritten_reminders": _safe_int(
+            experience.get("force_review_after_unwritten_reminders", 5),
+            default=5,
+            min_value=1,
+            max_value=100,
+        ),
         "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
         "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=False),
         "terminal_transcript_notify_lines": _safe_int(
@@ -164,7 +170,11 @@ def handle_group_settings_update(
 
     messaging_keys = {"default_send_to"}
     delivery_keys = {"min_interval_seconds", "auto_mark_on_delivery"}
-    experience_keys = {"experience_reminder_enabled", "experience_reminder_every_user_messages"}
+    experience_keys = {
+        "experience_reminder_enabled",
+        "experience_reminder_every_user_messages",
+        "experience_force_review_after_unwritten_reminders",
+    }
     automation_int_keys = {
         "nudge_after_seconds",
         "reply_required_nudge_after_seconds",
@@ -238,6 +248,13 @@ def handle_group_settings_update(
                     default=10,
                     min_value=1,
                     max_value=1000,
+                )
+            if "experience_force_review_after_unwritten_reminders" in experience_patch:
+                experience["force_review_after_unwritten_reminders"] = _safe_int(
+                    experience_patch.get("experience_force_review_after_unwritten_reminders"),
+                    default=5,
+                    min_value=1,
+                    max_value=100,
                 )
             group.doc["experience"] = experience
 

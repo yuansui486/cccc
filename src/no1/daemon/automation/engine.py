@@ -1009,6 +1009,10 @@ class AutomationManager:
         """Run all automation checks for a group."""
         cfg = _cfg(group)
         now = datetime.now(timezone.utc)
+
+        from ..messaging.experience_reminder import advance_experience_reviews
+
+        advance_experience_reviews(group)
         
         # Level 1: Message-level checks
         self._check_nudge(group, cfg, now)

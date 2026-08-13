@@ -149,7 +149,7 @@ class TestExperienceReminder(unittest.TestCase):
 
         other_actor = plan_experience_reminder(self.group, actor_id="peer-2", messages=[self._message(10)])
         self.assertFalse(other_actor.due)
-        self.assertEqual(len(other_actor.event_ids), 1)
+        self.assertEqual(other_actor.event_ids, ())
 
     def test_non_user_messages_and_disabled_policy_do_not_count(self) -> None:
         from no1.daemon.messaging.experience_reminder import commit_experience_reminder, plan_experience_reminder
@@ -186,6 +186,103 @@ class TestExperienceReminder(unittest.TestCase):
         self.assertIn("verified lessons", EXPERIENCE_REMINDER_LINE)
         self.assertIn("confirmed user preferences", EXPERIENCE_REMINDER_LINE)
         self.assertIn("clearly evidenced stable preferences", EXPERIENCE_REMINDER_LINE)
+
+    def test_v1_actor_state_migrates_to_scope_level_without_inferred_failures(self) -> None:
+        import json
+
+        state_path = self.group.path / "state" / "experience_reminders.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            json.dumps(
+                {
+                    "v": 1,
+                    "scopes": {
+                        "default": {
+                            "actors": {
+                                "a": {"count": 2, "recent_event_ids": ["e-1", "e-2"]},
+                                "b": {"count": 2, "recent_event_ids": ["e-2", "e-3"]},
+                            }
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        from no1.daemon.messaging.experience_reminder import get_distillation_status
+
+        status = get_distillation_status(self.group, scope_key="default")
+        self.assertEqual(status["consecutive_unwritten"], 0)
+        self.assertEqual(status["messages_since_reminder"], 3)
+
+    def test_force_threshold_creates_peer_collection_and_no_change_preserves_revision(self) -> None:
+        from no1.daemon.messaging.experience_reminder import (
+            commit_experience_reminder,
+            complete_review,
+            get_distillation_status,
+            plan_experience_reminder,
+            submit_candidate,
+        )
+        from no1.kernel.actors import add_actor
+        from no1.kernel.experience import read_experience
+
+        add_actor(self.group, actor_id="lead", runtime="codex", runner="headless")
+        add_actor(self.group, actor_id="peer", runtime="claude", runner="headless")
+        self.group.doc["experience"] = {
+            "reminder_enabled": True,
+            "reminder_every_user_messages": 1,
+            "force_review_after_unwritten_reminders": 2,
+        }
+        self.group.save()
+
+        first = plan_experience_reminder(self.group, actor_id="foreman", messages=[self._message(1)])
+        commit_experience_reminder(self.group, first)
+        first_cycle = get_distillation_status(self.group)["active_cycle"]
+        self.assertFalse(first_cycle["forced"])
+
+        second = plan_experience_reminder(self.group, actor_id="peer", messages=[self._message(2)])
+        commit_experience_reminder(self.group, second)
+        cycle = get_distillation_status(self.group)["active_cycle"]
+        self.assertTrue(cycle["forced"])
+        self.assertEqual(cycle["requested_peers"], 1)
+        self.assertEqual(cycle["state"], "collecting")
+
+        submit_candidate(self.group, cycle_id=cycle["cycle_id"], actor_id="peer", content="")
+        revision = read_experience(self.group).revision
+        complete_review(
+            self.group,
+            cycle_id=cycle["cycle_id"],
+            actor_id="lead",
+            result="no_change",
+        )
+        status = get_distillation_status(self.group)
+        self.assertEqual(status["last_result"]["result"], "no_change")
+        self.assertEqual(status["consecutive_unwritten"], 0)
+        self.assertEqual(read_experience(self.group).revision, revision)
+
+    def test_failed_forced_review_does_not_reset_unwritten_counter(self) -> None:
+        from no1.daemon.messaging.experience_reminder import _record_result
+
+        scope = {"consecutive_unwritten": 5, "history": [], "active_cycle": {}}
+        cycle = {"cycle_id": "cycle", "forced": True, "foreman_id": "lead"}
+        _record_result(scope, cycle, result="failed")
+        self.assertEqual(scope["consecutive_unwritten"], 5)
+
+
+class TestExperienceAuthorization(unittest.TestCase):
+    def test_only_foreman_can_write(self) -> None:
+        from unittest.mock import patch
+
+        from no1.daemon.experience_ops import _handle
+
+        group = type("G", (), {})()
+        with (
+            patch("no1.daemon.experience_ops.load_group", return_value=group),
+            patch("no1.daemon.experience_ops.find_actor", return_value={"id": "peer"}),
+            patch("no1.daemon.experience_ops.find_foreman", return_value={"id": "foreman"}),
+        ):
+            response = _handle("append", {"group_id": "g", "by": "peer", "content": "x"})
+        self.assertFalse(response.ok)
+        self.assertEqual(response.error.code, "permission_denied")
 
 
 class TestExperienceMcpHandler(unittest.TestCase):

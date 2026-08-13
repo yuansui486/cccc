@@ -1427,8 +1427,18 @@ MCP_TOOLS = [
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,
-                "action": {"type": "string", "enum": ["read", "append", "replace"], "default": "read"},
+                "action": {
+                    "type": "string",
+                    "enum": ["read", "append", "replace", "review_status", "candidate_submit", "review_complete"],
+                    "default": "read",
+                },
                 "content": {"type": "string"},
+                "cycle_id": {
+                    "type": "string",
+                    "description": "Active distillation review cycle ID; include it when writing during a review.",
+                },
+                "result": {"type": "string", "enum": ["written", "no_change", "failed"]},
+                "summary": {"type": "string"},
                 "expected_revision": {
                     "type": "string",
                     "description": "Revision returned by read; required for replace.",

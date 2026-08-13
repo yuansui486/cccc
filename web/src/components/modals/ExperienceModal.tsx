@@ -41,6 +41,7 @@ export function ExperienceModal({
   const [notice, setNotice] = useState("");
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderEvery, setReminderEvery] = useState(10);
+  const [forceReviewAfter, setForceReviewAfter] = useState(5);
 
   const loadDocument = useCallback(async () => {
     if (!groupId) return;
@@ -55,7 +56,10 @@ export function ExperienceModal({
         setError(response.error.message);
         return;
       }
-      setDocumentState(response.result);
+      setDocumentState((current) => ({
+        ...response.result,
+        distillation: response.result.distillation ?? current?.distillation,
+      }));
       setDraft(String(response.result.content || ""));
     } finally {
       setBusy(false);
@@ -67,8 +71,21 @@ export function ExperienceModal({
     setEditing(false);
     setReminderEnabled(settings?.experience_reminder_enabled ?? true);
     setReminderEvery(settings?.experience_reminder_every_user_messages ?? 10);
+    setForceReviewAfter(settings?.experience_force_review_after_unwritten_reminders ?? 5);
     void loadDocument();
-  }, [isOpen, loadDocument, settings?.experience_reminder_enabled, settings?.experience_reminder_every_user_messages]);
+  }, [
+    isOpen,
+    loadDocument,
+    settings?.experience_force_review_after_unwritten_reminders,
+    settings?.experience_reminder_enabled,
+    settings?.experience_reminder_every_user_messages,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || !documentState?.distillation?.active_cycle) return;
+    const timer = window.setInterval(() => void loadDocument(), 5000);
+    return () => window.clearInterval(timer);
+  }, [documentState?.distillation?.active_cycle, isOpen, loadDocument]);
 
   const saveDocument = async () => {
     if (!groupId || !documentState) return;
@@ -92,7 +109,10 @@ export function ExperienceModal({
         );
         return;
       }
-      setDocumentState(response.result);
+      setDocumentState((current) => ({
+        ...response.result,
+        distillation: response.result.distillation ?? current?.distillation,
+      }));
       setDraft(response.result.content);
       setEditing(false);
       setNotice(t("layout:experienceSaved"));
@@ -109,6 +129,10 @@ export function ExperienceModal({
       const ok = await onUpdateSettings({
         experience_reminder_enabled: reminderEnabled,
         experience_reminder_every_user_messages: Math.max(1, Math.min(1000, Math.round(reminderEvery || 10))),
+        experience_force_review_after_unwritten_reminders: Math.max(
+          1,
+          Math.min(100, Math.round(forceReviewAfter || 5)),
+        ),
       });
       if (ok !== false) setNotice(t("layout:experienceReminderSaved"));
     } finally {
@@ -220,7 +244,51 @@ export function ExperienceModal({
 
           <section className="border-t border-[var(--glass-border-subtle)] pt-4">
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("layout:experienceReminder")}</div>
-            <div className="mt-3 flex flex-wrap items-end gap-4">
+            {documentState?.distillation ? (
+              <div className="mt-3 rounded-md border border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)]/50 px-3 py-3">
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[var(--color-text-secondary)]">
+                  <span>
+                    {t("layout:experienceMessagesUntilReminder", {
+                      count: documentState.distillation.messages_until_reminder,
+                    })}
+                  </span>
+                  <span>
+                    {t("layout:experienceConsecutiveUnwritten", {
+                      count: documentState.distillation.consecutive_unwritten,
+                    })}
+                  </span>
+                  {documentState.distillation.last_result ? (
+                    <span>
+                      {t(`layout:experienceResult_${documentState.distillation.last_result.result}`)} ·{" "}
+                      {new Date(documentState.distillation.last_result.at).toLocaleString()}
+                    </span>
+                  ) : null}
+                </div>
+                {documentState.distillation.active_cycle ? (
+                  <div className="mt-2 text-xs text-[var(--color-text-primary)]">
+                    {documentState.distillation.active_cycle.state === "collecting"
+                      ? t("layout:experienceCollecting", {
+                          received: documentState.distillation.active_cycle.received_peers,
+                          total: documentState.distillation.active_cycle.requested_peers,
+                        })
+                      : t("layout:experienceAwaitingForeman", {
+                          foreman: documentState.distillation.active_cycle.foreman_id,
+                        })}
+                  </div>
+                ) : null}
+                {documentState.distillation.history.length > 1 ? (
+                  <div className="mt-2 border-t border-[var(--glass-border-subtle)] pt-2 text-xs text-[var(--color-text-muted)]">
+                    {documentState.distillation.history.slice(1, 4).map((item) => (
+                      <div key={`${item.cycle_id || item.at}-${item.result}`} className="mt-1 flex justify-between gap-3">
+                        <span>{t(`layout:experienceResult_${item.result}`)}</span>
+                        <span>{new Date(item.at).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px_180px_auto] sm:items-end">
               <label className="flex min-h-9 items-center gap-2 text-sm text-[var(--color-text-primary)]">
                 <input type="checkbox" checked={reminderEnabled} onChange={(event) => setReminderEnabled(event.target.checked)} disabled={readOnly} />
                 {t("layout:experienceReminderEnabled")}
@@ -235,6 +303,19 @@ export function ExperienceModal({
                   value={reminderEvery}
                   disabled={!reminderEnabled || readOnly}
                   onChange={(event) => setReminderEvery(Number(event.target.value))}
+                  className={classNames(ui.inputClass, "w-28")}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-[var(--color-text-muted)]">
+                <span className="block">{t("layout:experienceForceReviewAfter")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={forceReviewAfter}
+                  disabled={!reminderEnabled || readOnly}
+                  onChange={(event) => setForceReviewAfter(Number(event.target.value))}
                   className={classNames(ui.inputClass, "w-28")}
                 />
               </label>

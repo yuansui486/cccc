@@ -2353,6 +2353,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                         min_value=1,
                         max_value=1000,
                     ),
+                    "experience_force_review_after_unwritten_reminders": _safe_int(
+                        experience.get("force_review_after_unwritten_reminders", 5),
+                        default=5,
+                        min_value=1,
+                        max_value=100,
+                    ),
                     "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
                     "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=False),
                     "terminal_transcript_notify_lines": _safe_int(tt.get("notify_lines", 20), default=20, min_value=1, max_value=80),
@@ -3355,6 +3361,11 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch["experience_reminder_every_user_messages"] = max(
                 1,
                 min(1000, int(req.experience_reminder_every_user_messages)),
+            )
+        if req.experience_force_review_after_unwritten_reminders is not None:
+            patch["experience_force_review_after_unwritten_reminders"] = max(
+                1,
+                min(100, int(req.experience_force_review_after_unwritten_reminders)),
             )
 
         # Terminal transcript policy (group-scoped)

@@ -586,7 +586,7 @@ export function AutomationTab(props: AutomationTabProps) {
     editingRuleSourceId && status[editingRuleSourceId] ? status[editingRuleSourceId] : {};
 
   return (
-    <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
       {props.hideHeader ? null : (
         <div className={settingsWorkspaceShellClass(isDark)}>
           <div className={settingsWorkspaceHeaderClass(isDark)}>
@@ -597,6 +597,33 @@ export function AutomationTab(props: AutomationTabProps) {
           </div>
         </div>
       )}
+
+      <Section
+        isDark={isDark}
+        icon={SettingsIcon}
+        title={t("policies.title")}
+        description={t("policies.compactDescription")}
+      >
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3.5 py-3 text-left transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={props.busy}
+          onClick={() => setBuiltinSettingsOpen(true)}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-[var(--color-text-primary)]">
+              {t("policies.builtinSettings")}
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              {t("policies.builtinSummary")}
+            </div>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--color-accent-primary)]">
+            {t("policies.openSettings")}
+            <ChevronRightIcon className="h-4 w-4" />
+          </span>
+        </button>
+      </Section>
 
       <Section
         isDark={isDark}
@@ -702,33 +729,6 @@ export function AutomationTab(props: AutomationTabProps) {
                 activeCount: props.taskActiveOverdueMilestonesSeconds.length,
                 plannedCount: props.taskPlannedUnassignedMilestonesSeconds.length,
               })}
-            </div>
-          </div>
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--color-accent-primary)]">
-            {t("policies.openSettings")}
-            <ChevronRightIcon className="h-4 w-4" />
-          </span>
-        </button>
-      </Section>
-
-      <Section
-        isDark={isDark}
-        icon={SettingsIcon}
-        title={t("policies.title")}
-        description={t("policies.compactDescription")}
-      >
-        <button
-          type="button"
-          className="flex w-full items-center gap-3 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3.5 py-3 text-left transition-colors hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={props.busy}
-          onClick={() => setBuiltinSettingsOpen(true)}
-        >
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium text-[var(--color-text-primary)]">
-              {t("policies.builtinSettings")}
-            </div>
-            <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-              {t("policies.builtinSummary")}
             </div>
           </div>
           <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--color-accent-primary)]">
