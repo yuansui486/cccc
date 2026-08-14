@@ -4727,6 +4727,56 @@ class TestCodexAppFlow(unittest.TestCase):
             manager.stop_actor(group_id="g_test", actor_id="peer1")
             cleanup()
 
+    def test_codex_remote_tui_theme_refresh_preserves_app_server(self) -> None:
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.terminal_theme import TERMINAL_COLOR_SCHEME_ENV
+
+        session = CodexAppSession(
+            group_id="g_test",
+            actor_id="peer1",
+            cwd=Path("."),
+            env={"BASE": "1", TERMINAL_COLOR_SCHEME_ENV: "dark"},
+            listen_url="ws://127.0.0.1:12345",
+            transport="websocket",
+            persist_headless_state=False,
+            start_remote_tui=True,
+            remote_tui_base_command=["codex"],
+        )
+
+        class _Proc:
+            pid = 12345
+
+            def poll(self):
+                return None
+
+        class _PtySession:
+            pid = 22222
+
+        session._proc = _Proc()
+        session._running = True
+        session._pty_session = _PtySession()
+        session._session_state.thread_id = "thr-refresh"
+        started: list[tuple[dict[str, str], str]] = []
+
+        def _start_remote_tui(*, env, resume_thread_id=""):
+            started.append((dict(env), str(resume_thread_id)))
+            session._pty_session = _PtySession()
+            return session._pty_session
+
+        with patch.object(session, "_start_remote_tui", side_effect=_start_remote_tui) as start_tui, patch(
+            "no1.daemon.codex_app_sessions.pty_runner.SUPERVISOR.stop_actor"
+        ) as stop_tui, patch("no1.daemon.codex_app_sessions.write_pty_state") as write_state:
+            refreshed = session.refresh_remote_tui_theme("light")
+
+        self.assertTrue(refreshed)
+        self.assertTrue(session.is_running())
+        self.assertEqual(session._proc.pid, 12345)
+        self.assertEqual(session.env.get(TERMINAL_COLOR_SCHEME_ENV), "light")
+        self.assertEqual(started, [({"BASE": "1", TERMINAL_COLOR_SCHEME_ENV: "light"}, "thr-refresh")])
+        stop_tui.assert_called_once_with(group_id="g_test", actor_id="peer1")
+        start_tui.assert_called_once()
+        write_state.assert_called_once_with("g_test", "peer1", pid=22222)
+
     def test_codex_pty_app_remote_tui_start_failure_does_not_mark_resume_failed(self) -> None:
         from no1.daemon.codex_app_sessions import CodexAppSession
         from no1.daemon.runtime_session_ops import read_runtime_session

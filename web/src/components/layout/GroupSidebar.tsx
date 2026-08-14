@@ -806,11 +806,6 @@ export function GroupSidebar({
                     )}
                   />
                 </span>
-                {(actor.unread_count ?? 0) > 0 && (
-                  <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-500 dark:text-indigo-300">
-                    {actor.unread_count}
-                  </span>
-                )}
               </button>
             );
           })}
@@ -1034,7 +1029,6 @@ export function GroupSidebar({
                   <span className={classNames("shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold", indicator.statusBadgeClass)}>
                     {indicator.statusLabel}
                   </span>
-                  {renderCountBadge(actor.unread_count ?? 0)}
                 </button>
               );
             })}

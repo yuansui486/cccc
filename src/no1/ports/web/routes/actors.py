@@ -950,6 +950,28 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             }
         )
 
+    @group_router.post("/actors/{actor_id}/terminal-theme")
+    async def actor_terminal_theme_refresh(
+        request: Request,
+        group_id: str,
+        actor_id: str,
+        req: TerminalLaunchRequest = Body(...),
+        by: str = "user",
+    ) -> Dict[str, Any]:
+        """Refresh a Codex remote TUI without restarting its app-server session."""
+        return await ctx.daemon(
+            {
+                "op": "actor_terminal_theme_refresh",
+                "args": {
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "by": by,
+                    "terminal_color_scheme": req.terminal_color_scheme,
+                    **_profile_auth_args(request),
+                },
+            }
+        )
+
     @group_router.get("/actors/{actor_id}/env_private")
     async def actor_env_private_keys(group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
         """List configured private env keys + masked previews (never returns raw values)."""

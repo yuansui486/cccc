@@ -225,6 +225,20 @@ export async function restartActor(groupId: string, actorId: string) {
   );
 }
 
+export async function refreshActorTerminalTheme(
+  groupId: string,
+  actorId: string,
+  colorScheme: "light" | "dark",
+) {
+  return apiJson<{ refreshed?: boolean }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/terminal-theme`,
+    {
+      method: "POST",
+      body: JSON.stringify({ terminal_color_scheme: colorScheme }),
+    },
+  );
+}
+
 export async function fetchActorPrivateEnvKeys(groupId: string, actorId: string) {
   return apiJson<{ group_id: string; actor_id: string; keys: string[]; masked_values?: Record<string, string> }>(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/env_private?by=user`,

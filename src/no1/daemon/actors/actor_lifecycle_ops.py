@@ -17,7 +17,7 @@ from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ..mcp_install import prepare_runtime_mcp_env
 from ..runtime_session_ops import start_pty_actor_with_runtime_resume
-from ..terminal_theme import with_terminal_color_scheme
+from ..terminal_theme import normalize_terminal_color_scheme, with_terminal_color_scheme
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
@@ -241,6 +241,43 @@ def handle_actor_stop(
     from ...kernel.events import publish_event
     publish_event("actor.stop", {"group_id": group.group_id, "actor_id": actor_id})
     return DaemonResponse(ok=True, result={"actor": actor, "event": event})
+
+
+def handle_actor_terminal_theme_refresh(args: Dict[str, Any]) -> DaemonResponse:
+    group_id = str(args.get("group_id") or "").strip()
+    actor_id = str(args.get("actor_id") or "").strip()
+    by = str(args.get("by") or "user").strip()
+    if not group_id:
+        return _error("missing_group_id", "missing group_id")
+    if not actor_id:
+        return _error("missing_actor_id", "missing actor_id")
+    group = load_group(group_id)
+    if group is None:
+        return _error("group_not_found", f"group not found: {group_id}")
+    try:
+        require_actor_permission(group, by=by, action="actor.start", target_actor_id=actor_id)
+        actor = find_actor(group, actor_id)
+        if not isinstance(actor, dict):
+            return _error("actor_not_found", f"actor not found: {actor_id}")
+        if not actor_uses_codex_app_server_state(actor):
+            return _error(
+                "terminal_theme_refresh_unsupported",
+                "in-place terminal theme refresh is only supported for Codex app-server actors",
+            )
+        scheme = normalize_terminal_color_scheme(args.get("terminal_color_scheme"))
+        refreshed = codex_app_supervisor.refresh_remote_tui_theme(
+            group_id=group_id,
+            actor_id=actor_id,
+            color_scheme=scheme,
+        )
+        if not refreshed:
+            return _error("terminal_theme_refresh_failed", "Codex remote TUI is not running or is already refreshing")
+        return DaemonResponse(
+            ok=True,
+            result={"group_id": group_id, "actor_id": actor_id, "terminal_color_scheme": scheme, "refreshed": True},
+        )
+    except Exception as exc:
+        return _error("terminal_theme_refresh_failed", str(exc))
 
 
 def handle_actor_restart(
@@ -562,6 +599,8 @@ def try_handle_actor_lifecycle_op(
             remove_headless_state=remove_headless_state,
             remove_pty_state_if_pid=remove_pty_state_if_pid,
         )
+    if op == "actor_terminal_theme_refresh":
+        return handle_actor_terminal_theme_refresh(args)
     if op == "actor_restart":
         return handle_actor_restart(
             args,

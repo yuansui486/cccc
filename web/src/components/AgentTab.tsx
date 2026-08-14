@@ -19,6 +19,7 @@ import { copyTextToClipboard } from "../utils/copy";
 import { getStoppedTerminalOutputText } from "../utils/stoppedTerminalOutput";
 import { opencodeDeepSeekModelFromCommand } from "../utils/runtimePresets";
 import { fetchTerminalTail } from "../services/api/diagnostics";
+import { refreshActorTerminalTheme } from "../services/api/actors";
 import { useAgentTerminalConnection } from "./agentTerminal/useAgentTerminalConnection";
 
 const EMPTY_STREAMING_ACTIVITIES: StreamingActivity[] = [];
@@ -131,25 +132,18 @@ export function AgentTab({
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  // Codex resolves terminal colors once at process startup. Keep the whole
-  // PTY surface on that same palette while it is running so a page theme
-  // toggle cannot leave the outer surface and Codex's own input panel mixed.
-  const terminalThemeSessionKey = `${groupId}\u0000${actor.id}\u0000${termEpoch}\u0000${isRunning ? "running" : "stopped"}`;
-  const terminalThemeRef = useRef<{ key: string; isDark: boolean }>({
-    key: terminalThemeSessionKey,
-    isDark,
-  });
-  if (terminalThemeRef.current.key !== terminalThemeSessionKey) {
-    terminalThemeRef.current = { key: terminalThemeSessionKey, isDark };
-  }
   const codexRuntime = String(actor.runtime || "").trim().toLowerCase() === "codex";
-  const terminalIsDark = codexRuntime ? terminalThemeRef.current.isDark : isDark;
+  const codexAppServerRuntime = codexRuntime && String(actor.runtime_state_source || "").trim().toLowerCase() === "app_server";
+  const [codexTerminalIsDark, setCodexTerminalIsDark] = useState(isDark);
   const pendingTerminalBottomScrollRef = useRef(false);
   const [activated, setActivated] = useState(false);
   // Bumped to trigger a fresh WebSocket connection from the reconnect button
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [stoppedTerminalText, setStoppedTerminalText] = useState("");
   const [stoppedTerminalLoading, setStoppedTerminalLoading] = useState(false);
+  const previousThemeRef = useRef<boolean | null>(null);
+  const themeRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const pendingThemeSchemeRef = useRef<"light" | "dark" | null>(null);
 
   const pasteStateRef = useRef<{ inFlight: boolean; lastAt: number }>({ inFlight: false, lastAt: 0 });
 
@@ -171,6 +165,17 @@ export function AgentTab({
     if (!isVisible || isHeadless || !isRunning) return;
     pendingTerminalBottomScrollRef.current = true;
   }, [actor.id, groupId, isHeadless, isRunning, isVisible]);
+
+  // A new Codex process (or a stop/start transition) captures the current
+  // page theme. A running app-server Codex is refreshed below without
+  // interrupting its model session.
+  useEffect(() => {
+    if (!codexRuntime) return;
+    setCodexTerminalIsDark(isDark);
+    // Capture theme only when the runtime session changes; theme changes while
+    // running are handled by the remote TUI refresh effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actor.id, codexRuntime, isRunning, termEpoch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -311,16 +316,13 @@ export function AgentTab({
   const ghostActionButtonClass =
     "inline-flex items-center gap-1.5 rounded-xl border border-transparent px-3 py-2.5 text-sm font-medium text-[var(--color-text-tertiary)] transition-colors hover:border-[var(--glass-border-subtle)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-50 disabled:cursor-not-allowed";
 
-  // Update terminal theme when isDark changes
+  // Codex updates its palette only after the remote TUI refresh succeeds;
+  // other runtimes continue to follow the page theme immediately.
   useEffect(() => {
-    // Codex caches terminal colors during startup. Updating xterm live while
-    // Codex keeps its old palette creates mixed light/dark TUI panels; a
-    // restart (termEpoch change) recreates the terminal with the new theme.
-    if (String(actor.runtime || "").trim().toLowerCase() === "codex") return;
     if (terminalRef.current) {
-      terminalRef.current.options.theme = getTerminalTheme(isDark);
+      terminalRef.current.options.theme = getTerminalTheme(codexRuntime ? codexTerminalIsDark : isDark);
     }
-  }, [actor.runtime, isDark]);
+  }, [codexRuntime, codexTerminalIsDark, isDark]);
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -347,7 +349,7 @@ export function AgentTab({
       cursorInactiveStyle: "none",
       fontSize: 13,
       fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Menlo, Monaco, monospace',
-      theme: getTerminalTheme(terminalIsDark),
+      theme: getTerminalTheme(codexRuntime ? codexTerminalIsDark : isDark),
       disableStdin: !canControl,
       // Bigger scrollback improves history browsing without going "infinite" and hurting perf.
       // Default is 8k lines; the user can override it in Global → Developer settings.
@@ -472,6 +474,40 @@ export function AgentTab({
     clearTerminalSignal,
     setReconnectTrigger,
   });
+
+  useEffect(() => {
+    if (previousThemeRef.current === null) {
+      previousThemeRef.current = isDark;
+      return;
+    }
+    if (previousThemeRef.current === isDark) return;
+    previousThemeRef.current = isDark;
+    if (!codexAppServerRuntime || !isRunning || isHeadless) return;
+
+    pendingThemeSchemeRef.current = isDark ? "dark" : "light";
+    if (themeRefreshInFlightRef.current) return;
+
+    const drainThemeRefresh = async (): Promise<void> => {
+      while (pendingThemeSchemeRef.current) {
+        const scheme = pendingThemeSchemeRef.current;
+        pendingThemeSchemeRef.current = null;
+        try {
+          const response = await refreshActorTerminalTheme(groupId, actor.id, scheme);
+          if (response.ok && response.result?.refreshed) {
+            setCodexTerminalIsDark(scheme === "dark");
+            requestReconnect();
+          }
+        } catch {
+          // Theme changes must never interrupt the running Codex session.
+        }
+      }
+    };
+
+    const refreshPromise = drainThemeRefresh().finally(() => {
+      themeRefreshInFlightRef.current = null;
+    });
+    themeRefreshInFlightRef.current = refreshPromise;
+  }, [actor.id, codexAppServerRuntime, groupId, isDark, isHeadless, isRunning, requestReconnect]);
 
   useEffect(() => {
     if (!isVisible || !terminalReady || isHeadless || !isRunning) return;
@@ -689,7 +725,7 @@ export function AgentTab({
           contain: "layout",
           overflow: "hidden",
           ...(isRunning && !isHeadless
-            ? { backgroundColor: terminalIsDark ? "#0f172a" : "#fafafa" }
+            ? { backgroundColor: (codexRuntime ? codexTerminalIsDark : isDark) ? "#0f172a" : "#fafafa" }
             : {}),
         }}
       >

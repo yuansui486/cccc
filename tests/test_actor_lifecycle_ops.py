@@ -7,6 +7,50 @@ from unittest.mock import patch
 
 
 class TestActorLifecycleOps(unittest.TestCase):
+    def test_actor_terminal_theme_refresh_dispatches_to_codex_app_session(self) -> None:
+        from no1.daemon.actors.actor_lifecycle_ops import handle_actor_terminal_theme_refresh
+
+        group = object()
+        actor = {
+            "id": "peer1",
+            "runtime": "codex",
+            "runner": "pty",
+            "runtime_state_source": "app_server",
+        }
+        with patch("no1.daemon.actors.actor_lifecycle_ops.load_group", return_value=group), patch(
+            "no1.daemon.actors.actor_lifecycle_ops.find_actor", return_value=actor
+        ), patch("no1.daemon.actors.actor_lifecycle_ops.require_actor_permission") as require_permission, patch(
+            "no1.daemon.actors.actor_lifecycle_ops.codex_app_supervisor.refresh_remote_tui_theme",
+            return_value=True,
+        ) as refresh:
+            response = handle_actor_terminal_theme_refresh(
+                {
+                    "group_id": "g-test",
+                    "actor_id": "peer1",
+                    "by": "user",
+                    "terminal_color_scheme": "light",
+                }
+            )
+
+        self.assertTrue(response.ok, getattr(response, "error", None))
+        require_permission.assert_called_once_with(group, by="user", action="actor.start", target_actor_id="peer1")
+        refresh.assert_called_once_with(group_id="g-test", actor_id="peer1", color_scheme="light")
+        self.assertEqual((response.result or {}).get("terminal_color_scheme"), "light")
+
+    def test_actor_terminal_theme_refresh_rejects_non_codex_app_server_actor(self) -> None:
+        from no1.daemon.actors.actor_lifecycle_ops import handle_actor_terminal_theme_refresh
+
+        with patch("no1.daemon.actors.actor_lifecycle_ops.load_group", return_value=object()), patch(
+            "no1.daemon.actors.actor_lifecycle_ops.find_actor",
+            return_value={"id": "peer1", "runtime": "claude", "runner": "pty"},
+        ), patch("no1.daemon.actors.actor_lifecycle_ops.require_actor_permission"):
+            response = handle_actor_terminal_theme_refresh(
+                {"group_id": "g-test", "actor_id": "peer1", "terminal_color_scheme": "dark"}
+            )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(getattr(response.error, "code", ""), "terminal_theme_refresh_unsupported")
+
     def _mock_runtime_start(self):
         return patch(
             "no1.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor",

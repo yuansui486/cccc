@@ -37,9 +37,10 @@ from .messaging.turn_provenance import (
     terminalize_uncertain_delivery_attempt,
     turn_delivery_attempt_receipt,
 )
-from .runner_state_ops import headless_state_path, remove_headless_state
+from .runner_state_ops import headless_state_path, remove_headless_state, write_pty_state
 from .codex_app_thread_ops import prepare_codex_app_tui_resume, start_codex_app_thread
 from .runtime_session_ops import mark_runtime_session_auth_failed, record_codex_app_thread_runtime_session, runtime_resume_enabled
+from .terminal_theme import normalize_terminal_color_scheme, with_terminal_color_scheme
 from ..util.fs import atomic_write_json
 from ..util.node_env import with_node_deprecation_warnings_suppressed
 from ..util.process import pid_is_alive, resolve_subprocess_argv, terminate_pid, windowless_subprocess_popen_kwargs
@@ -670,6 +671,7 @@ class CodexAppSession:
         self._proc: Optional[subprocess.Popen[str]] = None
         self._ws: Any = None
         self._pty_session: Any = None
+        self._remote_tui_refreshing = False
         self._lock = threading.Lock()
         self._pending: Dict[int, "queue.Queue[Dict[str, Any]]"] = {}
         self._next_request_id = 1
@@ -1198,6 +1200,9 @@ class CodexAppSession:
     def handle_remote_tui_exit(self, *, pid: int = 0) -> bool:
         if not self.start_remote_tui:
             return False
+        with self._lock:
+            if self._remote_tui_refreshing:
+                return True
         current_pid = self.remote_tui_pid()
         if pid > 0 and current_pid > 0 and int(pid) != current_pid:
             return False
@@ -1205,6 +1210,55 @@ class CodexAppSession:
             return False
         self.stop(persist_actor_stopped=False)
         return True
+
+    def refresh_remote_tui_theme(self, color_scheme: str) -> bool:
+        """Restart only the remote TUI while keeping the app-server session alive."""
+
+        if not self.start_remote_tui or not self.is_running():
+            return False
+        scheme = normalize_terminal_color_scheme(color_scheme)
+        with self._lock:
+            if self._remote_tui_refreshing:
+                return False
+            old_session = self._pty_session
+            if old_session is None:
+                return False
+            thread_id = str(self._session_state.thread_id or "").strip()
+            old_env = dict(self.env)
+            self.env = with_terminal_color_scheme(self.env, scheme)
+            self._remote_tui_refreshing = True
+            # The normal PTY exit callback treats a remote TUI exit as an
+            # app-server failure. This exit is intentional and will be
+            # followed by a replacement TUI below.
+            try:
+                setattr(old_session, "_expected_exit", True)
+            except Exception:
+                pass
+            refresh_env = dict(self.env)
+        try:
+            pty_runner.SUPERVISOR.stop_actor(group_id=self.group_id, actor_id=self.actor_id)
+            new_session = self._start_remote_tui(env=refresh_env, resume_thread_id=thread_id)
+            try:
+                write_pty_state(self.group_id, self.actor_id, pid=int(getattr(new_session, "pid", 0) or 0))
+            except Exception:
+                logger.exception("failed to persist refreshed Codex remote TUI pid for %s/%s", self.group_id, self.actor_id)
+            return True
+        except Exception:
+            logger.exception("failed to refresh Codex remote TUI theme for %s/%s", self.group_id, self.actor_id)
+            try:
+                with self._lock:
+                    self.env = old_env
+                restored_session = self._start_remote_tui(env=old_env, resume_thread_id=thread_id)
+                try:
+                    write_pty_state(self.group_id, self.actor_id, pid=int(getattr(restored_session, "pid", 0) or 0))
+                except Exception:
+                    logger.exception("failed to persist restored Codex remote TUI pid for %s/%s", self.group_id, self.actor_id)
+            except Exception:
+                logger.exception("failed to restore Codex remote TUI after theme refresh failure for %s/%s", self.group_id, self.actor_id)
+            return False
+        finally:
+            with self._lock:
+                self._remote_tui_refreshing = False
 
     def _start_remote_tui(self, *, env: Dict[str, str], resume_thread_id: str = "") -> Any:
         remote_command = resolve_subprocess_argv(
@@ -2647,6 +2701,14 @@ class CodexAppSessionManager:
             session = self._sessions.get(key)
         if isinstance(session, CodexAppSession):
             return bool(session.handle_remote_tui_exit(pid=int(pid or 0)))
+        return False
+
+    def refresh_remote_tui_theme(self, *, group_id: str, actor_id: str, color_scheme: str) -> bool:
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        with self._lock:
+            session = self._sessions.get(key)
+        if isinstance(session, CodexAppSession):
+            return bool(session.refresh_remote_tui_theme(color_scheme))
         return False
 
     def stop_group(self, *, group_id: str) -> None:

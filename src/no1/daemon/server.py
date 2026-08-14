@@ -752,6 +752,8 @@ def _best_effort_killpg(pid: int, sig: signal.Signals) -> None:
 
 def _handle_pty_session_exit(session: pty_runner.PtySession, *, persist_actor_stopped: bool = True) -> None:
     """Persist user-visible PTY exits as stopped so daemon autostart does not resurrect them."""
+    if bool(getattr(session, "_expected_exit", False)):
+        return
     removed_current_state = bool(_remove_pty_state_if_pid(session.group_id, session.actor_id, pid=session.pid))
     stop_codex_app_server_for_pty_actor_if_needed(group_id=session.group_id, actor_id=session.actor_id, pid=session.pid)
     if not persist_actor_stopped:
