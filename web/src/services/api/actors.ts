@@ -1,6 +1,6 @@
 import type { Actor, ActorProfile, ActorProfileUsage, ActorRuntimeOptions } from "../../types";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
-import { syncStoredTerminalColorScheme } from "../../utils/terminalThemeSync";
+import { getStoredTerminalColorScheme } from "../../utils/terminalThemeSync";
 import {
   actorsReadOnlyRequestKey,
   apiForm,
@@ -197,11 +197,11 @@ export async function removeActor(groupId: string, actorId: string) {
 }
 
 export async function startActor(groupId: string, actorId: string) {
-  await syncStoredTerminalColorScheme({ force: true });
   clearActorsReadOnlyRequest(groupId);
   clearGroupsReadRequest();
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/start`, {
     method: "POST",
+    body: JSON.stringify({ terminal_color_scheme: getStoredTerminalColorScheme() }),
   });
 }
 
@@ -214,12 +214,14 @@ export async function stopActor(groupId: string, actorId: string) {
 }
 
 export async function restartActor(groupId: string, actorId: string) {
-  await syncStoredTerminalColorScheme({ force: true });
   clearActorsReadOnlyRequest(groupId);
   clearGroupsReadRequest();
   return apiJson(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/restart?by=user`,
-    { method: "POST" },
+    {
+      method: "POST",
+      body: JSON.stringify({ terminal_color_scheme: getStoredTerminalColorScheme() }),
+    },
   );
 }
 

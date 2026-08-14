@@ -392,6 +392,71 @@ class TestActorRuntimeOps(unittest.TestCase):
             retry_seconds=0.0,
         )
 
+    def test_codex_app_remote_tui_receives_session_terminal_color_scheme(self) -> None:
+        from no1.daemon.actors import actor_runtime_ops
+        from no1.daemon.terminal_theme import TERMINAL_COLOR_SCHEME_ENV
+
+        captured: dict[str, object] = {}
+
+        def fake_start_pty_app_actor(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(remote_tui_pid=lambda: 1234)
+
+        with tempfile.TemporaryDirectory() as td:
+            ledger_path = Path(td) / "ledger.jsonl"
+            group = SimpleNamespace(
+                group_id="g-test",
+                doc={"active_scope_key": "scope1", "state": "active", "running": False},
+                save=lambda: None,
+                ledger_path=ledger_path,
+            )
+            actor = {
+                "id": "codex-1",
+                "default_scope_key": "scope1",
+                "runner": "pty",
+                "runtime": "codex",
+                "runtime_state_source": "app_server",
+                "command": ["codex"],
+                "env": {},
+            }
+            with (
+                patch.object(actor_runtime_ops, "find_actor", return_value=actor),
+                patch.object(actor_runtime_ops.pty_runner, "PTY_SUPPORTED", True),
+                patch.object(actor_runtime_ops, "runtime_start_preflight_error", return_value=""),
+                patch.object(actor_runtime_ops, "_prepare_codex_skill_overlay", return_value={}),
+                patch.object(
+                    actor_runtime_ops.codex_app_supervisor,
+                    "start_pty_app_actor",
+                    side_effect=fake_start_pty_app_actor,
+                ),
+            ):
+                result = actor_runtime_ops.start_actor_process(
+                    group,
+                    "codex-1",
+                    command=[],
+                    env={TERMINAL_COLOR_SCHEME_ENV: "light"},
+                    runner="pty",
+                    runtime="codex",
+                    by="user",
+                    find_scope_url=lambda _group, _scope_key: td,
+                    effective_runner_kind=lambda runner: runner,
+                    merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+                    normalize_runtime_command=lambda _runtime, command: list(command),
+                    ensure_mcp_installed=lambda _runtime, _cwd, **_kwargs: True,
+                    inject_actor_context_env=lambda env, _gid, _aid: dict(env),
+                    prepare_pty_env=lambda env: dict(env),
+                    pty_backlog_bytes=lambda: 1024,
+                    write_headless_state=lambda _gid, _aid: None,
+                    write_pty_state=lambda _gid, _aid, _pid: None,
+                    clear_preamble_sent=lambda _group, _aid: None,
+                    throttle_reset_actor=lambda _gid, _aid: None,
+                    supported_runtimes=("codex",),
+                )
+
+        self.assertTrue(bool(result.get("success")), result.get("error"))
+        env = captured.get("env") if isinstance(captured.get("env"), dict) else {}
+        self.assertEqual(env.get(TERMINAL_COLOR_SCHEME_ENV), "light")
+
     def test_opencode_actor_start_injects_inline_mcp_config_into_pty_env(self) -> None:
         from no1.daemon.actors import actor_runtime_ops
         from no1.kernel.runtime import ensure_opencode_auto_command

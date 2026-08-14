@@ -228,7 +228,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
 
         session._maybe_reply_to_terminal_queries(b"\x1b[c")
 
-        self.assertEqual(writes, [])
+        self.assertEqual(writes, [b"\x1b[?1;2c"])
 
     def test_windows_pty_does_not_replay_complete_terminal_query_tail(self) -> None:
         from no1.runners import pty_win

@@ -15,6 +15,9 @@ _FIXED_QUERY_RESPONSES: Tuple[Tuple[bytes, bytes], ...] = (
     (b"\x1b[>0c", b"\x1b[>0;0;0c"),
 )
 _OSC_QUERY_RE = re.compile(rb"\x1b\](4;(\d+)|10|11);\?(?:\x07|\x1b\\)")
+_OSC_RESPONSE_RE = re.compile(
+    rb"\x1b\](?:10|11);rgb:[0-9a-fA-F]{1,4}/[0-9a-fA-F]{1,4}/[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)"
+)
 
 _XTERM_PALETTE = (
     "000000",
@@ -40,6 +43,12 @@ _TERMINAL_COLORS = {
     "light": ("1e293b", "fafafa"),
     "dark": ("e2e8f0", "0f172a"),
 }
+_QUERY_FILTER_RUNTIMES = {"codex", "droid", "gemini", "neovate", "opencode"}
+_FIXED_TERMINAL_RESPONSES = (
+    b"\x1b[1;1R",
+    b"\x1b[?1;2c",
+    b"\x1b[>0;0;0c",
+)
 
 
 def _osc_rgb(hex_color: str) -> str:
@@ -60,6 +69,65 @@ def _iter_new_fixed_queries(data: bytes, previous_length: int) -> Iterable[Tuple
             if end > previous_length:
                 yield query, response
             offset = index + 1
+
+
+def _is_terminal_query_prefix(value: bytes, *, runtime: str) -> bool:
+    if runtime not in _QUERY_FILTER_RUNTIMES or not value:
+        return False
+    fixed = tuple(query for query, _response in _FIXED_QUERY_RESPONSES) + _FIXED_TERMINAL_RESPONSES
+    if any(candidate.startswith(value) for candidate in fixed):
+        return True
+    if value.startswith(b"\x1b]"):
+        prefixes = (b"\x1b]4;", b"\x1b]10;", b"\x1b]11;")
+        return any(prefix.startswith(value) or value.startswith(prefix) for prefix in prefixes)
+    return False
+
+
+def filter_terminal_query_output(
+    previous_pending: bytes,
+    chunk: bytes,
+    *,
+    runtime: str,
+) -> tuple[bytes, bytes]:
+    """Remove terminal queries/replies from the browser-visible PTY stream.
+
+    Query bytes must still reach ``terminal_query_responses`` so the child can
+    receive an immediate answer, but they should never be rendered by xterm.
+    ``previous_pending`` contains only an incomplete candidate from the prior
+    chunk and is therefore safe to hold until the sequence is complete.
+    """
+
+    runtime_id = str(runtime or "").strip().lower()
+    if runtime_id not in _QUERY_FILTER_RUNTIMES:
+        return bytes(chunk or b""), b""
+
+    data = bytes(previous_pending or b"") + bytes(chunk or b"")
+    visible = bytearray()
+    index = 0
+    fixed = tuple(query for query, _response in _FIXED_QUERY_RESPONSES) + _FIXED_TERMINAL_RESPONSES
+    while index < len(data):
+        if data[index] != 0x1B:
+            visible.append(data[index])
+            index += 1
+            continue
+        remaining = data[index:]
+        matched = False
+        for sequence in fixed:
+            if remaining.startswith(sequence):
+                index += len(sequence)
+                matched = True
+                break
+        if matched:
+            continue
+        osc_match = _OSC_QUERY_RE.match(remaining) or _OSC_RESPONSE_RE.match(remaining)
+        if osc_match:
+            index += osc_match.end()
+            continue
+        if _is_terminal_query_prefix(remaining, runtime=runtime_id):
+            return bytes(visible), remaining
+        visible.append(data[index])
+        index += 1
+    return bytes(visible), b""
 
 
 def terminal_query_responses(
@@ -114,8 +182,10 @@ def terminal_query_responses(
                 color = _XTERM_PALETTE[index] if 0 <= index < len(_XTERM_PALETTE) else "000000"
                 responses.append(f"\x1b]4;{index_text};rgb:{_osc_rgb(color)}\x07".encode("ascii"))
             elif kind == "10":
-                responses.append(f"\x1b]10;rgb:{_osc_rgb(foreground)}\x07".encode("ascii"))
+                terminator = "\x1b\\" if runtime_id == "codex" else "\x07"
+                responses.append(f"\x1b]10;rgb:{_osc_rgb(foreground)}{terminator}".encode("ascii"))
             elif kind == "11":
-                responses.append(f"\x1b]11;rgb:{_osc_rgb(background)}\x07".encode("ascii"))
+                terminator = "\x1b\\" if runtime_id == "codex" else "\x07"
+                responses.append(f"\x1b]11;rgb:{_osc_rgb(background)}{terminator}".encode("ascii"))
 
     return data[-_QUERY_TAIL_BYTES:], responses

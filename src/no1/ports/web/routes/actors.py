@@ -43,6 +43,7 @@ from ..schemas import (
     ActorCreateRequest,
     ActorProfileUpsertRequest,
     ActorRestartRequest,
+    TerminalLaunchRequest,
     ActorUpdateRequest,
     RouteContext,
     _normalize_command,
@@ -897,14 +898,26 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         return resp
 
     @group_router.post("/actors/{actor_id}/start")
-    async def actor_start(request: Request, group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
+    async def actor_start(
+        request: Request,
+        group_id: str,
+        actor_id: str,
+        req: TerminalLaunchRequest | None = Body(default=None),
+        by: str = "user",
+    ) -> Dict[str, Any]:
         await invalidate_readonly_actor_list(group_id)
         if not await _developer_mode_enabled() and _is_internal_headless_runtime(await _actor_runtime_meta(group_id, actor_id)):
             raise _headless_error(source="actor_start")
         return await ctx.daemon(
             {
                 "op": "actor_start",
-                "args": {"group_id": group_id, "actor_id": actor_id, "by": by, **_profile_auth_args(request)},
+                "args": {
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "by": by,
+                    "terminal_color_scheme": req.terminal_color_scheme if req is not None else None,
+                    **_profile_auth_args(request),
+                },
             }
         )
 
@@ -931,6 +944,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "group_id": group_id,
                     "actor_id": actor_id,
                     "by": by,
+                    "terminal_color_scheme": req.terminal_color_scheme if req is not None else None,
                     **_profile_auth_args(request),
                 },
             }

@@ -22,8 +22,8 @@ from ..kernel.working_state import derive_pty_terminal_override
 from .pty_lifecycle import LifecycleGate
 from .pty_snapshot import PtyBacklogSnapshot, PtyBacklogSnapshotCache
 from .pty_attach import PtyAttachBusyError, PtyAttachReservation
-from .terminal_queries import terminal_query_responses
-from ..kernel.settings import get_observability_settings
+from .terminal_queries import filter_terminal_query_output, terminal_query_responses
+from ..daemon.terminal_theme import TERMINAL_COLOR_SCHEME_ENV, normalize_terminal_color_scheme
 
 PTY_SUPPORTED = True
 TERMINAL_SIGNAL_BUFFER_CHARS = 4096
@@ -78,8 +78,7 @@ class PtySession:
         self.group_id = group_id
         self.actor_id = actor_id
         self._runtime = str(runtime or "")
-        terminal_ui = get_observability_settings().get("terminal_ui") or {}
-        self._color_scheme = str(terminal_ui.get("color_scheme") or "dark").strip().lower()
+        self._color_scheme = normalize_terminal_color_scheme(env.get(TERMINAL_COLOR_SCHEME_ENV))
         self._on_exit = on_exit
         self._started_at = time.monotonic()
         self._first_output_at: Optional[float] = None
@@ -109,6 +108,7 @@ class PtySession:
         self._terminal_override: Optional[Dict[str, str]] = None
         self._mode_tail = b""
         self._query_tail = b""
+        self._query_output_pending = b""
         self._bracketed_paste = False
         self._bracketed_paste_changed_at: Optional[float] = None
 
@@ -303,6 +303,8 @@ class PtySession:
             end = int(getattr(self, "_backlog_end_offset", 0) or 0)
             self._backlog_start_offset = end
             self._mode_tail = b""
+            self._query_tail = b""
+            self._query_output_pending = b""
 
     def resize(self, *, cols: int, rows: int) -> None:
         if cols <= 0 or rows <= 0:
@@ -686,12 +688,19 @@ class PtySession:
                 return
 
             self._maybe_reply_to_terminal_queries(chunk)
+            visible_chunk, self._query_output_pending = filter_terminal_query_output(
+                getattr(self, "_query_output_pending", b""),
+                chunk,
+                runtime=self._runtime,
+            )
             self._update_input_modes(chunk)
-            self._append_backlog(chunk)
+            if not visible_chunk:
+                continue
+            self._append_backlog(visible_chunk)
             with self._lock:
                 clients = list(self._clients.items())
 
-            self._queue_output_for_clients(chunk, clients=clients)
+            self._queue_output_for_clients(visible_chunk, clients=clients)
 
     def _queue_output_for_clients(
         self,
@@ -751,7 +760,7 @@ class PtySession:
                 chunk,
                 runtime=self._runtime,
                 active_writer=active_writer,
-                color_scheme=self._color_scheme,
+                color_scheme=getattr(self, "_color_scheme", "dark"),
             )
         for response in responses:
             self.write_input(response)

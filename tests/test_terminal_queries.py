@@ -1,4 +1,5 @@
-from no1.runners.terminal_queries import terminal_query_responses
+from no1.runners.terminal_queries import filter_terminal_query_output, terminal_query_responses
+from no1.daemon.terminal_theme import TERMINAL_COLOR_SCHEME_ENV, normalize_terminal_color_scheme, with_terminal_color_scheme
 
 
 def _feed(
@@ -20,6 +21,15 @@ def _feed(
         )
         responses.extend(current)
     return responses
+
+
+def test_terminal_color_scheme_is_session_scoped_and_defaults_dark() -> None:
+    assert normalize_terminal_color_scheme("light") == "light"
+    assert normalize_terminal_color_scheme("invalid") == "dark"
+    assert with_terminal_color_scheme({"OTHER": "1"}, "light") == {
+        "OTHER": "1",
+        TERMINAL_COLOR_SCHEME_ENV: "light",
+    }
 
 
 def test_opencode_answers_osc_queries_across_chunks() -> None:
@@ -82,12 +92,12 @@ def test_codex_answers_light_and_dark_color_queries_with_active_writer() -> None
     query = b"\x1b]10;?\x1b\\\x1b]11;?\x07"
 
     assert _feed([query], runtime="codex", active_writer=True, color_scheme="light") == [
-        b"\x1b]10;rgb:1e1e/2929/3b3b\x07",
-        b"\x1b]11;rgb:fafa/fafa/fafa\x07",
+        b"\x1b]10;rgb:1e1e/2929/3b3b\x1b\\",
+        b"\x1b]11;rgb:fafa/fafa/fafa\x1b\\",
     ]
     assert _feed([query], runtime="codex", active_writer=True, color_scheme="dark") == [
-        b"\x1b]10;rgb:e2e2/e8e8/f0f0\x07",
-        b"\x1b]11;rgb:0f0f/1717/2a2a\x07",
+        b"\x1b]10;rgb:e2e2/e8e8/f0f0\x1b\\",
+        b"\x1b]11;rgb:0f0f/1717/2a2a\x1b\\",
     ]
 
 
@@ -95,8 +105,8 @@ def test_codex_answers_color_queries_without_active_writer() -> None:
     query = b"\x1b]10;?\x1b\\\x1b]11;?\x07"
 
     assert _feed([query], runtime="codex", active_writer=False, color_scheme="light") == [
-        b"\x1b]10;rgb:1e1e/2929/3b3b\x07",
-        b"\x1b]11;rgb:fafa/fafa/fafa\x07",
+        b"\x1b]10;rgb:1e1e/2929/3b3b\x1b\\",
+        b"\x1b]11;rgb:fafa/fafa/fafa\x1b\\",
     ]
 
 
@@ -109,6 +119,23 @@ def test_codex_answers_fragmented_color_queries_once() -> None:
     )
 
     assert responses == [
-        b"\x1b]10;rgb:1e1e/2929/3b3b\x07",
-        b"\x1b]11;rgb:fafa/fafa/fafa\x07",
+        b"\x1b]10;rgb:1e1e/2929/3b3b\x1b\\",
+        b"\x1b]11;rgb:fafa/fafa/fafa\x1b\\",
     ]
+
+
+def test_codex_query_output_is_hidden_from_browser_across_chunks() -> None:
+    pending = b""
+    visible = []
+    for chunk in (b"before\x1b]10;?\x1b", b"\\after\x1b[?1;", b"2cend"):
+        output, pending = filter_terminal_query_output(pending, chunk, runtime="codex")
+        visible.append(output)
+
+    assert b"".join(visible) == b"beforeafterend"
+    assert pending == b""
+
+
+def test_non_query_terminal_output_is_preserved() -> None:
+    output, pending = filter_terminal_query_output(b"", b"\x1b[Ahello\r", runtime="codex")
+    assert output == b"\x1b[Ahello\r"
+    assert pending == b""

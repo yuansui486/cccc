@@ -18,8 +18,8 @@ from .platform_support import load_winpty_process_class, pty_support_error_messa
 from .pty_lifecycle import LifecycleGate
 from .pty_snapshot import PtyBacklogSnapshot, PtyBacklogSnapshotCache
 from .pty_attach import PtyAttachBusyError, PtyAttachReservation
-from .terminal_queries import terminal_query_responses
-from ..kernel.settings import get_observability_settings
+from .terminal_queries import filter_terminal_query_output, terminal_query_responses
+from ..daemon.terminal_theme import TERMINAL_COLOR_SCHEME_ENV, normalize_terminal_color_scheme
 from ..util.process import terminate_pid
 
 _WINPTY_PROCESS = load_winpty_process_class()
@@ -75,8 +75,7 @@ class PtySession:
         self.group_id = group_id
         self.actor_id = actor_id
         self._runtime = str(runtime or "")
-        terminal_ui = get_observability_settings().get("terminal_ui") or {}
-        self._color_scheme = str(terminal_ui.get("color_scheme") or "dark").strip().lower()
+        self._color_scheme = normalize_terminal_color_scheme(env.get(TERMINAL_COLOR_SCHEME_ENV))
         self._on_exit = on_exit
         self._started_at = time.monotonic()
         self._first_output_at: Optional[float] = None
@@ -101,6 +100,7 @@ class PtySession:
         self._terminal_override: Optional[Dict[str, str]] = None
         self._mode_tail = b""
         self._query_tail = b""
+        self._query_output_pending = b""
         self._bracketed_paste = False
         self._bracketed_paste_changed_at: Optional[float] = None
 
@@ -321,6 +321,7 @@ class PtySession:
             self._backlog_start_offset = end
             self._mode_tail = b""
             self._query_tail = b""
+            self._query_output_pending = b""
 
     def _notify_wake(self) -> None:
         try:
@@ -417,7 +418,7 @@ class PtySession:
                 chunk,
                 runtime=self._runtime,
                 active_writer=active_writer,
-                color_scheme=self._color_scheme,
+                color_scheme=getattr(self, "_color_scheme", "dark"),
             )
         for response in responses:
             self.write_input(response)
@@ -460,14 +461,21 @@ class PtySession:
             if chunk is None:
                 self._running = False
                 break
-            self._append_backlog(chunk)
+            visible_chunk, self._query_output_pending = filter_terminal_query_output(
+                getattr(self, "_query_output_pending", b""),
+                chunk,
+                runtime=self._runtime,
+            )
+            if not visible_chunk:
+                continue
+            self._append_backlog(visible_chunk)
             with self._lock:
                 clients = list(self._clients.items())
             for fileno, client in clients:
-                if self._max_client_buffer_bytes and (len(client.outbuf) + len(chunk) > self._max_client_buffer_bytes):
+                if self._max_client_buffer_bytes and (len(client.outbuf) + len(visible_chunk) > self._max_client_buffer_bytes):
                     self.detach_client(fileno)
                     continue
-                client.outbuf.extend(chunk)
+                client.outbuf.extend(visible_chunk)
                 if not client.active:
                     continue
                 try:

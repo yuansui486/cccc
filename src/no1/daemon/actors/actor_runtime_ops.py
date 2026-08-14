@@ -16,6 +16,7 @@ from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ..mcp_install import prepare_runtime_mcp_env
 from ..runtime_session_ops import start_pty_actor_with_runtime_resume
+from ..terminal_theme import TERMINAL_COLOR_SCHEME_ENV, with_terminal_color_scheme
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...runners.platform_support import pty_support_error_message
@@ -258,6 +259,7 @@ def start_actor_process(
     by: str,
     caller_id: str = "",
     is_admin: bool = False,
+    terminal_color_scheme: str = "dark",
     find_scope_url: Callable[[Any, str], str],
     effective_runner_kind: Callable[[str], str],
     merge_actor_env_with_private: Callable[[str, str, Dict[str, Any]], Dict[str, Any]],
@@ -302,6 +304,7 @@ def start_actor_process(
     cwd = launch_spec["cwd"]
     runtime = launch_spec["runtime"]
     runner = launch_spec["runner"]
+    terminal_color_scheme = str(env.get(TERMINAL_COLOR_SCHEME_ENV) or terminal_color_scheme)
 
     if runtime == "codex":
         try:
@@ -326,6 +329,7 @@ def start_actor_process(
         command=list(effective_cmd),
         runtime_options=dict(actor.get("runtime_options") or {}),
     )
+    launch_env = with_terminal_color_scheme(launch_env, terminal_color_scheme)
 
     runtime_error = runtime_start_preflight_error(runtime, effective_cmd, runner=effective_runner)
     if runtime_error:

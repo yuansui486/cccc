@@ -45,7 +45,7 @@ import {
   withAuthToken,
   clearSharedReadRequest,
 } from "./base";
-import { syncStoredTerminalColorScheme } from "../../utils/terminalThemeSync";
+import { getStoredTerminalColorScheme } from "../../utils/terminalThemeSync";
 
 export async function fetchGroups() {
   return reuseRecentReadRequest(
@@ -1577,11 +1577,11 @@ export async function attachScope(groupId: string, path: string) {
 }
 
 export async function startGroup(groupId: string) {
-  await syncStoredTerminalColorScheme({ force: true });
   clearActorsReadOnlyRequest(groupId);
   clearGroupsReadRequest();
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/start?by=user`, {
     method: "POST",
+    body: JSON.stringify({ terminal_color_scheme: getStoredTerminalColorScheme() }),
   });
 }
 

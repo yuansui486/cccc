@@ -17,6 +17,7 @@ from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ..mcp_install import prepare_runtime_mcp_env
 from ..runtime_session_ops import start_pty_actor_with_runtime_resume
+from ..terminal_theme import with_terminal_color_scheme
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
@@ -135,11 +136,12 @@ def handle_actor_start(
         pass
 
     try:
+        start_env = with_terminal_color_scheme(dict(env or {}), args.get("terminal_color_scheme"))
         start_result = start_actor_process(
             group,
             actor_id,
             command=list(cmd or []),
-            env=dict(env or {}),
+            env=start_env,
             runner=runner_kind,
             runtime=runtime,
             by=by,
@@ -400,6 +402,7 @@ def handle_actor_restart(
             command=list(launch_spec["effective_command"]),
             runtime_options=dict((launch_spec.get("actor") or {}).get("runtime_options") or {}),
         )
+        launch_env = with_terminal_color_scheme(launch_env, args.get("terminal_color_scheme"))
         runtime_error = runtime_start_preflight_error(runtime, launch_spec["effective_command"], runner=runner_effective)
         if runtime_error:
             return _error("runtime_unavailable", runtime_error, details={"runtime": runtime, "actor_id": actor_id})

@@ -150,8 +150,13 @@ class ActorUpdateRequest(BaseModel):
     profile_action: Optional[Literal["convert_to_custom"]] = None
 
 
-class ActorRestartRequest(BaseModel):
+class TerminalLaunchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    terminal_color_scheme: Optional[Literal["light", "dark"]] = None
+
+
+class ActorRestartRequest(TerminalLaunchRequest):
+    pass
 
 
 class ActorProfileUpsertRequest(BaseModel):

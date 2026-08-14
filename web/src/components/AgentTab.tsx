@@ -131,6 +131,19 @@ export function AgentTab({
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  // Codex resolves terminal colors once at process startup. Keep the whole
+  // PTY surface on that same palette while it is running so a page theme
+  // toggle cannot leave the outer surface and Codex's own input panel mixed.
+  const terminalThemeSessionKey = `${groupId}\u0000${actor.id}\u0000${termEpoch}\u0000${isRunning ? "running" : "stopped"}`;
+  const terminalThemeRef = useRef<{ key: string; isDark: boolean }>({
+    key: terminalThemeSessionKey,
+    isDark,
+  });
+  if (terminalThemeRef.current.key !== terminalThemeSessionKey) {
+    terminalThemeRef.current = { key: terminalThemeSessionKey, isDark };
+  }
+  const codexRuntime = String(actor.runtime || "").trim().toLowerCase() === "codex";
+  const terminalIsDark = codexRuntime ? terminalThemeRef.current.isDark : isDark;
   const pendingTerminalBottomScrollRef = useRef(false);
   const [activated, setActivated] = useState(false);
   // Bumped to trigger a fresh WebSocket connection from the reconnect button
@@ -300,10 +313,14 @@ export function AgentTab({
 
   // Update terminal theme when isDark changes
   useEffect(() => {
+    // Codex caches terminal colors during startup. Updating xterm live while
+    // Codex keeps its old palette creates mixed light/dark TUI panels; a
+    // restart (termEpoch change) recreates the terminal with the new theme.
+    if (String(actor.runtime || "").trim().toLowerCase() === "codex") return;
     if (terminalRef.current) {
       terminalRef.current.options.theme = getTerminalTheme(isDark);
     }
-  }, [isDark]);
+  }, [actor.runtime, isDark]);
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -330,7 +347,7 @@ export function AgentTab({
       cursorInactiveStyle: "none",
       fontSize: 13,
       fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Menlo, Monaco, monospace',
-      theme: getTerminalTheme(isDark),
+      theme: getTerminalTheme(terminalIsDark),
       disableStdin: !canControl,
       // Bigger scrollback improves history browsing without going "infinite" and hurting perf.
       // Default is 8k lines; the user can override it in Global → Developer settings.
@@ -432,7 +449,7 @@ export function AgentTab({
       fitAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Theme changes are handled in a dedicated effect; avoid re-creating the terminal.
-  }, [isHeadless, isRunning, activated]);
+  }, [isHeadless, isRunning, activated, termEpoch]);
 
   const {
     connectionStatus,
@@ -666,7 +683,16 @@ export function AgentTab({
 
       {/* Terminal or Status Area */}
       {/* contain: layout prevents terminal content changes from triggering parent layout recalculation */}
-      <div className={classNames("flex-1 min-h-0 relative", "bg-[var(--color-bg-secondary)]")} style={{ contain: 'layout', overflow: 'hidden' }}>
+      <div
+        className={classNames("flex-1 min-h-0 relative", "bg-[var(--color-bg-secondary)]")}
+        style={{
+          contain: "layout",
+          overflow: "hidden",
+          ...(isRunning && !isHeadless
+            ? { backgroundColor: terminalIsDark ? "#0f172a" : "#fafafa" }
+            : {}),
+        }}
+      >
         {isHeadless ? (
           <div className="flex h-full min-h-0 flex-col px-5 pb-5 pt-3 sm:px-7 sm:pb-6 sm:pt-3">
             <div

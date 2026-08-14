@@ -2122,6 +2122,15 @@ describe("api.fetchActors invalidation", () => {
     await api.startGroup("g-demo");
     await api.fetchActors("g-demo", false);
 
+    const startCall = fetchMock.mock.calls.find(
+      ([path, init]) =>
+        path === "/api/v1/groups/g-demo/start?by=user" &&
+        String((init as RequestInit | undefined)?.method || "GET").toUpperCase() === "POST",
+    );
+    expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body || "{}"))).toEqual({
+      terminal_color_scheme: "dark",
+    });
+
     const getCalls = fetchMock.mock.calls.filter(
       ([path, init]) =>
         path === "/api/v1/groups/g-demo/actors" &&

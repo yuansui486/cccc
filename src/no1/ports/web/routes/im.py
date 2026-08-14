@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
 
 from ....daemon.im.im_bridge_ops import read_live_im_bridge_pid, stop_im_bridges_for_group
 from ....kernel.group import load_group
@@ -30,6 +30,7 @@ from ..schemas import (
     IMPendingRejectRequest,
     IMSetRequest,
     InboxReadRequest,
+    TerminalLaunchRequest,
     RouteContext,
     check_group,
     get_principal,
@@ -252,9 +253,22 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         )
 
     @group_router.post("/start")
-    async def group_start(request: Request, group_id: str, by: str = "user") -> Dict[str, Any]:
+    async def group_start(
+        request: Request,
+        group_id: str,
+        req: TerminalLaunchRequest | None = Body(default=None),
+        by: str = "user",
+    ) -> Dict[str, Any]:
         await invalidate_readonly_actor_list(group_id)
-        result = await ctx.daemon({"op": "group_start", "args": {"group_id": group_id, "by": by, **_profile_auth_args(request)}})
+        result = await ctx.daemon({
+            "op": "group_start",
+            "args": {
+                "group_id": group_id,
+                "by": by,
+                "terminal_color_scheme": req.terminal_color_scheme if req is not None else None,
+                **_profile_auth_args(request),
+            },
+        })
         await invalidate_readonly_actor_list(group_id)
         return result
 
