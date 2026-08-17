@@ -264,6 +264,7 @@ from ._skill_packages import (  # noqa: F401
     materialize_skill_package_for_group,
     prepare_codex_skill_package_overlay_for_actor,
     prepare_openclaw_skill_package_overlay_for_actor,
+    openclaw_actor_skill_projection_lock,
 )
 from ._handlers import (  # noqa: F401
     _curated_install_metadata,

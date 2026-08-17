@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import posixpath
 import re
 import secrets
 import shutil
 import tempfile
+import threading
+import time
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.request import Request, urlopen
 
 import yaml
@@ -30,6 +33,9 @@ _MAX_PACKAGE_BYTES = 50 * 1024 * 1024
 _MAX_EXTRACTED_BYTES = 100 * 1024 * 1024
 _MAX_PACKAGE_FILES = 10000
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
+_logger = logging.getLogger("no1.daemon.openclaw.skills")
+_OPENCLAW_PROJECTION_LOCKS: Dict[Tuple[str, str], threading.RLock] = {}
+_OPENCLAW_PROJECTION_LOCKS_GUARD = threading.RLock()
 
 
 def _skill_package_root() -> Path:
@@ -578,6 +584,17 @@ def _openclaw_actor_skill_root(group_id: str, actor_id: str) -> Tuple[Path, Path
     return managed_root, managed_root / digest
 
 
+def openclaw_actor_skill_projection_lock(group_id: str, actor_id: str) -> threading.RLock:
+    """Return the process-local lock for one actor's OpenClaw projection."""
+    key = (str(group_id or "").strip(), str(actor_id or "").strip())
+    with _OPENCLAW_PROJECTION_LOCKS_GUARD:
+        lock = _OPENCLAW_PROJECTION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _OPENCLAW_PROJECTION_LOCKS[key] = lock
+        return lock
+
+
 def _remove_openclaw_skill_path(path: Path) -> None:
     if path.is_symlink() or path.is_file():
         path.unlink(missing_ok=True)
@@ -585,25 +602,107 @@ def _remove_openclaw_skill_path(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def _publish_openclaw_actor_skill_root(staging_root: Path, actor_root: Path) -> None:
-    backup_root = actor_root.with_name(f".{actor_root.name}.{secrets.token_hex(6)}.backup")
-    moved_existing = False
-    published = False
-    try:
-        if actor_root.exists() or actor_root.is_symlink():
-            os.replace(actor_root, backup_root)
-            moved_existing = True
-        os.replace(staging_root, actor_root)
-        published = True
-    except Exception:
-        if moved_existing and not actor_root.exists() and backup_root.exists():
-            os.replace(backup_root, actor_root)
-        raise
-    finally:
-        if staging_root.exists() or staging_root.is_symlink():
-            _remove_openclaw_skill_path(staging_root)
-        if published and (backup_root.exists() or backup_root.is_symlink()):
-            _remove_openclaw_skill_path(backup_root)
+def _best_effort_remove_openclaw_skill_path(path: Path, *, attempts: int = 3) -> bool:
+    """Remove a managed path without making a live projection fail on Windows."""
+    if not (path.exists() or path.is_symlink()) and not path.is_file():
+        return True
+    last_error: Optional[BaseException] = None
+    for attempt in range(max(1, attempts)):
+        try:
+            _remove_openclaw_skill_path(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.05 * (2**attempt))
+    _logger.warning("OpenClaw managed skill cleanup deferred for %s: %s", path, last_error)
+    return False
+
+
+def _openclaw_revision_path(actor_root: Path, fingerprint: str) -> Path:
+    return actor_root / "revisions" / str(fingerprint or "")[:24]
+
+
+def _openclaw_projection_result(
+    *,
+    managed_root: Path,
+    actor_root: Path,
+    revision_root: Optional[Path],
+    managed: Dict[str, Dict[str, str]],
+    selected_names: List[str],
+    fingerprint: str,
+    cleanup_pending: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    root = revision_root / "skills" if revision_root is not None and managed else None
+    managed_names = sorted(
+        {str(item.get("name") or "").strip() for item in managed.values() if str(item.get("name") or "").strip()}
+    )
+    return {
+        "root": str(root) if root is not None else "",
+        "managed_root": str(managed_root),
+        "actor_root": str(actor_root),
+        "legacy_root": str(actor_root / "skills"),
+        "revision_root": str(revision_root) if revision_root is not None else "",
+        "selected_names": sorted(set(selected_names)),
+        "managed_names": managed_names,
+        "fingerprint": fingerprint,
+        "cleanup_pending": sorted(set(cleanup_pending or [])),
+    }
+
+
+def _openclaw_revision_is_complete(revision_root: Path, fingerprint: str) -> bool:
+    metadata = read_json(revision_root / "managed-skills.json")
+    if str(metadata.get("fingerprint") or "") != str(fingerprint or ""):
+        return False
+    skills = metadata.get("skills") if isinstance(metadata.get("skills"), dict) else {}
+    if not skills:
+        return False
+    for row in skills.values():
+        if not isinstance(row, dict):
+            return False
+        slug = _safe_token(row.get("skill_slug"), default="")
+        if not slug or not (revision_root / "skills" / slug / "SKILL.md").is_file():
+            return False
+    return True
+
+
+def _find_complete_openclaw_revision(actor_root: Path, fingerprint: str) -> Optional[Path]:
+    revisions_root = actor_root / "revisions"
+    if not revisions_root.is_dir():
+        return None
+    canonical = _openclaw_revision_path(actor_root, fingerprint)
+    candidates = [canonical, *sorted(revisions_root.glob(f"{str(fingerprint)[:24]}-*"))]
+    for candidate in candidates:
+        if _openclaw_revision_is_complete(candidate, fingerprint):
+            return candidate
+    return None
+
+
+def _openclaw_skill_slug_map(entries: List[Dict[str, Any]]) -> Dict[str, str]:
+    counts: Dict[str, int] = {}
+    for entry in entries:
+        base = str(entry["base_slug"])
+        counts[base] = counts.get(base, 0) + 1
+    used: set[str] = set()
+    result: Dict[str, str] = {}
+    for entry in sorted(entries, key=lambda item: str(item["capability_id"])):
+        capability_id = str(entry["capability_id"])
+        base = str(entry["base_slug"])
+        if counts.get(base, 0) > 1:
+            candidate = f"{base}--{hashlib.sha256(capability_id.encode('utf-8')).hexdigest()[:12]}"
+        else:
+            candidate = base
+        if candidate in used:
+            suffix = hashlib.sha256(capability_id.encode("utf-8")).hexdigest()
+            for width in (16, 24, 32, 64):
+                candidate = f"{base}--{suffix[:width]}"
+                if candidate not in used:
+                    break
+        used.add(candidate)
+        result[capability_id] = candidate
+    return result
 
 
 def _rewrite_openclaw_skill_name(skill_path: Path, capability_id: str) -> str:
@@ -626,35 +725,30 @@ def prepare_openclaw_skill_package_overlay_for_actor(group: Any, actor_id: str) 
     """Materialize admitted AgentSkills into an actor-specific OpenClaw skill root."""
     group_id = str(getattr(group, "group_id", "") or "").strip()
     managed_root, actor_root = _openclaw_actor_skill_root(group_id, actor_id)
-    root = actor_root / "skills"
+    with openclaw_actor_skill_projection_lock(group_id, actor_id):
+        actor = find_actor(group, actor_id)
+        if not isinstance(actor, dict):
+            pending = []
+            if actor_root.exists():
+                if not _best_effort_remove_openclaw_skill_path(actor_root):
+                    pending.append(str(actor_root))
+            return _openclaw_projection_result(
+                managed_root=managed_root,
+                actor_root=actor_root,
+                revision_root=None,
+                managed={},
+                selected_names=[],
+                fingerprint="",
+                cleanup_pending=pending,
+            )
 
-    actor = find_actor(group, actor_id)
-    if not isinstance(actor, dict):
-        if actor_root.exists():
-            shutil.rmtree(actor_root)
-        return {
-            "root": "",
-            "managed_root": str(managed_root),
-            "selected_names": [],
-            "managed_names": [],
-            "fingerprint": "",
-        }
-
-    admission = resolve_current_admission(
-        group_id=group_id,
-        actor_id=actor_id,
-    )
-    autoload = _effective_package_autoload_for_actor(group, actor, admission=admission)
-    records = admission.get("admitted_records") if isinstance(admission.get("admitted_records"), dict) else {}
-    package_state = read_json(_skill_package_install_state_path())
-    packages = package_state.get("packages") if isinstance(package_state.get("packages"), dict) else {}
-    managed_root.mkdir(parents=True, exist_ok=True)
-    staging_root = managed_root / f".{actor_root.name}.{secrets.token_hex(6)}.tmp"
-    staging_skills = staging_root / "skills"
-    selected_names: List[str] = []
-    managed: Dict[str, Dict[str, str]] = {}
-    try:
-        for cap_id in autoload:
+        admission = resolve_current_admission(group_id=group_id, actor_id=actor_id)
+        autoload = _effective_package_autoload_for_actor(group, actor, admission=admission)
+        records = admission.get("admitted_records") if isinstance(admission.get("admitted_records"), dict) else {}
+        package_state = read_json(_skill_package_install_state_path())
+        packages = package_state.get("packages") if isinstance(package_state.get("packages"), dict) else {}
+        entries: List[Dict[str, Any]] = []
+        for cap_id in sorted(set(str(item or "").strip() for item in autoload if str(item or "").strip())):
             rec = records.get(cap_id) if isinstance(records.get(cap_id), dict) else None
             if not (
                 isinstance(rec, dict)
@@ -666,41 +760,113 @@ def prepare_openclaw_skill_package_overlay_for_actor(group: Any, actor_id: str) 
             extracted_path = Path(str(row.get("extracted_path") or ""))
             if not extracted_path.is_dir() or not (extracted_path / "SKILL.md").is_file():
                 raise ValueError(f"skill package is not installed: {cap_id}")
-            skill_slug = _safe_token(
+            base_slug = _safe_token(
                 row.get("skill_slug")
                 or (rec.get("install_spec") or {}).get("skill_slug")
                 or rec.get("name")
                 or cap_id
             )
-            target = staging_skills / skill_slug
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(extracted_path, target)
-            skill_name = _rewrite_openclaw_skill_name(target / "SKILL.md", cap_id)
-            selected_names.append(skill_name)
-            managed[cap_id] = {
-                "capability_id": cap_id,
-                "name": skill_name,
-                "skill_slug": skill_slug,
-                "path": str(root / skill_slug),
-                "sha256": str(row.get("sha256") or row.get("package_sha256") or "").strip(),
+            entries.append(
+                {
+                    "capability_id": cap_id,
+                    "row": row,
+                    "extracted_path": extracted_path,
+                    "base_slug": base_slug,
+                    "name": f"onecolleague-{hashlib.sha256(cap_id.encode('utf-8')).hexdigest()[:16]}",
+                }
+            )
+        if not entries:
+            return _openclaw_projection_result(
+                managed_root=managed_root,
+                actor_root=actor_root,
+                revision_root=None,
+                managed={},
+                selected_names=[],
+                fingerprint="",
+            )
+
+        slug_map = _openclaw_skill_slug_map(entries)
+        logical = [
+            {
+                "capability_id": str(entry["capability_id"]),
+                "name": str(entry["name"]),
+                "skill_slug": slug_map[str(entry["capability_id"])],
+                "sha256": str(
+                    entry["row"].get("sha256") or entry["row"].get("package_sha256") or ""
+                ).strip(),
             }
-        staging_root.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(staging_root / "managed-skills.json", {"v": 1, "skills": managed}, indent=2)
-        _publish_openclaw_actor_skill_root(staging_root, actor_root)
-    except Exception:
-        if staging_root.exists() or staging_root.is_symlink():
-            _remove_openclaw_skill_path(staging_root)
-        raise
-    fingerprint = hashlib.sha256(
-        json.dumps(managed, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    managed_names = sorted(
-        {str(item.get("name") or "").strip() for item in managed.values() if str(item.get("name") or "").strip()}
-    )
-    return {
-        "root": str(root) if managed else "",
-        "managed_root": str(managed_root),
-        "selected_names": sorted(set(selected_names)),
-        "managed_names": managed_names,
-        "fingerprint": fingerprint,
-    }
+            for entry in sorted(entries, key=lambda item: str(item["capability_id"]))
+        ]
+        fingerprint = hashlib.sha256(
+            json.dumps(logical, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        revisions_root = actor_root / "revisions"
+        revision_root = _openclaw_revision_path(actor_root, fingerprint)
+        managed_root.mkdir(parents=True, exist_ok=True)
+        revisions_root.mkdir(parents=True, exist_ok=True)
+        complete_revision = _find_complete_openclaw_revision(actor_root, fingerprint)
+        if complete_revision is not None:
+            revision_root = complete_revision
+            metadata = read_json(revision_root / "managed-skills.json")
+            managed = metadata.get("skills") if isinstance(metadata.get("skills"), dict) else {}
+            selected_names = [str(item.get("name") or "").strip() for item in logical]
+            return _openclaw_projection_result(
+                managed_root=managed_root,
+                actor_root=actor_root,
+                revision_root=revision_root,
+                managed={str(key): dict(value) for key, value in managed.items() if isinstance(value, dict)},
+                selected_names=selected_names,
+                fingerprint=fingerprint,
+            )
+
+        staging_root = revisions_root / f".{fingerprint[:24]}.{secrets.token_hex(6)}.tmp"
+        staging_skills = staging_root / "skills"
+        managed: Dict[str, Dict[str, str]] = {}
+        selected_names: List[str] = []
+        try:
+            for entry in entries:
+                cap_id = str(entry["capability_id"])
+                skill_slug = slug_map[cap_id]
+                target = staging_skills / skill_slug
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(Path(entry["extracted_path"]), target)
+                skill_name = _rewrite_openclaw_skill_name(target / "SKILL.md", cap_id)
+                selected_names.append(skill_name)
+                managed[cap_id] = {
+                    "capability_id": cap_id,
+                    "name": skill_name,
+                    "skill_slug": skill_slug,
+                    "path": str(revision_root / "skills" / skill_slug),
+                    "sha256": str(
+                        entry["row"].get("sha256") or entry["row"].get("package_sha256") or ""
+                    ).strip(),
+                }
+            staging_root.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(
+                staging_root / "managed-skills.json",
+                {"v": 2, "fingerprint": fingerprint, "skills": managed},
+                indent=2,
+            )
+            if revision_root.exists() and not _openclaw_revision_is_complete(revision_root, fingerprint):
+                revision_root = revisions_root / f"{fingerprint[:24]}-{secrets.token_hex(4)}"
+                for row in managed.values():
+                    row["path"] = str(revision_root / "skills" / str(row["skill_slug"]))
+                atomic_write_json(
+                    staging_root / "managed-skills.json",
+                    {"v": 2, "fingerprint": fingerprint, "skills": managed},
+                    indent=2,
+                )
+            os.replace(staging_root, revision_root)
+        except Exception:
+            if staging_root.exists() or staging_root.is_symlink():
+                _best_effort_remove_openclaw_skill_path(staging_root)
+            raise
+
+        return _openclaw_projection_result(
+            managed_root=managed_root,
+            actor_root=actor_root,
+            revision_root=revision_root,
+            managed=managed,
+            selected_names=selected_names,
+            fingerprint=fingerprint,
+        )

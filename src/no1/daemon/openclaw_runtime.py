@@ -1763,65 +1763,104 @@ def _context_command(root: Path) -> list[str]:
     return ["openclaw"]
 
 
-def refresh_openclaw_actor_skill_projection(group_id: str, actor_id: str) -> Dict[str, Any]:
+def refresh_openclaw_actor_skill_projection(
+    group_id: str,
+    actor_id: str,
+    *,
+    projection: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Publish an already-materialized actor Skill overlay to a live Gateway."""
     key = (str(group_id or "").strip(), str(actor_id or "").strip())
-    with _LOCK:
-        env = dict(_GATEWAY_ACTOR_ENVS.get(key) or {})
-    config_raw = str(env.get("OPENCLAW_CONFIG_PATH") or "").strip()
-    if not config_raw:
-        return {"refreshed": False, "reason": "actor_gateway_not_running"}
-    config_path = Path(config_raw)
-    root = config_path.parent
-    config = read_json(config_path)
-    if not isinstance(config, dict):
-        raise RuntimeError("managed OpenClaw config is invalid")
     from .ops.capability_ops import prepare_openclaw_skill_package_overlay_for_actor
+    from .ops.capability_ops._skill_packages import (
+        _best_effort_remove_openclaw_skill_path,
+        openclaw_actor_skill_projection_lock,
+    )
     from ..kernel.group import load_group
 
-    group = load_group(group_id)
-    if group is None:
-        raise RuntimeError("group not found")
-    projection = prepare_openclaw_skill_package_overlay_for_actor(group, actor_id)
-    agent_id = openclaw_agent_id(group_id, actor_id)
-    agents_cfg = config.get("agents") if isinstance(config.get("agents"), dict) else {}
-    agents = agents_cfg.get("list") if isinstance(agents_cfg.get("list"), list) else []
-    selected = sorted({str(item).strip() for item in projection.get("selected_names", []) if str(item).strip()})
-    next_agents = []
-    found = False
-    for item in agents:
-        if not isinstance(item, dict):
-            next_agents.append(item)
-            continue
-        row = dict(item)
-        if str(row.get("id") or "").strip() == agent_id:
-            found = True
-            existing_skills = row.get("skills") if isinstance(row.get("skills"), list) else []
-            base_skills = [
-                str(skill).strip()
-                for skill in existing_skills
-                if str(skill).strip() and not str(skill).strip().startswith("onecolleague-")
-            ]
-            row["skills"] = sorted(set(base_skills) | set(selected))
-        next_agents.append(row)
-    if not found:
-        return {"refreshed": False, "reason": "agent_not_found"}
-    skills_cfg = config.get("skills") if isinstance(config.get("skills"), dict) else {}
-    load_cfg = dict(skills_cfg.get("load") or {}) if isinstance(skills_cfg.get("load"), dict) else {}
-    extra_dirs = [str(item) for item in load_cfg.get("extraDirs", []) if str(item).strip()]
-    managed_root = str(projection.get("managed_root") or "").strip()
-    if managed_root:
-        actor_overlay_id = hashlib.sha256(f"{key[0]}\0{key[1]}".encode("utf-8")).hexdigest()[:16]
-        actor_overlay_root = str(Path(managed_root) / actor_overlay_id)
-        extra_dirs = [item for item in extra_dirs if not _path_is_within(item, actor_overlay_root)]
-    root_path = str(projection.get("root") or "").strip()
-    if root_path and root_path not in extra_dirs:
-        extra_dirs.append(root_path)
-    load_cfg["extraDirs"] = extra_dirs
-    load_cfg["watch"] = True
-    candidate = _deep_merge(config, {"agents": {"list": next_agents}, "skills": {"load": load_cfg}})
-    _publish_config(_context_command(root), candidate, env=env)
-    return {"refreshed": True, "selected_names": selected, "root": root_path}
+    with openclaw_actor_skill_projection_lock(*key):
+        with _LOCK:
+            env = dict(_GATEWAY_ACTOR_ENVS.get(key) or {})
+        config_raw = str(env.get("OPENCLAW_CONFIG_PATH") or "").strip()
+        if not config_raw:
+            return {"refreshed": False, "reason": "actor_gateway_not_running"}
+        config_path = Path(config_raw)
+        context_root = config_path.parent
+        config = read_json(config_path)
+        if not isinstance(config, dict):
+            raise RuntimeError("managed OpenClaw config is invalid")
+        group = load_group(group_id)
+        if group is None:
+            raise RuntimeError("group not found")
+        active_projection = (
+            dict(projection)
+            if isinstance(projection, dict)
+            else prepare_openclaw_skill_package_overlay_for_actor(group, actor_id)
+        )
+        agent_id = openclaw_agent_id(group_id, actor_id)
+        agents_cfg = config.get("agents") if isinstance(config.get("agents"), dict) else {}
+        agents = agents_cfg.get("list") if isinstance(agents_cfg.get("list"), list) else []
+        selected = sorted(
+            {str(item).strip() for item in active_projection.get("selected_names", []) if str(item).strip()}
+        )
+        next_agents = []
+        found = False
+        for item in agents:
+            if not isinstance(item, dict):
+                next_agents.append(item)
+                continue
+            row = dict(item)
+            if str(row.get("id") or "").strip() == agent_id:
+                found = True
+                existing_skills = row.get("skills") if isinstance(row.get("skills"), list) else []
+                base_skills = [
+                    str(skill).strip()
+                    for skill in existing_skills
+                    if str(skill).strip() and not str(skill).strip().startswith("onecolleague-")
+                ]
+                row["skills"] = sorted(set(base_skills) | set(selected))
+            next_agents.append(row)
+        if not found:
+            return {"refreshed": False, "reason": "agent_not_found"}
+        skills_cfg = config.get("skills") if isinstance(config.get("skills"), dict) else {}
+        load_cfg = dict(skills_cfg.get("load") or {}) if isinstance(skills_cfg.get("load"), dict) else {}
+        extra_dirs = [str(item) for item in load_cfg.get("extraDirs", []) if str(item).strip()]
+        actor_overlay_root = str(active_projection.get("actor_root") or "").strip()
+        if not actor_overlay_root:
+            managed_root = str(active_projection.get("managed_root") or "").strip()
+            actor_overlay_id = hashlib.sha256(f"{key[0]}\0{key[1]}".encode("utf-8")).hexdigest()[:16]
+            actor_overlay_root = str(Path(managed_root) / actor_overlay_id) if managed_root else ""
+        if actor_overlay_root:
+            extra_dirs = [item for item in extra_dirs if not _path_is_within(item, actor_overlay_root)]
+        root_path = str(active_projection.get("root") or "").strip()
+        if root_path and root_path not in extra_dirs:
+            extra_dirs.append(root_path)
+        load_cfg["extraDirs"] = extra_dirs
+        load_cfg["watch"] = True
+        candidate = _deep_merge(config, {"agents": {"list": next_agents}, "skills": {"load": load_cfg}})
+        _publish_config(_context_command(context_root), candidate, env=env)
+
+        cleanup_pending: list[str] = []
+        if actor_overlay_root:
+            actor_root = Path(actor_overlay_root)
+            active_revision = Path(str(active_projection.get("revision_root") or "")).resolve() if str(active_projection.get("revision_root") or "").strip() else None
+            candidates: list[Path] = []
+            legacy_root = actor_root / "skills"
+            if legacy_root.exists() or legacy_root.is_symlink():
+                candidates.append(legacy_root)
+            revisions_root = actor_root / "revisions"
+            if revisions_root.is_dir():
+                candidates.extend(path for path in revisions_root.iterdir() if path != active_revision)
+            for old_path in candidates:
+                if not _best_effort_remove_openclaw_skill_path(old_path):
+                    cleanup_pending.append(str(old_path))
+        return {
+            "refreshed": True,
+            "selected_names": selected,
+            "root": root_path,
+            "fingerprint": str(active_projection.get("fingerprint") or ""),
+            "cleanup_pending": cleanup_pending,
+        }
 
 
 def _terminate_owned_gateways_under(root: Path) -> None:
@@ -2143,7 +2182,13 @@ def remove_openclaw_actor_runtime(
                     shutil.rmtree(Path(state_dir_raw) / "agents" / agent_id, ignore_errors=True)
         shutil.rmtree(actor_runtime_root, ignore_errors=True)
         skill_root = home / "runtime" / "openclaw" / "skills" / "actors" / skill_digest
-        shutil.rmtree(skill_root, ignore_errors=True)
+        try:
+            from .ops.capability_ops._skill_packages import _best_effort_remove_openclaw_skill_path
+
+            _best_effort_remove_openclaw_skill_path(skill_root)
+        except Exception:
+            # Actor deletion must not be blocked by a Windows skill watcher.
+            pass
 
     with _LOCK:
         for cache_key in list(_INITIALIZED_CONTEXTS):
@@ -2254,6 +2299,11 @@ def prepare_openclaw_actor_runtime(
     actor_id = str(actor_id or "").strip()
     if not group_id or not actor_id:
         raise ValueError("OpenClaw runtime requires OneColleague group and actor context")
+    from .ops.capability_ops._skill_packages import (
+        _best_effort_remove_openclaw_skill_path,
+        openclaw_actor_skill_projection_lock,
+    )
+
     workspace = Path(cwd).expanduser().resolve()
     base_command = [str(item) for item in list(command or []) if str(item).strip()]
     prefix = openclaw_cli_prefix(base_command)
@@ -2275,7 +2325,7 @@ def prepare_openclaw_actor_runtime(
         actor_id=actor_id,
     )
     context_lock = _context_lock(context.root)
-    with context_lock:
+    with openclaw_actor_skill_projection_lock(group_id, actor_id), context_lock:
         guard()
         managed_env = _initialize_managed_context(prefix, source_env=source_env, context=context)
         env.update(managed_env)
@@ -2294,6 +2344,7 @@ def prepare_openclaw_actor_runtime(
         projection = _skill_projection(group_id, actor_id)
         skill_root = str(projection.get("root") or "").strip()
         managed_skill_root = str(projection.get("managed_root") or "").strip()
+        actor_skill_root = str(projection.get("actor_root") or "").strip()
         selected_skill_names = sorted(
             {str(item).strip() for item in projection.get("selected_names") or [] if str(item).strip()}
         )
@@ -2304,8 +2355,8 @@ def prepare_openclaw_actor_runtime(
         server_name = openclaw_mcp_server_name(group_id, actor_id)
         current_config = _read_managed_config_strict(env)
         agents, servers, extra_dirs = _configured_state(current_config)
-        if managed_skill_root:
-            extra_dirs = [item for item in extra_dirs if not _path_is_within(item, managed_skill_root)]
+        if actor_skill_root:
+            extra_dirs = [item for item in extra_dirs if not _path_is_within(item, actor_skill_root)]
         server_config = _mcp_server_config(
             group_id=group_id,
             actor_id=actor_id,
@@ -2462,6 +2513,22 @@ def prepare_openclaw_actor_runtime(
                 _terminate_gateway_process(stale_process)
             _publish_config(prefix, candidate, env=env)
         gateway_ready_after_publish = gateway_was_running and _owned_gateway_pid(env) > 0
+        if actor_skill_root:
+            actor_root = Path(actor_skill_root)
+            active_revision = (
+                Path(str(projection.get("revision_root") or "")).resolve()
+                if str(projection.get("revision_root") or "").strip()
+                else None
+            )
+            cleanup_candidates: list[Path] = []
+            legacy_root = actor_root / "skills"
+            if legacy_root.exists() or legacy_root.is_symlink():
+                cleanup_candidates.append(legacy_root)
+            revisions_root = actor_root / "revisions"
+            if revisions_root.is_dir():
+                cleanup_candidates.extend(path for path in revisions_root.iterdir() if path != active_revision)
+            for old_path in cleanup_candidates:
+                _best_effort_remove_openclaw_skill_path(old_path)
         phase("starting_gateway")
         _start_gateway(
             prefix,

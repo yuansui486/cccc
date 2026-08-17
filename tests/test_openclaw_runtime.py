@@ -422,6 +422,7 @@ class TestOpenClawRuntime(unittest.TestCase):
                 return_value={
                     "root": "",
                     "managed_root": str(root / "skills"),
+                    "actor_root": str(root / "skills"),
                     "selected_names": [],
                     "managed_names": [],
                     "fingerprint": "empty",
@@ -1406,7 +1407,9 @@ class TestOpenClawRuntime(unittest.TestCase):
                 projection = _skill_packages.prepare_openclaw_skill_package_overlay_for_actor(group, "actor-a")
 
             self.assertEqual(projection["root"], "")
-            self.assertFalse((root / "selected-skill").exists())
+            # The old revision remains until a live Gateway configuration switch
+            # confirms that it is no longer being watched.
+            self.assertTrue((root / "selected-skill").exists())
 
     def test_skill_projection_preserves_current_overlay_when_staging_fails(self) -> None:
         from no1.daemon.ops.capability_ops import _skill_packages
@@ -1441,6 +1444,67 @@ class TestOpenClawRuntime(unittest.TestCase):
                     _skill_packages.prepare_openclaw_skill_package_overlay_for_actor(group, "actor-a")
 
             self.assertTrue(existing_skill.is_file())
+
+    def test_skill_projection_disambiguates_duplicate_slugs_and_reuses_revision(self) -> None:
+        from no1.daemon.ops.capability_ops import _skill_packages
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            extracted_a = home / "package-a"
+            extracted_b = home / "package-b"
+            for extracted, name in ((extracted_a, "alpha"), (extracted_b, "beta")):
+                extracted.mkdir()
+                (extracted / "SKILL.md").write_text(
+                    f"---\nname: {name}\n---\nBody\n", encoding="utf-8"
+                )
+            install_state = home / "install_state.json"
+            install_state.write_text(
+                json.dumps(
+                    {
+                        "packages": {
+                            "skill:alpha": {"extracted_path": str(extracted_a), "skill_slug": "skill", "sha256": "a"},
+                            "skill:beta": {"extracted_path": str(extracted_b), "skill_slug": "skill", "sha256": "b"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            group = SimpleNamespace(group_id="group-a", doc={"actors": [{"id": "actor-a"}]})
+            admitted = {
+                "admitted_capabilities": ["skill:alpha", "skill:beta"],
+                "admitted_records": {
+                    cap_id: {
+                        "capability_id": cap_id,
+                        "kind": "skill",
+                        "install_mode": "codex_skill_package",
+                        "qualification_status": "qualified",
+                    }
+                    for cap_id in ("skill:alpha", "skill:beta")
+                },
+            }
+            with patch.object(_skill_packages, "ensure_home", return_value=home), patch.object(
+                _skill_packages, "_skill_package_install_state_path", return_value=install_state
+            ), patch.object(_skill_packages, "resolve_current_admission", return_value=admitted), patch.object(
+                _skill_packages, "find_actor", return_value={"id": "actor-a"}
+            ):
+                first = _skill_packages.prepare_openclaw_skill_package_overlay_for_actor(group, "actor-a")
+                second = _skill_packages.prepare_openclaw_skill_package_overlay_for_actor(group, "actor-a")
+
+            self.assertEqual(first["root"], second["root"])
+            skills_root = Path(first["root"])
+            slugs = sorted(path.name for path in skills_root.iterdir() if path.is_dir())
+            self.assertEqual(
+                slugs,
+                sorted(
+                    [
+                        f"skill--{hashlib.sha256(b'skill:alpha').hexdigest()[:12]}",
+                        f"skill--{hashlib.sha256(b'skill:beta').hexdigest()[:12]}",
+                    ]
+                ),
+            )
+            metadata = json.loads((skills_root.parent / "managed-skills.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["v"], 2)
+            self.assertEqual(set(metadata["skills"]), {"skill:alpha", "skill:beta"})
 
     def test_live_skill_refresh_preserves_base_skills_and_replaces_actor_overlay(self) -> None:
         from no1.daemon import openclaw_runtime
@@ -1484,6 +1548,75 @@ class TestOpenClawRuntime(unittest.TestCase):
             self.assertIn("C:/base", published["skills"]["load"]["extraDirs"])
             self.assertNotIn(str(actor_root / "old" / "skills"), published["skills"]["load"]["extraDirs"])
             self.assertIn(str(actor_root / "skills"), published["skills"]["load"]["extraDirs"])
+
+    def test_live_skill_refresh_switches_revision_and_keeps_locked_old_revision(self) -> None:
+        from no1.daemon import openclaw_runtime
+        from no1.daemon.ops.capability_ops import _skill_packages
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            context = root / "context"
+            context.mkdir()
+            config_path = context / "openclaw.json"
+            agent_id = openclaw_runtime.openclaw_agent_id("group-a", "actor-a")
+            actor_root = root / "runtime" / "openclaw" / "skills" / "actors" / "actor-digest"
+            old_root = actor_root / "revisions" / "old"
+            new_root = actor_root / "revisions" / "new"
+            (old_root / "skills").mkdir(parents=True)
+            (new_root / "skills").mkdir(parents=True)
+            old_path = old_root / "skills"
+            new_path = new_root / "skills"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "agents": {"list": [{"id": agent_id, "skills": ["onecolleague-old"]}]},
+                        "skills": {
+                            "load": {
+                                "extraDirs": [
+                                    "C:/base",
+                                    str(old_path),
+                                    "C:/other-actor",
+                                ]
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            env = {
+                "OPENCLAW_CONFIG_PATH": str(config_path),
+                "OPENCLAW_GATEWAY_TOKEN": "token",
+                "OPENCLAW_GATEWAY_PORT": "24128",
+            }
+            projection = {
+                "root": str(new_path),
+                "revision_root": str(new_root),
+                "actor_root": str(actor_root),
+                "managed_root": str(actor_root.parent),
+                "selected_names": ["onecolleague-new"],
+                "fingerprint": "new-fingerprint",
+            }
+            openclaw_runtime._GATEWAY_ACTOR_ENVS[("group-a", "actor-a")] = env
+            published = {}
+            with patch.object(openclaw_runtime, "_context_command", return_value=["openclaw"]), patch.object(
+                openclaw_runtime,
+                "_publish_config",
+                side_effect=lambda prefix, candidate, env: published.update(candidate),
+            ), patch("no1.kernel.group.load_group", return_value=SimpleNamespace(group_id="group-a")), patch.object(
+                _skill_packages,
+                "_best_effort_remove_openclaw_skill_path",
+                return_value=False,
+            ):
+                result = openclaw_runtime.refresh_openclaw_actor_skill_projection(
+                    "group-a", "actor-a", projection=projection
+                )
+
+            self.assertTrue(result["refreshed"])
+            self.assertIn("C:/base", published["skills"]["load"]["extraDirs"])
+            self.assertIn("C:/other-actor", published["skills"]["load"]["extraDirs"])
+            self.assertIn(str(new_path), published["skills"]["load"]["extraDirs"])
+            self.assertNotIn(str(old_path), published["skills"]["load"]["extraDirs"])
+            self.assertIn(str(old_root), result["cleanup_pending"])
 
 
 if __name__ == "__main__":

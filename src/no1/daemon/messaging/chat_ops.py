@@ -725,26 +725,35 @@ def _prepare_message_skill(
         touched.append((actor_id, had_session))
         if str(actor.get("runtime") or "").strip().lower() == "openclaw":
             try:
-                projection = prepare_openclaw_skill_package_overlay_for_actor(group, actor_id)
-            except Exception as exc:
-                rollback()
-                return "", _error(
-                    "skill_projection_failed",
-                    str(exc),
-                    details={"capability_id": canonical_id, "actor_id": actor_id},
-                )
-            selected = projection.get("selected_names") if isinstance(projection, dict) else []
-            if stable_name not in {str(item or "").strip() for item in selected if str(item or "").strip()}:
-                rollback()
-                return "", _error(
-                    "skill_unavailable",
-                    "selected skill is not installed or is not an OpenClaw skill package",
-                    details={"capability_id": canonical_id, "actor_id": actor_id},
-                )
-            try:
-                from ..openclaw_runtime import refresh_openclaw_actor_skill_projection
+                from ..ops.capability_ops._skill_packages import openclaw_actor_skill_projection_lock
 
-                refresh_openclaw_actor_skill_projection(str(getattr(group, "group_id", "") or ""), actor_id)
+                with openclaw_actor_skill_projection_lock(
+                    str(getattr(group, "group_id", "") or ""), actor_id
+                ):
+                    projection = prepare_openclaw_skill_package_overlay_for_actor(group, actor_id)
+                    selected = projection.get("selected_names") if isinstance(projection, dict) else []
+                    if stable_name not in {str(item or "").strip() for item in selected if str(item or "").strip()}:
+                        rollback()
+                        return "", _error(
+                            "skill_unavailable",
+                            "selected skill is not installed or is not an OpenClaw skill package",
+                            details={"capability_id": canonical_id, "actor_id": actor_id},
+                        )
+                    try:
+                        from ..openclaw_runtime import refresh_openclaw_actor_skill_projection
+
+                        refresh_openclaw_actor_skill_projection(
+                            str(getattr(group, "group_id", "") or ""),
+                            actor_id,
+                            projection=projection,
+                        )
+                    except Exception as exc:
+                        rollback()
+                        return "", _error(
+                            "skill_projection_failed",
+                            str(exc),
+                            details={"capability_id": canonical_id, "actor_id": actor_id},
+                        )
             except Exception as exc:
                 rollback()
                 return "", _error(

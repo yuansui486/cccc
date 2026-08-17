@@ -23,7 +23,10 @@ def test_prepare_message_skill_projects_stable_openclaw_name() -> None:
     ) as enable, patch(
         "no1.daemon.ops.capability_ops.prepare_openclaw_skill_package_overlay_for_actor",
         return_value={"selected_names": [stable_name]},
-    ) as project:
+    ) as project, patch(
+        "no1.daemon.openclaw_runtime.refresh_openclaw_actor_skill_projection",
+        return_value={"refreshed": True},
+    ) as refresh:
         name, error = _prepare_message_skill(
             SimpleNamespace(group_id="g-test"),
             capability_id=capability_id,
@@ -35,6 +38,8 @@ def test_prepare_message_skill_projects_stable_openclaw_name() -> None:
     assert enable.call_args.args[0]["scope"] == "session"
     assert enable.call_args.args[0]["ttl_seconds"] == 3600
     project.assert_called_once()
+    refresh.assert_called_once()
+    assert refresh.call_args.kwargs["projection"] == {"selected_names": [stable_name]}
 
 
 def test_prepare_message_skill_rolls_back_new_session_on_projection_failure() -> None:
@@ -66,4 +71,3 @@ def test_prepare_message_skill_rolls_back_new_session_on_projection_failure() ->
     assert error.error.code == "skill_unavailable"
     assert enable.call_count == 2
     assert enable.call_args_list[1].args[0]["enabled"] is False
-
