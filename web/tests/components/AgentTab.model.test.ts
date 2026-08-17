@@ -3,24 +3,42 @@ import { describe, expect, it } from "vitest";
 import {
   actorHasRuntimeResumeFailure,
   shouldFetchStoppedTerminalTail,
-  shouldShowOpenClawTerminalInitializing,
+  shouldShowRuntimeTerminalInitializing,
 } from "../../src/components/AgentTab";
 
 describe("AgentTab stopped terminal tail model", () => {
-  it("keeps an OpenClaw terminal behind the initialization state until output arrives", () => {
-    expect(shouldShowOpenClawTerminalInitializing({
-      isOpenClaw: true,
+  it.each(["openclaw", "hermes"])("keeps a %s terminal behind initialization until output arrives", (runtime) => {
+    expect(shouldShowRuntimeTerminalInitializing({
+      runtime,
       isRunning: true,
+      isHeadless: false,
       terminalHasOutput: false,
     })).toBe(true);
-    expect(shouldShowOpenClawTerminalInitializing({
-      isOpenClaw: true,
+    expect(shouldShowRuntimeTerminalInitializing({
+      runtime,
       isRunning: true,
+      isHeadless: false,
       terminalHasOutput: true,
     })).toBe(false);
-    expect(shouldShowOpenClawTerminalInitializing({
-      isOpenClaw: false,
+  });
+
+  it("does not show terminal initialization for stopped, headless, or unrelated runtimes", () => {
+    expect(shouldShowRuntimeTerminalInitializing({
+      runtime: "codex",
       isRunning: true,
+      isHeadless: false,
+      terminalHasOutput: false,
+    })).toBe(false);
+    expect(shouldShowRuntimeTerminalInitializing({
+      runtime: "hermes",
+      isRunning: false,
+      isHeadless: false,
+      terminalHasOutput: false,
+    })).toBe(false);
+    expect(shouldShowRuntimeTerminalInitializing({
+      runtime: "hermes",
+      isRunning: true,
+      isHeadless: true,
       terminalHasOutput: false,
     })).toBe(false);
   });

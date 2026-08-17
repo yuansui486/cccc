@@ -47,6 +47,7 @@ _TUI_VALUE_FLAGS = {"--history-limit", "--thinking", "--timeout-ms"}
 _PREPARE_CACHE_SECONDS = 10.0
 _PREPARED_SCHEMA_VERSION = 1
 _MODEL_CACHE_SECONDS = 30.0
+_OPENCLAW_STARTUP_TIMEOUT_SECONDS = 60.0
 _GATEWAY_PORT_BASE = 22000
 _GATEWAY_PORT_STRIDE = 128
 _GATEWAY_PORT_SLOTS = 300
@@ -654,7 +655,12 @@ def _active_config_path(
     if state_dir:
         return default_path.resolve()
     try:
-        result = _run_cli(prefix, ["config", "file"], env=env, timeout=15.0)
+        result = _run_cli(
+            prefix,
+            ["config", "file"],
+            env=env,
+            timeout=_OPENCLAW_STARTUP_TIMEOUT_SECONDS,
+        )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0:
@@ -673,7 +679,12 @@ def _config_json(
     env: Optional[Dict[str, str]],
     default: Any,
 ) -> Any:
-    result = _run_cli(prefix, ["config", "get", path, "--json"], env=env, timeout=15.0)
+    result = _run_cli(
+        prefix,
+        ["config", "get", path, "--json"],
+        env=env,
+        timeout=_OPENCLAW_STARTUP_TIMEOUT_SECONDS,
+    )
     if result.returncode != 0:
         return default
     parsed = _parse_json_output(result.stdout)
@@ -712,7 +723,12 @@ def _configured_agents(prefix: list[str], *, env: Optional[Dict[str, str]]) -> l
     if isinstance(configured, list):
         return [dict(item) for item in configured if isinstance(item, dict)]
 
-    result = _run_cli(prefix, ["agents", "list", "--json"], env=env, timeout=20.0)
+    result = _run_cli(
+        prefix,
+        ["agents", "list", "--json"],
+        env=env,
+        timeout=_OPENCLAW_STARTUP_TIMEOUT_SECONDS,
+    )
     parsed = _parse_json_output(result.stdout) if result.returncode == 0 else None
     if not isinstance(parsed, list):
         return []
@@ -909,7 +925,7 @@ def _wait_for_gateway_config_hash(
     expected_hash: str,
     *,
     env: Optional[Dict[str, str]],
-    timeout: float = 10.0,
+    timeout: float = _OPENCLAW_STARTUP_TIMEOUT_SECONDS,
 ) -> None:
     deadline = time.monotonic() + timeout
     last_error = ""
@@ -940,7 +956,12 @@ def _write_validated_config_candidate(
     temp_path = _write_config_candidate(candidate, env=env)
     validate_env = dict(env or {})
     validate_env["OPENCLAW_CONFIG_PATH"] = str(temp_path)
-    result = _run_cli(prefix, ["config", "validate", "--json"], env=validate_env, timeout=30.0)
+    result = _run_cli(
+        prefix,
+        ["config", "validate", "--json"],
+        env=validate_env,
+        timeout=_OPENCLAW_STARTUP_TIMEOUT_SECONDS,
+    )
     if result.returncode != 0:
         temp_path.unlink(missing_ok=True)
         raise RuntimeError(f"failed to validate OpenClaw config: {_result_error(result)}")
@@ -1464,7 +1485,12 @@ def _list_openclaw_skill_names(
     agent_id: str,
     env: Optional[Dict[str, str]],
 ) -> Optional[list[str]]:
-    result = _run_cli(prefix, ["skills", "list", "--agent", agent_id, "--json"], env=env, timeout=30.0)
+    result = _run_cli(
+        prefix,
+        ["skills", "list", "--agent", agent_id, "--json"],
+        env=env,
+        timeout=_OPENCLAW_STARTUP_TIMEOUT_SECONDS,
+    )
     if result.returncode != 0:
         return None
     parsed = _parse_json_output(result.stdout)
@@ -1963,7 +1989,7 @@ def _start_gateway(
     _GATEWAY_ACTORS[actor_key] = key
     _GATEWAY_ACTOR_ENVS[actor_key] = dict(env or {})
 
-    deadline = time.monotonic() + 20.0
+    deadline = time.monotonic() + _OPENCLAW_STARTUP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if process.poll() is not None:
             break
@@ -2266,7 +2292,7 @@ def _patch_session_model(
             "sessions.patch",
             {"key": str(session_key), "model": model},
             env=env,
-            timeout=20.0,
+            timeout=_OPENCLAW_STARTUP_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         raise RuntimeError(f"failed to select OpenClaw model for the actor session: {exc}") from exc

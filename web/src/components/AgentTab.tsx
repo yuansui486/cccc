@@ -26,6 +26,7 @@ const EMPTY_STREAMING_ACTIVITIES: StreamingActivity[] = [];
 const EMPTY_HEADLESS_PREVIEW_SESSIONS: HeadlessPreviewSession[] = [];
 const EMPTY_HEADLESS_RAW_EVENTS: HeadlessStreamEvent[] = [];
 const STOPPED_TAIL_FETCH_DELAY_MS = 350;
+const TERMINAL_INITIALIZATION_RUNTIMES = new Set(["openclaw", "hermes"]);
 
 const copyToClipboard = copyTextToClipboard;
 
@@ -44,14 +45,16 @@ export function shouldFetchStoppedTerminalTail(args: {
   return Boolean(args.activated && !args.isRunning && !args.isHeadless && args.groupId && args.actorId && !args.isActorBusy);
 }
 
-export function shouldShowOpenClawTerminalInitializing(args: {
-  isOpenClaw: boolean;
+export function shouldShowRuntimeTerminalInitializing(args: {
+  runtime: string | null | undefined;
   isRunning: boolean;
+  isHeadless: boolean;
   terminalHasOutput: boolean;
 }): boolean {
   return Boolean(
-    args.isOpenClaw
+    TERMINAL_INITIALIZATION_RUNTIMES.has(String(args.runtime || "").trim().toLowerCase())
       && args.isRunning
+      && !args.isHeadless
       && !args.terminalHasOutput,
   );
 }
@@ -105,7 +108,8 @@ export function AgentTab({
   const startupState = String(actor.runtime_startup?.state || "").trim().toLowerCase();
   const startupPending = startupState === "queued" || startupState === "initializing";
   const startupError = String(actor.runtime_startup?.error || "").trim();
-  const openClawRuntime = String(actor.runtime || "").trim().toLowerCase() === "openclaw";
+  const normalizedRuntime = String(actor.runtime || "").trim().toLowerCase();
+  const terminalInitializationRuntime = TERMINAL_INITIALIZATION_RUNTIMES.has(normalizedRuntime);
   const canControl = !readOnly;
   const isBusy = busy.includes(actor.id);
   const latestHeadlessText = useGroupStore((state) => {
@@ -510,9 +514,10 @@ export function AgentTab({
     clearTerminalSignal,
     setReconnectTrigger,
   });
-  const showOpenClawInitializing = shouldShowOpenClawTerminalInitializing({
-    isOpenClaw: openClawRuntime,
+  const showRuntimeInitializing = shouldShowRuntimeTerminalInitializing({
+    runtime: actor.runtime,
     isRunning,
+    isHeadless,
     terminalHasOutput,
   });
 
@@ -824,10 +829,10 @@ export function AgentTab({
               style={{
                 contain: 'layout paint',
                 overflow: 'hidden',
-                opacity: terminalReady && (!openClawRuntime || terminalHasOutput) ? 1 : 0,
+                opacity: terminalReady && (!terminalInitializationRuntime || terminalHasOutput) ? 1 : 0,
               }}
             />
-            {showOpenClawInitializing && (
+            {showRuntimeInitializing && (
               <div className={classNames(
                 "absolute inset-0 flex flex-col items-center justify-center p-8",
                 "text-[var(--color-text-secondary)] bg-[var(--glass-panel-bg)]",
@@ -846,7 +851,7 @@ export function AgentTab({
               </div>
             )}
             {/* Connection error overlay — shown when all reconnect attempts failed and terminal never became ready */}
-            {!showOpenClawInitializing && connectionStatus === 'disconnected' && !terminalReady && (
+            {!showRuntimeInitializing && connectionStatus === 'disconnected' && !terminalReady && (
               <div className={classNames(
                 "absolute inset-0 flex flex-col items-center justify-center p-8",
                 "text-[var(--color-text-tertiary)] bg-[var(--glass-panel-bg)]"

@@ -514,7 +514,7 @@ class TestOpenClawRuntime(unittest.TestCase):
         ), patch.object(openclaw_runtime.subprocess, "Popen", return_value=process), patch.object(
             openclaw_runtime.time,
             "monotonic",
-            side_effect=[0.0, 21.0],
+            side_effect=[0.0, 61.0],
         ), patch.object(openclaw_runtime, "terminate_pid", return_value=True) as terminate_pid:
             with self.assertRaisesRegex(RuntimeError, "did not become ready"):
                 openclaw_runtime._start_gateway(
@@ -533,6 +533,39 @@ class TestOpenClawRuntime(unittest.TestCase):
         terminate_pid.assert_called_once_with(1234, timeout_s=5.0, include_group=True, force=True)
         self.assertEqual(openclaw_runtime._GATEWAY_PROCESSES, {})
         self.assertEqual(openclaw_runtime._GATEWAY_ACTORS, {})
+
+    def test_gateway_can_become_ready_during_extended_startup_window(self) -> None:
+        from no1.daemon import openclaw_runtime
+
+        process = SimpleNamespace(pid=1234, poll=Mock(return_value=None), wait=Mock(), kill=Mock())
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            openclaw_runtime,
+            "_owned_gateway_ready",
+            side_effect=[False, True],
+        ), patch.object(openclaw_runtime, "_loopback_port_open", return_value=True), patch.object(
+            openclaw_runtime.subprocess,
+            "Popen",
+            return_value=process,
+        ), patch.object(
+            openclaw_runtime.time,
+            "monotonic",
+            side_effect=[0.0, 59.0],
+        ), patch.object(openclaw_runtime, "terminate_pid") as terminate_pid:
+            openclaw_runtime._start_gateway(
+                ["openclaw"],
+                env={
+                    "CCCC_HOME": td,
+                    "OPENCLAW_CONFIG_PATH": str(Path(td) / "openclaw.json"),
+                    "OPENCLAW_GATEWAY_PORT": "24128",
+                    "OPENCLAW_GATEWAY_TOKEN": "token",
+                },
+                cwd=Path(td),
+                group_id="group-a",
+                actor_id="actor-a",
+            )
+
+        self.assertIn(("group-a", "actor-a"), openclaw_runtime._GATEWAY_ACTORS)
+        terminate_pid.assert_not_called()
 
     def test_gateway_termination_waits_after_kill_fallback(self) -> None:
         from no1.daemon import openclaw_runtime
@@ -700,8 +733,42 @@ class TestOpenClawRuntime(unittest.TestCase):
             "sessions.patch",
             {"key": "agent:onecolleague-a:onecolleague", "model": "onecolleague/model-a"},
             env={},
-            timeout=20.0,
+            timeout=60.0,
         )
+
+    def test_startup_cli_steps_use_extended_timeout(self) -> None:
+        from no1.daemon import openclaw_runtime
+
+        completed = subprocess.CompletedProcess(
+            args=["openclaw"],
+            returncode=0,
+            stdout='{"skills": []}',
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            openclaw_runtime,
+            "_run_cli",
+            return_value=completed,
+        ) as run_cli:
+            env = {"OPENCLAW_CONFIG_PATH": str(Path(td) / "openclaw.json")}
+            candidate_path = openclaw_runtime._write_validated_config_candidate(
+                ["openclaw"],
+                {"agents": {"list": []}},
+                env=env,
+            )
+            candidate_path.unlink(missing_ok=True)
+            self.assertEqual(run_cli.call_args.kwargs["timeout"], 60.0)
+
+            run_cli.reset_mock()
+            self.assertEqual(
+                openclaw_runtime._list_openclaw_skill_names(
+                    ["openclaw"],
+                    agent_id="onecolleague-test",
+                    env=env,
+                ),
+                [],
+            )
+            self.assertEqual(run_cli.call_args.kwargs["timeout"], 60.0)
 
     def test_session_model_patch_does_not_mutate_session_store_when_rpc_fails(self) -> None:
         from no1.daemon import openclaw_runtime
