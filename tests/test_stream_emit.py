@@ -9,6 +9,12 @@ from no1.contracts.v1 import ChatStreamData
 
 
 class TestStreamEmit(unittest.TestCase):
+    def test_user_delivery_status_events_are_streamable(self) -> None:
+        from no1.daemon.messaging.streaming import STREAMABLE_KINDS_V1
+
+        self.assertIn("chat.read", STREAMABLE_KINDS_V1)
+        self.assertIn("actor.delivery.failed", STREAMABLE_KINDS_V1)
+
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
         td_ctx = tempfile.TemporaryDirectory()

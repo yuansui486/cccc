@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -1440,6 +1441,49 @@ class TestOpenClawRuntime(unittest.TestCase):
                     _skill_packages.prepare_openclaw_skill_package_overlay_for_actor(group, "actor-a")
 
             self.assertTrue(existing_skill.is_file())
+
+    def test_live_skill_refresh_preserves_base_skills_and_replaces_actor_overlay(self) -> None:
+        from no1.daemon import openclaw_runtime
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "context"
+            root.mkdir()
+            config_path = root / "openclaw.json"
+            agent_id = openclaw_runtime.openclaw_agent_id("group-a", "actor-a")
+            managed_root = Path(td) / "runtime" / "openclaw" / "skills" / "actors"
+            actor_root = managed_root / hashlib.sha256(b"group-a\0actor-a").hexdigest()[:16]
+            config_path.write_text(
+                json.dumps({
+                    "agents": {"list": [{"id": agent_id, "skills": ["base-skill", "onecolleague-old"]}]},
+                    "skills": {"load": {"extraDirs": ["C:/base", str(actor_root / "old" / "skills"), "C:/other"]}},
+                }),
+                encoding="utf-8",
+            )
+            env = {
+                "OPENCLAW_CONFIG_PATH": str(config_path),
+                "OPENCLAW_GATEWAY_TOKEN": "token",
+                "OPENCLAW_GATEWAY_PORT": "24128",
+            }
+            openclaw_runtime._GATEWAY_ACTOR_ENVS[("group-a", "actor-a")] = env
+            published = {}
+            with patch.object(openclaw_runtime, "_context_command", return_value=["openclaw"]), patch.object(
+                openclaw_runtime, "_publish_config", side_effect=lambda prefix, candidate, env: published.update(candidate)
+            ), patch("no1.kernel.group.load_group", return_value=SimpleNamespace(group_id="group-a")), patch(
+                "no1.daemon.ops.capability_ops.prepare_openclaw_skill_package_overlay_for_actor",
+                return_value={
+                    "selected_names": ["onecolleague-new"],
+                    "managed_root": str(managed_root),
+                    "root": str(actor_root / "skills"),
+                },
+            ):
+                result = openclaw_runtime.refresh_openclaw_actor_skill_projection("group-a", "actor-a")
+
+            self.assertTrue(result["refreshed"])
+            skills = published["agents"]["list"][0]["skills"]
+            self.assertEqual(skills, ["base-skill", "onecolleague-new"])
+            self.assertIn("C:/base", published["skills"]["load"]["extraDirs"])
+            self.assertNotIn(str(actor_root / "old" / "skills"), published["skills"]["load"]["extraDirs"])
+            self.assertIn(str(actor_root / "skills"), published["skills"]["load"]["extraDirs"])
 
 
 if __name__ == "__main__":

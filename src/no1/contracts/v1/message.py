@@ -148,6 +148,9 @@ class ChatMessageData(BaseModel):
     reply_required: bool = False
     collaboration_required: bool = False
     computer_control_request: Optional[Dict[str, Any]] = None
+    # Capability selected in the composer for this turn. The ledger keeps the
+    # original user text while runtime adapters use this id for projection.
+    skill_capability_id: Optional[str] = None
 
     # IM semantics
     to: List[str] = Field(default_factory=list)  # @mentions (empty = broadcast)

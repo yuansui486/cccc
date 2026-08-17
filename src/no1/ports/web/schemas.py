@@ -46,6 +46,7 @@ class SendRequest(BaseModel):
     client_id: str = Field(default="")
     refs: list[dict[str, Any]] = Field(default_factory=list)
     computer_control_request: Optional[dict[str, Any]] = None
+    skill_capability_id: str = Field(default="")
 
 
 class SendCrossGroupRequest(BaseModel):
@@ -75,6 +76,7 @@ class TrackedSendRequest(BaseModel):
     reply_required: bool = True
     idempotency_key: str = Field(default="")
     refs: list[dict[str, Any]] = Field(default_factory=list)
+    skill_capability_id: str = Field(default="")
 
 
 class ReplyRequest(BaseModel):
@@ -88,6 +90,7 @@ class ReplyRequest(BaseModel):
     collaboration_required: bool = False
     client_id: str = Field(default="")
     refs: list[dict[str, Any]] = Field(default_factory=list)
+    skill_capability_id: str = Field(default="")
 
 
 class DebugClearLogsRequest(BaseModel):

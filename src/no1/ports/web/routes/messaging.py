@@ -122,6 +122,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "client_id": _normalize_client_id(req.client_id),
                 "refs": list(req.refs),
                 "computer_control_request": req.computer_control_request,
+                "skill_capability_id": str(req.skill_capability_id or "").strip(),
             },
         )
         return await _submit_message(daemon_req)
@@ -173,6 +174,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "reply_required": _normalize_reply_required(req.reply_required),
                 "idempotency_key": _normalize_client_id(req.idempotency_key),
                 "refs": list(req.refs),
+                "skill_capability_id": str(req.skill_capability_id or "").strip(),
             },
         )
         return await _submit_message(daemon_req)
@@ -223,6 +225,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         client_id: str = Form(""),
         refs_json: str = Form("[]"),
         computer_control_request_json: str = Form(""),
+        skill_capability_id: str = Form(""),
         files: list[UploadFile] = File(default_factory=list),
     ) -> Dict[str, Any]:
         _require_web_user(by)
@@ -293,6 +296,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "client_id": normalized_client_id,
                 "refs": refs,
                 "computer_control_request": computer_control_request,
+                "skill_capability_id": str(skill_capability_id or "").strip(),
             },
         )
         return await _submit_message(daemon_req)
@@ -310,6 +314,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         collaboration_required: str = Form("false"),
         client_id: str = Form(""),
         refs_json: str = Form("[]"),
+        skill_capability_id: str = Form(""),
         files: list[UploadFile] = File(default_factory=list),
     ) -> Dict[str, Any]:
         _require_web_user(by)
@@ -367,6 +372,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "collaboration_required": _normalize_reply_required(collaboration_required),
                 "client_id": normalized_client_id,
                 "refs": refs,
+                "skill_capability_id": str(skill_capability_id or "").strip(),
             },
         )
         return await _submit_message(daemon_req)

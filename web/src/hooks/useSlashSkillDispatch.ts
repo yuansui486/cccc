@@ -2,6 +2,10 @@ import { useCallback } from "react";
 
 import * as api from "../services/api";
 import type { ChatFilter } from "../stores/useUIStore";
+import {
+  mergeCanonicalAttachmentsWithOptimisticPreview,
+  releaseTransferredPreviewUrls,
+} from "../stores/chatOutboxStore";
 import type { LedgerEvent, ReplyTarget } from "../types";
 import {
   formatSendMessageError,
@@ -20,6 +24,7 @@ export async function sendSlashSkillMessageRequest(args: {
   collaborationRequired: boolean;
   localId: string;
   replyTarget: ReplyTarget;
+  skillCapabilityId?: string;
 }) {
   if (args.replyTarget) {
     return api.replyMessage(
@@ -33,6 +38,7 @@ export async function sendSlashSkillMessageRequest(args: {
       args.collaborationRequired,
       args.localId,
       [],
+      args.skillCapabilityId || "",
     );
   }
 
@@ -46,6 +52,8 @@ export async function sendSlashSkillMessageRequest(args: {
     args.collaborationRequired,
     args.localId,
     [],
+    undefined,
+    args.skillCapabilityId || "",
   );
 }
 
@@ -63,6 +71,7 @@ export function useSlashSkillDispatch(args: {
   setChatMobileSurface: (groupId: string, surface: "messages" | "presentation") => void;
   enqueueOutbox: (groupId: string, localId: string, event: LedgerEvent) => void;
   removeOutbox: (groupId: string, localId: string) => void;
+  appendEvent: (event: LedgerEvent, groupId?: string) => void;
   showError: (message: string) => void;
   onMessageSent?: () => void;
   t: ChatTFunction;
@@ -81,6 +90,7 @@ export function useSlashSkillDispatch(args: {
     setChatMobileSurface,
     enqueueOutbox,
     removeOutbox,
+    appendEvent,
     showError,
     onMessageSent,
     t,
@@ -90,6 +100,7 @@ export function useSlashSkillDispatch(args: {
     const message = String(text || "").trim();
     if (!selectedGroupId || !message) return false;
     const replyTarget: ReplyTarget = options?.replyTarget || null;
+    const skillCapabilityId = String(options?.skillCapabilityId || "").trim();
     if (groupSendBlockedReason) {
       showError(getGroupSendBlockedMessage(groupSendBlockedReason, t));
       return false;
@@ -120,16 +131,24 @@ export function useSlashSkillDispatch(args: {
     };
     enqueueOutbox(selectedGroupId, localId, optimisticEvent);
 
-    const resp = await sendSlashSkillMessageRequest({
-      selectedGroupId,
-      message,
-      toTokens,
-      priority: prio as "normal" | "attention",
-      replyRequired,
-      collaborationRequired,
-      localId,
-      replyTarget,
-    });
+    let resp;
+    try {
+      resp = await sendSlashSkillMessageRequest({
+        selectedGroupId,
+        message,
+        toTokens,
+        priority: prio as "normal" | "attention",
+        replyRequired,
+        collaborationRequired,
+        localId,
+        replyTarget,
+        skillCapabilityId,
+      });
+    } catch (error) {
+      removeOutbox(selectedGroupId, localId);
+      showError(error instanceof Error ? error.message : "send failed");
+      return false;
+    }
     if (!resp.ok) {
       removeOutbox(selectedGroupId, localId);
       showError(formatSendMessageError({
@@ -141,6 +160,16 @@ export function useSlashSkillDispatch(args: {
       return false;
     }
 
+    const canonicalEvent = resp.result && typeof resp.result === "object" && "event" in resp.result
+      ? resp.result.event as LedgerEvent | null | undefined
+      : undefined;
+    if (canonicalEvent) {
+      const reconciled = mergeCanonicalAttachmentsWithOptimisticPreview(canonicalEvent, selectedGroupId);
+      appendEvent(reconciled.event, selectedGroupId);
+      removeOutbox(selectedGroupId, localId);
+      releaseTransferredPreviewUrls(reconciled.transferredPreviewUrls);
+    }
+
     clearDraft(selectedGroupId);
     setToText("");
     setChatUnreadCount(selectedGroupId, 0);
@@ -150,6 +179,7 @@ export function useSlashSkillDispatch(args: {
     return true;
   }, [
     clearDraft,
+    appendEvent,
     enqueueOutbox,
     groupSendBlockedReason,
     onMessageSent,

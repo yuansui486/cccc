@@ -632,6 +632,129 @@ def _commit_headless_delivery_queued(
     commit_experience_reminder(group, experience_decision)
 
 
+def _prepare_message_skill(
+    group: Any,
+    *,
+    capability_id: str,
+    recipient_ids: list[str],
+) -> tuple[str, Optional[DaemonResponse]]:
+    """Enable a composer-selected skill for this turn and project OpenClaw skills.
+
+    The capability state machine owns installation/policy checks.  We invoke it
+    before appending the chat event so a projection failure cannot leave a
+    message which the target runtime cannot execute.
+    """
+    raw_id = str(capability_id or "").strip()
+    if not raw_id:
+        return "", None
+    try:
+        from ..ops.capability_ops import (
+            _canonical_capability_id,
+            handle_capability_enable,
+            prepare_openclaw_skill_package_overlay_for_actor,
+        )
+        from ..ops.capability_ops._admission import resolve_current_admission
+    except Exception as exc:
+        return "", _error("skill_projection_failed", str(exc))
+    try:
+        canonical_id = str(_canonical_capability_id(raw_id) or "").strip()
+    except Exception:
+        canonical_id = raw_id
+    if not canonical_id:
+        return "", _error("invalid_skill_capability", "skill capability id is empty")
+
+    stable_name = f"onecolleague-{hashlib.sha256(canonical_id.encode('utf-8')).hexdigest()[:16]}"
+    touched: list[tuple[str, bool]] = []
+    actor_ids = list(dict.fromkeys(str(item or "").strip() for item in recipient_ids if str(item or "").strip()))
+
+    def rollback() -> None:
+        for touched_actor, had_session in reversed(touched):
+            if had_session:
+                continue
+            try:
+                handle_capability_enable(
+                    {
+                        "group_id": str(getattr(group, "group_id", "") or ""),
+                        "actor_id": touched_actor,
+                        "by": "user",
+                        "scope": "session",
+                        "capability_id": canonical_id,
+                        "enabled": False,
+                        "ttl_seconds": 3600,
+                        "reason": "composer_skill_projection_rollback",
+                    }
+                )
+            except Exception:
+                logger.exception("failed to roll back composer skill activation for %s", touched_actor)
+
+    for actor_id in actor_ids:
+        actor = find_actor(group, actor_id)
+        if not isinstance(actor, dict):
+            continue
+        try:
+            admission_before = resolve_current_admission(
+                group_id=str(getattr(group, "group_id", "") or ""), actor_id=actor_id
+            )
+            sources_before = admission_before.get("activation_sources") if isinstance(admission_before, dict) else {}
+            had_session = any(
+                isinstance(item, dict) and str(item.get("scope") or "") == "session"
+                for item in (sources_before.get(canonical_id) if isinstance(sources_before, dict) else [])
+            )
+        except Exception:
+            had_session = False
+        enabled = handle_capability_enable(
+            {
+                "group_id": str(getattr(group, "group_id", "") or ""),
+                "actor_id": actor_id,
+                "by": "user",
+                "scope": "session",
+                "capability_id": canonical_id,
+                "enabled": True,
+                "ttl_seconds": 3600,
+                "reason": "composer_selected_skill",
+            }
+        )
+        result = enabled.result if isinstance(enabled.result, dict) else {}
+        if not enabled.ok or result.get("enabled") is False or str(result.get("state") or "").lower() in {"blocked", "failed", "denied"}:
+            rollback()
+            return "", _error(
+                "skill_projection_failed",
+                str((enabled.error.message if enabled.error is not None else result.get("reason")) or "skill activation failed"),
+                details={"capability_id": canonical_id, "actor_id": actor_id},
+            )
+        touched.append((actor_id, had_session))
+        if str(actor.get("runtime") or "").strip().lower() == "openclaw":
+            try:
+                projection = prepare_openclaw_skill_package_overlay_for_actor(group, actor_id)
+            except Exception as exc:
+                rollback()
+                return "", _error(
+                    "skill_projection_failed",
+                    str(exc),
+                    details={"capability_id": canonical_id, "actor_id": actor_id},
+                )
+            selected = projection.get("selected_names") if isinstance(projection, dict) else []
+            if stable_name not in {str(item or "").strip() for item in selected if str(item or "").strip()}:
+                rollback()
+                return "", _error(
+                    "skill_unavailable",
+                    "selected skill is not installed or is not an OpenClaw skill package",
+                    details={"capability_id": canonical_id, "actor_id": actor_id},
+                )
+            try:
+                from ..openclaw_runtime import refresh_openclaw_actor_skill_projection
+
+                refresh_openclaw_actor_skill_projection(str(getattr(group, "group_id", "") or ""), actor_id)
+            except Exception as exc:
+                rollback()
+                return "", _error(
+                    "skill_projection_failed",
+                    str(exc),
+                    details={"capability_id": canonical_id, "actor_id": actor_id},
+                )
+    return stable_name, None
+
+
 def handle_send(
     args: Dict[str, Any],
     *,
@@ -758,6 +881,18 @@ def handle_send(
     except ValueError as exc:
         return _error("invalid_insight", str(exc))
 
+    if not text.strip() and not args.get("attachments"):
+        return _error("empty_message", "message text cannot be empty")
+
+    skill_capability_id = str(args.get("skill_capability_id") or "").strip()
+    skill_delivery_name, skill_error = _prepare_message_skill(
+        group,
+        capability_id=skill_capability_id,
+        recipient_ids=recipient_actor_ids(group, to),
+    )
+    if skill_error is not None:
+        return skill_error
+
     group = _wake_group_on_human_message(
         group,
         by=by,
@@ -810,6 +945,8 @@ def handle_send(
         return _error("invalid_attachments", str(e))
     refs = _normalize_refs(args.get("refs"))
     delivery_body_text = text
+    if skill_delivery_name:
+        delivery_body_text = f"Use the enabled OneColleague skill `/{skill_delivery_name}` for this task.\n\n{delivery_body_text}"
     if install_slash_command is not None:
         delivery_body_text = render_install_command_task(install_slash_command)
         refs = [
@@ -836,6 +973,7 @@ def handle_send(
         reply_required=reply_required,
         collaboration_required=collaboration_required,
         computer_control_request=computer_control_request,
+        skill_capability_id=skill_capability_id or None,
         quote_text=quote_text or None,
         to=to,
         refs=refs,
@@ -1127,6 +1265,7 @@ def handle_tracked_send(
         "priority": message_priority,
         "reply_required": reply_required,
         "refs": base_refs,
+        "skill_capability_id": str(args.get("skill_capability_id") or "").strip(),
     }
     if client_id:
         message_args["client_id"] = client_id
@@ -1408,6 +1547,18 @@ def handle_reply(
         except MessageAdmissionError as exc:
             return _admission_error_response(exc)
 
+    if not text.strip() and not args.get("attachments"):
+        return _error("empty_message", "message text cannot be empty")
+
+    skill_capability_id = str(args.get("skill_capability_id") or "").strip()
+    skill_delivery_name, skill_error = _prepare_message_skill(
+        group,
+        capability_id=skill_capability_id,
+        recipient_ids=recipient_actor_ids(group, to),
+    )
+    if skill_error is not None:
+        return skill_error
+
     group = _wake_group_on_human_message(
         group,
         by=by,
@@ -1450,6 +1601,7 @@ def handle_reply(
             priority=priority,
             reply_required=reply_required,
             collaboration_required=collaboration_required,
+            skill_capability_id=skill_capability_id or None,
             to=to,
             reply_to=target_event_id or reply_to,
             quote_text=quote_text,
@@ -1503,7 +1655,11 @@ def handle_reply(
     event_id = str(event.get("id") or "").strip()
     event_ts = str(event.get("ts") or "").strip()
     delivery_text = _build_delivery_text(
-        text=text,
+        text=(
+            f"Use the enabled OneColleague skill `/{skill_delivery_name}` for this task.\n\n{text}"
+            if skill_delivery_name
+            else text
+        ),
         insight=insight,
         priority=priority,
         reply_required=reply_required,
@@ -1822,6 +1978,7 @@ def handle_file_send(
                 "attachments": [attachment],
                 "priority": priority,
                 "reply_required": coerce_bool(args.get("reply_required")),
+                "skill_capability_id": str(args.get("skill_capability_id") or "").strip(),
                 ADMISSION_CLAIM_ARG: issue_admission_claim(committed),
             }
             return handle_send(

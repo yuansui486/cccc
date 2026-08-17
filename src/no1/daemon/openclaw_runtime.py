@@ -1763,6 +1763,67 @@ def _context_command(root: Path) -> list[str]:
     return ["openclaw"]
 
 
+def refresh_openclaw_actor_skill_projection(group_id: str, actor_id: str) -> Dict[str, Any]:
+    """Publish an already-materialized actor Skill overlay to a live Gateway."""
+    key = (str(group_id or "").strip(), str(actor_id or "").strip())
+    with _LOCK:
+        env = dict(_GATEWAY_ACTOR_ENVS.get(key) or {})
+    config_raw = str(env.get("OPENCLAW_CONFIG_PATH") or "").strip()
+    if not config_raw:
+        return {"refreshed": False, "reason": "actor_gateway_not_running"}
+    config_path = Path(config_raw)
+    root = config_path.parent
+    config = read_json(config_path)
+    if not isinstance(config, dict):
+        raise RuntimeError("managed OpenClaw config is invalid")
+    from .ops.capability_ops import prepare_openclaw_skill_package_overlay_for_actor
+    from ..kernel.group import load_group
+
+    group = load_group(group_id)
+    if group is None:
+        raise RuntimeError("group not found")
+    projection = prepare_openclaw_skill_package_overlay_for_actor(group, actor_id)
+    agent_id = openclaw_agent_id(group_id, actor_id)
+    agents_cfg = config.get("agents") if isinstance(config.get("agents"), dict) else {}
+    agents = agents_cfg.get("list") if isinstance(agents_cfg.get("list"), list) else []
+    selected = sorted({str(item).strip() for item in projection.get("selected_names", []) if str(item).strip()})
+    next_agents = []
+    found = False
+    for item in agents:
+        if not isinstance(item, dict):
+            next_agents.append(item)
+            continue
+        row = dict(item)
+        if str(row.get("id") or "").strip() == agent_id:
+            found = True
+            existing_skills = row.get("skills") if isinstance(row.get("skills"), list) else []
+            base_skills = [
+                str(skill).strip()
+                for skill in existing_skills
+                if str(skill).strip() and not str(skill).strip().startswith("onecolleague-")
+            ]
+            row["skills"] = sorted(set(base_skills) | set(selected))
+        next_agents.append(row)
+    if not found:
+        return {"refreshed": False, "reason": "agent_not_found"}
+    skills_cfg = config.get("skills") if isinstance(config.get("skills"), dict) else {}
+    load_cfg = dict(skills_cfg.get("load") or {}) if isinstance(skills_cfg.get("load"), dict) else {}
+    extra_dirs = [str(item) for item in load_cfg.get("extraDirs", []) if str(item).strip()]
+    managed_root = str(projection.get("managed_root") or "").strip()
+    if managed_root:
+        actor_overlay_id = hashlib.sha256(f"{key[0]}\0{key[1]}".encode("utf-8")).hexdigest()[:16]
+        actor_overlay_root = str(Path(managed_root) / actor_overlay_id)
+        extra_dirs = [item for item in extra_dirs if not _path_is_within(item, actor_overlay_root)]
+    root_path = str(projection.get("root") or "").strip()
+    if root_path and root_path not in extra_dirs:
+        extra_dirs.append(root_path)
+    load_cfg["extraDirs"] = extra_dirs
+    load_cfg["watch"] = True
+    candidate = _deep_merge(config, {"agents": {"list": next_agents}, "skills": {"load": load_cfg}})
+    _publish_config(_context_command(root), candidate, env=env)
+    return {"refreshed": True, "selected_names": selected, "root": root_path}
+
+
 def _terminate_owned_gateways_under(root: Path) -> None:
     if not root.is_dir():
         return

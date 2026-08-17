@@ -902,7 +902,7 @@ describe("api.message refs", () => {
 
     const api = await import("../../src/services/api");
     const refs = [{ kind: "presentation_ref", slot_id: "slot-2", locator: { viewer_scroll_top: 240 } }];
-    await api.sendMessage("g-demo", "please review", ["worker-1"], undefined, "normal", false, false, "client-1", refs);
+    await api.sendMessage("g-demo", "please review", ["worker-1"], undefined, "normal", false, false, "client-1", refs, undefined, "skill:library:copywriting");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/groups/g-demo/send",
@@ -919,6 +919,7 @@ describe("api.message refs", () => {
           client_id: "client-1",
           refs,
           computer_control_request: null,
+          skill_capability_id: "skill:library:copywriting",
         }),
       }),
     );
@@ -1004,7 +1005,7 @@ describe("api.message refs", () => {
     const api = await import("../../src/services/api");
     const refs = [{ kind: "presentation_ref", slot_id: "slot-3", locator: { url: "http://127.0.0.1:3000" } }];
     const file = new File(["hello"], "note.txt", { type: "text/plain" });
-    await api.replyMessage("g-demo", "see attached", ["worker-2"], "evt-parent", [file], "attention", true, false, "client-2", refs);
+    await api.replyMessage("g-demo", "see attached", ["worker-2"], "evt-parent", [file], "attention", true, false, "client-2", refs, "skill:library:copywriting");
 
     const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("/api/v1/groups/g-demo/reply_upload");
@@ -1019,6 +1020,7 @@ describe("api.message refs", () => {
     expect(form.get("reply_required")).toBe("true");
     expect(form.get("client_id")).toBe("client-2");
     expect(form.get("refs_json")).toBe(JSON.stringify(refs));
+    expect(form.get("skill_capability_id")).toBe("skill:library:copywriting");
     const uploaded = form.get("files") as File;
     expect(uploaded).toBeInstanceOf(Blob);
     expect(uploaded.name).toBe("note.txt");

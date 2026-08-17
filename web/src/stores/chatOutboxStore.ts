@@ -157,3 +157,45 @@ export function releaseTransferredPreviewUrls(urls: string[], delayMs = 60000): 
     revokeObjectUrls(urls);
   }, delayMs);
 }
+
+/**
+ * Preserve local attachment previews while replacing an optimistic message
+ * with the server's canonical event. The caller owns appending/removing the
+ * resulting event and releasing transferred URLs after render.
+ */
+export function mergeCanonicalAttachmentsWithOptimisticPreview(
+  event: LedgerEvent,
+  groupId: string,
+): { event: LedgerEvent; transferredPreviewUrls: string[] } {
+  if (String(event.kind || "").trim() !== "chat.message" || String(event.by || "").trim() !== "user") {
+    return { event, transferredPreviewUrls: [] };
+  }
+  const data = event.data && typeof event.data === "object" ? event.data as Record<string, unknown> : null;
+  const clientId = data && typeof data.client_id === "string" ? data.client_id.trim() : "";
+  if (!clientId) return { event, transferredPreviewUrls: [] };
+
+  const optimisticData = getOutboxEntry(groupId, clientId)?.event?.data;
+  const optimisticAttachments = optimisticData && typeof optimisticData === "object" && Array.isArray((optimisticData as { attachments?: unknown[] }).attachments)
+    ? (optimisticData as { attachments: unknown[] }).attachments
+    : [];
+  const canonicalData = data || {};
+  const canonicalAttachments = Array.isArray(canonicalData.attachments) ? canonicalData.attachments : [];
+  if (optimisticAttachments.length <= 0 || canonicalAttachments.length <= 0) {
+    return { event, transferredPreviewUrls: [] };
+  }
+
+  const mergedAttachments = canonicalAttachments.map((attachment, index) => {
+    if (!attachment || typeof attachment !== "object") return attachment;
+    const optimistic = optimisticAttachments[index];
+    if (!optimistic || typeof optimistic !== "object") return attachment;
+    const previewUrl = typeof (optimistic as { local_preview_url?: unknown }).local_preview_url === "string"
+      ? String((optimistic as { local_preview_url?: string }).local_preview_url || "").trim()
+      : "";
+    return previewUrl.startsWith("blob:") ? { ...attachment, local_preview_url: previewUrl } : attachment;
+  });
+
+  return {
+    event: { ...event, data: { ...canonicalData, attachments: mergedAttachments } },
+    transferredPreviewUrls: transferOutboxPreviewUrls(groupId, clientId),
+  };
+}

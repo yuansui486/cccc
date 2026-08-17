@@ -2,16 +2,15 @@
 import { useEffect, useRef } from "react";
 import { useGroupStore, useUIStore, useModalStore } from "../stores";
 import {
-  getOutboxEntry,
+  mergeCanonicalAttachmentsWithOptimisticPreview,
   releaseTransferredPreviewUrls,
-  transferOutboxPreviewUrls,
   useChatOutboxStore,
 } from "../stores/chatOutboxStore";
 import { mergeStreamingActivity } from "../stores/chatStreamingSessions";
 import { beginContextRequest, isLatestContextRequest } from "../stores/groupStoreCore";
 import * as api from "../services/api";
 import type { FetchContextOptions } from "../services/api";
-import type { Actor, ChatMessageData, HeadlessStreamEvent, GroupContext, GroupRuntimeStatus, StreamingActivity } from "../types";
+import type { Actor, ChatMessageData, HeadlessStreamEvent, GroupContext, GroupRuntimeStatus, StreamingActivity, LedgerEvent } from "../types";
 import { runReconnectCatchup, scheduleContextSummaryCatchup } from "./sseCatchup";
 import {
   isContextSyncEvent,
@@ -62,56 +61,6 @@ export function getGroupStreamsHiddenDisconnectDelayMs(documentHidden: boolean):
 
 export function hasHeadlessActors(actors: Actor[]): boolean {
   return Array.isArray(actors) && actors.some((actor) => isHeadlessActorRunner(actor));
-}
-
-function mergeCanonicalAttachmentsWithOptimisticPreview(
-  ev: Record<string, unknown>,
-  groupId: string,
-): { event: Record<string, unknown>; transferredPreviewUrls: string[] } {
-  if (String(ev.kind || "").trim() !== "chat.message" || String(ev.by || "").trim() !== "user") {
-    return { event: ev, transferredPreviewUrls: [] };
-  }
-  const data = ev.data && typeof ev.data === "object" ? (ev.data as Record<string, unknown>) : null;
-  const clientId = data && typeof data.client_id === "string" ? data.client_id.trim() : "";
-  if (!clientId) {
-    return { event: ev, transferredPreviewUrls: [] };
-  }
-
-  const outboxEntry = getOutboxEntry(groupId, clientId);
-  const optimisticData = outboxEntry?.event?.data && typeof outboxEntry.event.data === "object"
-    ? (outboxEntry.event.data as { attachments?: unknown[] })
-    : null;
-  const optimisticAttachments = Array.isArray(optimisticData?.attachments) ? optimisticData.attachments : [];
-  const canonicalAttachments = Array.isArray(data?.attachments) ? data.attachments : [];
-  if (optimisticAttachments.length <= 0 || canonicalAttachments.length <= 0) {
-    return { event: ev, transferredPreviewUrls: [] };
-  }
-
-  const mergedAttachments = canonicalAttachments.map((attachment, index) => {
-    if (!attachment || typeof attachment !== "object") return attachment;
-    const optimistic = optimisticAttachments[index];
-    if (!optimistic || typeof optimistic !== "object") return attachment;
-    const previewUrl = typeof (optimistic as { local_preview_url?: unknown }).local_preview_url === "string"
-      ? String((optimistic as { local_preview_url?: string }).local_preview_url || "").trim()
-      : "";
-    if (!previewUrl.startsWith("blob:")) return attachment;
-    return {
-      ...attachment,
-      local_preview_url: previewUrl,
-    };
-  });
-
-  const transferredPreviewUrls = transferOutboxPreviewUrls(groupId, clientId);
-  return {
-    event: {
-      ...ev,
-      data: {
-        ...data,
-        attachments: mergedAttachments,
-      },
-    },
-    transferredPreviewUrls,
-  };
 }
 
 interface UseSSEOptions {
@@ -252,6 +201,7 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
   const updateReadStatus = useGroupStore((s) => s.updateReadStatus);
   const updateAckStatus = useGroupStore((s) => s.updateAckStatus);
   const updateReplyStatus = useGroupStore((s) => s.updateReplyStatus);
+  const mergeEventStatuses = useGroupStore((s) => s.mergeEventStatuses);
   const incrementActorUnread = useGroupStore((s) => s.incrementActorUnread);
   const updateActorActivity = useGroupStore((s) => s.updateActorActivity);
   const upsertStreamingActivity = useGroupStore((s) => s.upsertStreamingActivity);
@@ -1158,6 +1108,27 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
           return;
         }
 
+        // Project PTY delivery failures onto the originating user messages so
+        // the composer row does not look silently delivered.
+        if (String(ev?.kind || "").trim() === "actor.delivery.failed") {
+          const data = ev.data && typeof ev.data === "object" ? ev.data as Record<string, unknown> : {};
+          const eventIds = Array.isArray(data.event_ids) ? data.event_ids : [];
+          const status = {
+            state: "failed",
+            actor_id: String(data.actor_id || "").trim(),
+            reason: String(data.reason || "").trim(),
+            error: String(data.error || "").trim(),
+            retryable: Boolean(data.retryable),
+          };
+          const statuses: Record<string, { delivery_status: typeof status }> = {};
+          for (const eventId of eventIds) {
+            const id = String(eventId || "").trim();
+            if (id) statuses[id] = { delivery_status: status };
+          }
+          if (Object.keys(statuses).length > 0) mergeEventStatuses(statuses, groupId);
+          return;
+        }
+
         // Chat read status update
         if (isChatReadEvent(ev)) {
           const data = extractChatReadData(ev);
@@ -1179,7 +1150,7 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
           return;
         }
 
-        const reconciled = mergeCanonicalAttachmentsWithOptimisticPreview(ev as Record<string, unknown>, groupId);
+        const reconciled = mergeCanonicalAttachmentsWithOptimisticPreview(ev as LedgerEvent, groupId);
         const nextEvent = reconciled.event;
 
         // Initialize read/ack status for new messages

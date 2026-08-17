@@ -26,6 +26,7 @@ describe("sendSlashSkillMessageRequest", () => {
         by: "foreman",
         text: "失败日志",
       },
+      skillCapabilityId: "skill:library:copywriting",
     })).resolves.toEqual({ ok: true, result: {} });
 
     expect(apiMocks.replyMessage).toHaveBeenCalledWith(
@@ -39,6 +40,7 @@ describe("sendSlashSkillMessageRequest", () => {
       false,
       "local-1",
       [],
+      "skill:library:copywriting",
     );
     expect(apiMocks.sendMessage).not.toHaveBeenCalled();
   });
@@ -55,6 +57,7 @@ describe("sendSlashSkillMessageRequest", () => {
       collaborationRequired: false,
       localId: "local-2",
       replyTarget: null,
+      skillCapabilityId: "skill:library:copywriting",
     })).resolves.toEqual({ ok: true, result: {} });
 
     expect(apiMocks.sendMessage).toHaveBeenCalledWith(
@@ -67,6 +70,8 @@ describe("sendSlashSkillMessageRequest", () => {
       false,
       "local-2",
       [],
+      undefined,
+      "skill:library:copywriting",
     );
   });
 });

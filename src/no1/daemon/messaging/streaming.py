@@ -20,12 +20,14 @@ STREAMABLE_KINDS_V1: Set[str] = {
     "chat.message",
     "chat.stream",
     "chat.ack",
+    "chat.read",
     "system.notify",
     "system.notify_ack",
     "actor.start",
     "actor.stop",
     "actor.restart",
     "actor.activity",
+    "actor.delivery.failed",
 }
 
 

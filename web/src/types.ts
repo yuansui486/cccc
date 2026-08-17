@@ -238,6 +238,13 @@ export type LedgerEvent = {
   _ack_status?: Record<string, boolean>;
   _obligation_status?: Record<string, ObligationStatus>;
   _web_model_delivery_status?: WebModelDeliveryStatusPayload;
+  _delivery_status?: {
+    state?: "failed" | string;
+    actor_id?: string;
+    reason?: string;
+    error?: string;
+    retryable?: boolean;
+  };
 };
 
 export type HeadlessStreamEvent = {
@@ -254,6 +261,7 @@ export type LedgerEventStatusPayload = {
   ack_status?: Record<string, boolean>;
   obligation_status?: Record<string, ObligationStatus>;
   web_model_delivery_status?: WebModelDeliveryStatusPayload;
+  delivery_status?: LedgerEvent["_delivery_status"];
 };
 
 export type WebModelDeliveryStatusPayload = {

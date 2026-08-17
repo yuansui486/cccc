@@ -75,6 +75,10 @@ export function useAgentTerminalConnection(args: {
   } = args;
 
   const terminalSessionKey = `${groupId}\u0000${actorId}\u0000${termEpoch}`;
+  const terminalSessionKeyRef = useRef(terminalSessionKey);
+  useEffect(() => {
+    terminalSessionKeyRef.current = terminalSessionKey;
+  }, [terminalSessionKey]);
 
   const [connectionStatus, setConnectionStatus] = useState<AgentTerminalConnectionStatus>("disconnected");
   const [terminalReady, setTerminalReady] = useState(false);
@@ -144,9 +148,14 @@ export function useAgentTerminalConnection(args: {
 
   useEffect(() => {
     if (isRunning && !isHeadless) return;
-    const timer = window.setTimeout(() => setTerminalOutputSessionKey(null), 0);
+    const expectedSessionKey = terminalSessionKey;
+    const timer = window.setTimeout(() => {
+      if (terminalSessionKeyRef.current === expectedSessionKey) {
+        setTerminalOutputSessionKey(null);
+      }
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [isHeadless, isRunning]);
+  }, [isHeadless, isRunning, terminalSessionKey]);
 
   const requestReconnect = useCallback(() => {
     reconnectAttemptRef.current = 0;
@@ -349,7 +358,9 @@ export function useAgentTerminalConnection(args: {
           });
         }
         try {
-          if (safe.length > 0) setTerminalOutputSessionKey(terminalSessionKey);
+          if (safe.length > 0 && terminalSessionKeyRef.current === terminalSessionKey) {
+            setTerminalOutputSessionKey(terminalSessionKey);
+          }
           term.write(safe);
         } catch (err) {
           console.error("terminal write failed", err);

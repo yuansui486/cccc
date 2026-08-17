@@ -824,6 +824,7 @@ export function mergeLedgerEventStatuses(events: LedgerEvent[], statuses: Record
       _ack_status: patch.ack_status ?? event._ack_status,
       _obligation_status: patch.obligation_status ?? event._obligation_status,
       _web_model_delivery_status: patch.web_model_delivery_status ?? event._web_model_delivery_status,
+      _delivery_status: patch.delivery_status ?? event._delivery_status,
     };
   });
   return changed ? next : events;

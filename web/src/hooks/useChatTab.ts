@@ -14,7 +14,12 @@ import {
 } from "../stores";
 import { getEffectiveComposerDestGroupId, isComposerGroupSettled } from "../stores/useComposerStore";
 import { getChatSession } from "../stores/useUIStore";
-import { useChatOutboxStore, selectOutboxEntries } from "../stores/chatOutboxStore";
+import {
+  useChatOutboxStore,
+  selectOutboxEntries,
+  mergeCanonicalAttachmentsWithOptimisticPreview,
+  releaseTransferredPreviewUrls,
+} from "../stores/chatOutboxStore";
 import type {
   Actor,
   LedgerEvent,
@@ -1038,10 +1043,10 @@ export function useChatTab({
     const request = remoteRequest;
     if (!request || !remoteViewCurrent || request.groupId !== remoteViewGroupId) return undefined;
     const token = remoteLifecycle.begin(
-      "poll",
-      request.groupId,
-      request.registrationId,
-      request.messageGeneration,
+        "poll",
+        request.groupId,
+        request.registrationId,
+        request.messageGeneration,
     );
     if (!token) return undefined;
     void pollGroupBridgeRemoteReceipt({
@@ -1197,6 +1202,7 @@ export function useChatTab({
     setChatMobileSurface,
     enqueueOutbox,
     removeOutbox,
+    appendEvent,
     showError,
     onMessageSent,
     t,
@@ -1470,7 +1476,10 @@ export function useChatTab({
       ? buildCapsuleSkillDispatchText(skillDispatchItem, skillDispatchArgsText)
         || (composerFilesSnapshot.length > 0 ? buildCapsuleSkillAttachmentDispatchText(skillDispatchItem) : "")
       : "";
-    const messageTextSnapshot = skillDispatchText || txt;
+    // Keep the user's original text in the ledger and let the daemon attach
+    // the stable runtime Skill directive using the structured capability id.
+    const skillCapabilityIdSnapshot = String(skillDispatchItem?.capabilityId || "").trim();
+    const messageTextSnapshot = skillCapabilityIdSnapshot ? txt : (skillDispatchText || txt);
     const sendText = !skillDispatchText && selectedSkillCommandSnapshot.startsWith("/") && txt
       ? explicitSlashText
       : messageTextSnapshot;
@@ -1787,6 +1796,7 @@ export function useChatTab({
           collaborationRequiredSnapshot,
           localId,
           refsSnapshot,
+          skillCapabilityIdSnapshot,
         );
       } else {
         if (isCrossGroup) {
@@ -1813,6 +1823,7 @@ export function useChatTab({
               allow_unattended_triggers: computerControlPermissionsSnapshot.unattendedTriggers,
               allow_workflow_edit: true,
             } : undefined,
+            skillCapabilityIdSnapshot,
           );
         }
       }
@@ -1836,20 +1847,19 @@ export function useChatTab({
 
       // Cross-group sends do not deliver a canonical event into the current
       // group's stream, so clear the optimistic entry on HTTP success.
-      //
-      // Same-group sends keep the optimistic row until SSE reconciliation by
-      // client_id. Replacing an optimistic attachment preview with the HTTP
-      // response event causes a second image load/layout pass, which produces
-      // a visible jump while the list is following bottom.
       if (isCrossGroup) {
         removeOutbox(selectedGroupId, localId);
       }
-      // For same-group sends, rely on SSE to append the canonical event and
-      // clear the matching optimistic row. Cross-group sends still need the
-      // returned event because they do not stream back into the current group.
+      // The HTTP response is the canonical acknowledgement. Reconcile it
+      // immediately so a delayed/lost SSE frame cannot leave the optimistic
+      // row looking unsent. SSE remains an idempotent follow-up.
       if (canonicalEvent && isCrossGroup) {
         appendEvent(canonicalEvent, selectedGroupId);
       } else if (canonicalEvent && !isCrossGroup) {
+        const reconciled = mergeCanonicalAttachmentsWithOptimisticPreview(canonicalEvent, selectedGroupId);
+        appendEvent(reconciled.event, selectedGroupId);
+        removeOutbox(selectedGroupId, localId);
+        releaseTransferredPreviewUrls(reconciled.transferredPreviewUrls);
         const canonicalEventId = String(canonicalEvent.id || "").trim();
         if (canonicalEventId) {
           promoteStreamingEventsByPrefix(`local:${localId}:`, canonicalEventId, selectedGroupId);

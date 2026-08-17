@@ -599,6 +599,7 @@ export async function sendMessage(
     allow_unattended_triggers?: boolean;
     allow_workflow_edit?: boolean;
   },
+  skillCapabilityId = "",
 ) {
   if (files && files.length > 0) {
     const form = new FormData();
@@ -612,6 +613,7 @@ export async function sendMessage(
     if (clientId) form.append("client_id", clientId);
     if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
     if (computerControlRequest) form.append("computer_control_request_json", JSON.stringify(computerControlRequest));
+    if (skillCapabilityId) form.append("skill_capability_id", skillCapabilityId);
     for (const file of files) form.append("files", file, file.name);
     return apiForm(`/api/v1/groups/${encodeURIComponent(groupId)}/send_upload`, form);
   }
@@ -628,6 +630,7 @@ export async function sendMessage(
       client_id: clientId,
       refs: refs || [],
       computer_control_request: computerControlRequest || null,
+      ...(skillCapabilityId ? { skill_capability_id: skillCapabilityId } : {}),
     }),
   });
 }
@@ -646,6 +649,7 @@ export type TrackedSendMessagePayload = {
   reply_required?: boolean;
   idempotency_key?: string;
   refs?: MessageRef[];
+  skill_capability_id?: string;
 };
 
 export async function trackedSendMessage(groupId: string, payload: TrackedSendMessagePayload) {
@@ -666,6 +670,7 @@ export async function trackedSendMessage(groupId: string, payload: TrackedSendMe
       reply_required: payload.reply_required ?? true,
       idempotency_key: payload.idempotency_key || "",
       refs: payload.refs || [],
+      ...(payload.skill_capability_id ? { skill_capability_id: payload.skill_capability_id } : {}),
     }),
   });
 }
@@ -681,6 +686,7 @@ export async function replyMessage(
   collaborationRequired = false,
   clientId = "",
   refs?: MessageRef[],
+  skillCapabilityId = "",
 ) {
   if (files && files.length > 0) {
     const form = new FormData();
@@ -693,6 +699,7 @@ export async function replyMessage(
     form.append("collaboration_required", collaborationRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
     if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
+    if (skillCapabilityId) form.append("skill_capability_id", skillCapabilityId);
     for (const file of files) form.append("files", file, file.name);
     return apiForm(`/api/v1/groups/${encodeURIComponent(groupId)}/reply_upload`, form);
   }
@@ -708,6 +715,7 @@ export async function replyMessage(
       collaboration_required: collaborationRequired,
       client_id: clientId,
       refs: refs || [],
+      ...(skillCapabilityId ? { skill_capability_id: skillCapabilityId } : {}),
     }),
   });
 }
