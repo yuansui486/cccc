@@ -958,8 +958,19 @@ export function GroupSidebar({
         <section className="space-y-1">
           <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
             <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-              工作区
+              {t("teamMembersSection")}
             </div>
+            {!readOnly && onAddAgent && (
+              <button
+                type="button"
+                onClick={onAddAgent}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] dark:hover:bg-white/[0.08]"
+                aria-label={t("addAgent")}
+                title={t("addAgent")}
+              >
+                <PlusIcon size={18} />
+              </button>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -982,29 +993,6 @@ export function GroupSidebar({
                 </span>
               )}
             </button>
-
-          </div>
-        </section>
-
-        <section className="space-y-1">
-          <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
-            <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-              {t("memberManagement")}
-            </div>
-            {!readOnly && onAddAgent && (
-              <button
-                type="button"
-                onClick={onAddAgent}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] dark:hover:bg-white/[0.08]"
-                aria-label={t("addAgent")}
-                title={t("addAgent")}
-              >
-                <PlusIcon size={18} />
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-1">
 
             {actors.map((actor) => {
               const indicator = getActorIndicator(actor);
