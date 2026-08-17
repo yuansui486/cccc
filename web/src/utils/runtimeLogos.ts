@@ -47,6 +47,7 @@ export const RUNTIME_LOGO_FILE_BY_RUNTIME: Partial<Record<RuntimeLogoRuntime, st
   kimi: "logos/kimi.png",
   neovate: "logos/neovate.png",
   opencode: "logos/opencode.svg",
+  openclaw: "logos/openclaw.svg",
   web_model: "logo.png",
 };
 

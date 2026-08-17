@@ -125,6 +125,10 @@ const SECRETS_PLACEHOLDER: Record<string, { set: string; unset: string }> = {
     set: 'ONECOLLEAGUE_API_KEY="..."',
     unset: "ONECOLLEAGUE_API_KEY",
   },
+  openclaw: {
+    set: 'ONECOLLEAGUE_API_KEY="..."',
+    unset: "ONECOLLEAGUE_API_KEY",
+  },
   gemini: {
     set: 'GOOGLE_API_KEY="..."',
     unset: "GOOGLE_API_KEY",
@@ -428,6 +432,7 @@ export function EditActorModal({
   }, [isOpen, groupId, actorId]);
 
   const rtInfo = runtimes.find((r) => r.name === runtime);
+  const modelCatalog = opencodeModels;
   const available = rtInfo?.available ?? false;
   const defaultCommand = rtInfo?.recommended_command || "";
   const derivedRuntimePresetId = runtimePresetIdFor(runtime, command);
@@ -471,13 +476,13 @@ export function EditActorModal({
   useEffect(() => {
     if (!isOpen) return;
     if (editMode !== "custom" || effectiveLinked || commandHasModelFlag(command)) return;
-    const defaultPreset = defaultRuntimePresetFor(runtime, opencodeModels);
+    const defaultPreset = defaultRuntimePresetFor(runtime, modelCatalog);
     if (!defaultPreset) return;
     const normalizedCommand = commandForRuntimePreset(defaultPreset, rtInfo);
     if (!normalizedCommand.trim() || normalizedCommand.trim() === command.trim()) return;
     setSelectedRuntimePresetId(defaultPreset.id);
     onChangeCommand(normalizedCommand);
-  }, [isOpen, editMode, effectiveLinked, runtime, command, rtInfo, opencodeModels, onChangeCommand]);
+  }, [isOpen, editMode, effectiveLinked, runtime, command, rtInfo, modelCatalog, onChangeCommand]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -500,7 +505,7 @@ export function EditActorModal({
     });
     if (
       selectedRuntimePreset.envPrivate ||
-      (["codex", "opencode", "hermes"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
+      (["codex", "opencode", "openclaw", "hermes"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
     ) {
       setSecretsPrimed(true);
     }
@@ -526,7 +531,7 @@ export function EditActorModal({
       const next = mergeRuntimeAuthSecret(current, runtime, currentDoneHubCodexApiKey);
       return next === current ? current : next;
     });
-    if (["codex", "opencode", "hermes"].includes(runtime) && currentDoneHubCodexApiKey) {
+    if (["codex", "opencode", "openclaw", "hermes"].includes(runtime) && currentDoneHubCodexApiKey) {
       setSecretsPrimed(true);
     }
   }, [isOpen, editMode, effectiveLinked, runtime, doneHubCodexApiKey]);
@@ -587,14 +592,14 @@ export function EditActorModal({
     const apiKey = getCurrentDoneHubCodexApiKey();
     setSecretsSetText((current) => mergePresetSecrets(current, preset, apiKey));
     setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
-    if (preset.envPrivate || (["codex", "opencode", "hermes"].includes(preset.runtime) && apiKey)) {
+    if (preset.envPrivate || (["codex", "opencode", "openclaw", "hermes"].includes(preset.runtime) && apiKey)) {
       setSecretsPrimed(true);
     }
   };
 
   const changeRuntime = (next: SupportedRuntime) => {
     const nextInfo = runtimes.find((item) => item.name === next);
-    const preset = defaultRuntimePresetFor(next, opencodeModels);
+    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next, opencodeModels);
     const nextCommand = preset
       ? commandForRuntimePreset(preset, nextInfo)
       : String(nextInfo?.recommended_command || "").trim();
@@ -609,13 +614,13 @@ export function EditActorModal({
       return preset ? mergePresetSecrets(cleared, preset, apiKey) : mergeRuntimeAuthSecret(cleared, next, apiKey);
     });
     setSecretsUnsetText((current) => preset ? mergePresetUnsetKeys(current, preset) : mergeAllPresetUnsetKeys(current));
-    if (preset?.envPrivate || (["codex", "opencode", "hermes"].includes(next) && apiKey)) setSecretsPrimed(true);
+    if (preset?.envPrivate || (["codex", "opencode", "openclaw", "hermes"].includes(next) && apiKey)) setSecretsPrimed(true);
     setOpencodeDefaultVariant("high");
   };
 
   const changeModel = (model: string) => {
     const normalized = model.trim();
-    const preset = runtimePresetForModel(runtime, normalized, opencodeModels);
+    const preset = runtimePresetForModel(runtime, normalized, modelCatalog);
     const baseCommand = command.trim() || defaultCommand.trim();
     const nextCommand = withRuntimeModel(runtime, baseCommand, normalized);
     onChangeCommand(nextCommand);
@@ -939,7 +944,8 @@ export function EditActorModal({
                       onRuntimeChange={changeRuntime}
                       onModelChange={changeModel}
                       priceMap={runtimePriceMap}
-                      opencodeModels={opencodeModels}
+                      modelCatalog={modelCatalog}
+                      runtimeDescriptions={{ openclaw: t("openClawRuntimeDescription") }}
                       disabled={busy === "actor-update"}
                       labels={{
                         runtime: t("runtime"),
@@ -954,6 +960,9 @@ export function EditActorModal({
                         notInstalled: t("notInstalled"),
                         modelRequired: t("modelRequired"),
                         modelInvalid: t("modelInvalid"),
+                        loadingModels: t("loadingOpenClawModels"),
+                        modelCatalogError: t("openClawModelsLoadFailed"),
+                        retryModelCatalog: t("retryOpenClawModels"),
                       }}
                     />
 

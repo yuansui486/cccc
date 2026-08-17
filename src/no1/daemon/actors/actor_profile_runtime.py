@@ -84,7 +84,7 @@ def _resolve_profile_for_start(
 
 def _profile_patch(profile: Dict[str, Any]) -> Dict[str, Any]:
     runtime = str(profile.get("runtime") or "codex")
-    runner = "headless" if runtime == "web_model" else str(profile.get("runner") or "pty")
+    runner = "headless" if runtime == "web_model" else ("pty" if runtime == "openclaw" else str(profile.get("runner") or "pty"))
     return {
         "runtime": runtime,
         "runner": runner,
@@ -253,6 +253,11 @@ def resolve_linked_actor_before_start(
         if not isinstance(profile, dict):
             raise ActorProfileNotFoundError(f"profile not found: {profile_id}")
 
+        previous_runtime = str(item.get("runtime") or "codex").strip().lower()
+        next_runtime = str(profile.get("runtime") or "codex").strip().lower()
+        cleanup_previous_openclaw = previous_runtime == "openclaw" and next_runtime != "openclaw"
+        previous_env = dict(item.get("env") or {}) if isinstance(item.get("env"), dict) else {}
+
         explicit_ref = actor_profile_ref(item)
         item = apply_profile_link_to_actor(
             group,
@@ -263,6 +268,10 @@ def resolve_linked_actor_before_start(
             load_actor_profile_secrets=load_actor_profile_secrets,
             update_actor_private_env=update_actor_private_env,
         )
+        if cleanup_previous_openclaw:
+            from ..openclaw_runtime import remove_openclaw_actor_runtime
+
+            remove_openclaw_actor_runtime(group.group_id, actor_id, env=previous_env)
 
     # Apply capability autoload at startup:
     # 0) role-based defaults (foreman gets management packs automatically)

@@ -42,6 +42,7 @@ def handle_group_start(
     args: Dict[str, Any],
     *,
     effective_runner_kind: Callable[[str], str],
+    start_actor_process: Optional[Callable[..., Dict[str, Any]]] = None,
     find_scope_url: Callable[[Any, str], str],
     ensure_mcp_installed: Callable[..., Any],
     merge_actor_env_with_private: Callable[[str, str, Dict[str, Any]], Dict[str, Any]],
@@ -202,6 +203,19 @@ def handle_group_start(
             runtime = str(launch_spec["runtime"])
             runner_effective = str(launch_spec["effective_runner"])
             update_actor(group, aid, {"enabled": True})
+            if runtime == "openclaw" and start_actor_process is not None:
+                from ..openclaw_startup import queue_openclaw_actor_start
+
+                queue_openclaw_actor_start(
+                    group.group_id,
+                    aid,
+                    by=by,
+                    caller_id=str(args.get("caller_id") or "").strip(),
+                    is_admin=coerce_bool(args.get("is_admin"), default=False),
+                    start_actor_process=start_actor_process,
+                )
+                started.append(aid)
+                continue
             effective_env = dict(launch_spec["merged_env"])
             launch_env = prepare_runtime_mcp_env(
                 runtime,
@@ -220,6 +234,7 @@ def handle_group_start(
                             runtime,
                             cwd,
                             env=dict(launch_env),
+                            command=list(launch_spec["effective_command"]),
                         )
                     )
                 except Exception as e:
@@ -353,16 +368,25 @@ def handle_group_stop(
             if not aid:
                 continue
             try:
+                if str(actor.get("runtime") or "").strip().lower() == "openclaw":
+                    from ..openclaw_startup import cancel_openclaw_actor_start
+
+                    cancel_openclaw_actor_start(group.group_id, aid)
                 update_actor(group, aid, {"enabled": False})
                 stopped.append(aid)
             except Exception:
                 pass
 
         try:
-            pty_runner.SUPERVISOR.stop_group(group_id=group.group_id)
-            headless_runner.SUPERVISOR.stop_group(group_id=group.group_id)
-            codex_app_supervisor.stop_group(group_id=group.group_id)
-            claude_app_supervisor.stop_group(group_id=group.group_id)
+            try:
+                pty_runner.SUPERVISOR.stop_group(group_id=group.group_id)
+                headless_runner.SUPERVISOR.stop_group(group_id=group.group_id)
+                codex_app_supervisor.stop_group(group_id=group.group_id)
+                claude_app_supervisor.stop_group(group_id=group.group_id)
+            finally:
+                from ..openclaw_runtime import stop_openclaw_group_gateways
+
+                stop_openclaw_group_gateways(group.group_id)
         finally:
             invalidate_group_turn_grants(group, actor_ids, reason="group_stop")
 
@@ -401,6 +425,7 @@ def try_handle_group_lifecycle_op(
     args: Dict[str, Any],
     *,
     effective_runner_kind: Callable[[str], str],
+    start_actor_process: Callable[..., Dict[str, Any]],
     find_scope_url: Callable[[Any, str], str],
     ensure_mcp_installed: Callable[..., Any],
     merge_actor_env_with_private: Callable[[str, str, Dict[str, Any]], Dict[str, Any]],
@@ -426,6 +451,7 @@ def try_handle_group_lifecycle_op(
         return handle_group_start(
             args,
             effective_runner_kind=effective_runner_kind,
+            start_actor_process=start_actor_process,
             find_scope_url=find_scope_url,
             ensure_mcp_installed=ensure_mcp_installed,
             merge_actor_env_with_private=merge_actor_env_with_private,

@@ -12,6 +12,8 @@ const GLOBAL_REFRESH_EVENT_KINDS = new Set([
   "group.state_changed",
   "actor.remove",
   "actor.start",
+  "actor.starting",
+  "actor.start_failed",
   "actor.stop",
   "actor.restart",
 ]);
@@ -19,6 +21,8 @@ const GLOBAL_REFRESH_EVENT_KINDS = new Set([
 const ACTOR_REFRESH_EVENT_KINDS = new Set([
   "actor.remove",
   "actor.start",
+  "actor.starting",
+  "actor.start_failed",
   "actor.stop",
   "actor.restart",
   "group.state_changed",

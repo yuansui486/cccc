@@ -540,8 +540,14 @@ def cleanup_after_stop(
     pid_path: Path,
     release_lockfile: Callable[[Any], Any],
     lock_handle: Any,
+    openclaw_stop_all: Callable[[], Any] = lambda: None,
+    openclaw_startup_stop: Callable[[], Any] = lambda: None,
 ) -> None:
     stop_event.set()
+    try:
+        openclaw_startup_stop()
+    except Exception:
+        pass
     try:
         runtime_session_shutdown_start()
     except Exception:
@@ -564,6 +570,10 @@ def cleanup_after_stop(
         pass
     try:
         headless_stop_all()
+    except Exception:
+        pass
+    try:
+        openclaw_stop_all()
     except Exception:
         pass
     try:

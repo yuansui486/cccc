@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import posixpath
 import re
+import secrets
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from urllib.request import Request, urlopen
+
+import yaml
 
 from ....kernel.actors import find_actor
 from ....paths import ensure_home
@@ -548,4 +552,155 @@ def prepare_codex_skill_package_overlay_for_actor(group: Any, actor_id: str, env
         "CODEX_HOME": str(overlay),
         "CCCC_CODEX_SKILLS_OVERLAY": "1",
         "CCCC_CODEX_SKILLS_OVERLAY_COUNT": str(len(materialized)),
+    }
+
+
+def _openclaw_skill_name(skill_root: Path, fallback: str) -> str:
+    skill_file = skill_root / "SKILL.md"
+    try:
+        raw = skill_file.read_text(encoding="utf-8", errors="replace")
+        if raw.startswith("---"):
+            parts = raw.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter = yaml.safe_load(parts[1])
+                if isinstance(frontmatter, dict):
+                    name = str(frontmatter.get("name") or "").strip()
+                    if name:
+                        return name
+    except Exception:
+        pass
+    return str(fallback or "").strip()
+
+
+def _openclaw_actor_skill_root(group_id: str, actor_id: str) -> Tuple[Path, Path]:
+    digest = hashlib.sha256(f"{str(group_id).strip()}\0{str(actor_id).strip()}".encode("utf-8")).hexdigest()[:16]
+    managed_root = ensure_home() / "runtime" / "openclaw" / "skills" / "actors"
+    return managed_root, managed_root / digest
+
+
+def _remove_openclaw_skill_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _publish_openclaw_actor_skill_root(staging_root: Path, actor_root: Path) -> None:
+    backup_root = actor_root.with_name(f".{actor_root.name}.{secrets.token_hex(6)}.backup")
+    moved_existing = False
+    published = False
+    try:
+        if actor_root.exists() or actor_root.is_symlink():
+            os.replace(actor_root, backup_root)
+            moved_existing = True
+        os.replace(staging_root, actor_root)
+        published = True
+    except Exception:
+        if moved_existing and not actor_root.exists() and backup_root.exists():
+            os.replace(backup_root, actor_root)
+        raise
+    finally:
+        if staging_root.exists() or staging_root.is_symlink():
+            _remove_openclaw_skill_path(staging_root)
+        if published and (backup_root.exists() or backup_root.is_symlink()):
+            _remove_openclaw_skill_path(backup_root)
+
+
+def _rewrite_openclaw_skill_name(skill_path: Path, capability_id: str) -> str:
+    stable_name = f"onecolleague-{hashlib.sha256(str(capability_id).encode('utf-8')).hexdigest()[:16]}"
+    source = skill_path.read_text(encoding="utf-8")
+    if source.startswith("---"):
+        parts = source.split("---", 2)
+        if len(parts) == 3:
+            frontmatter = yaml.safe_load(parts[1])
+            frontmatter = dict(frontmatter) if isinstance(frontmatter, dict) else {}
+            frontmatter["name"] = stable_name
+            rendered = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
+            skill_path.write_text(f"---\n{rendered}\n---{parts[2]}", encoding="utf-8")
+            return stable_name
+    skill_path.write_text(f"---\nname: {stable_name}\n---\n\n{source}", encoding="utf-8")
+    return stable_name
+
+
+def prepare_openclaw_skill_package_overlay_for_actor(group: Any, actor_id: str) -> Dict[str, Any]:
+    """Materialize admitted AgentSkills into an actor-specific OpenClaw skill root."""
+    group_id = str(getattr(group, "group_id", "") or "").strip()
+    managed_root, actor_root = _openclaw_actor_skill_root(group_id, actor_id)
+    root = actor_root / "skills"
+
+    actor = find_actor(group, actor_id)
+    if not isinstance(actor, dict):
+        if actor_root.exists():
+            shutil.rmtree(actor_root)
+        return {
+            "root": "",
+            "managed_root": str(managed_root),
+            "selected_names": [],
+            "managed_names": [],
+            "fingerprint": "",
+        }
+
+    admission = resolve_current_admission(
+        group_id=group_id,
+        actor_id=actor_id,
+    )
+    autoload = _effective_package_autoload_for_actor(group, actor, admission=admission)
+    records = admission.get("admitted_records") if isinstance(admission.get("admitted_records"), dict) else {}
+    package_state = read_json(_skill_package_install_state_path())
+    packages = package_state.get("packages") if isinstance(package_state.get("packages"), dict) else {}
+    managed_root.mkdir(parents=True, exist_ok=True)
+    staging_root = managed_root / f".{actor_root.name}.{secrets.token_hex(6)}.tmp"
+    staging_skills = staging_root / "skills"
+    selected_names: List[str] = []
+    managed: Dict[str, Dict[str, str]] = {}
+    try:
+        for cap_id in autoload:
+            rec = records.get(cap_id) if isinstance(records.get(cap_id), dict) else None
+            if not (
+                isinstance(rec, dict)
+                and is_codex_skill_package_record(rec)
+                and str(rec.get("qualification_status") or "").strip().lower() == "qualified"
+            ):
+                continue
+            row = packages.get(cap_id) if isinstance(packages.get(cap_id), dict) else {}
+            extracted_path = Path(str(row.get("extracted_path") or ""))
+            if not extracted_path.is_dir() or not (extracted_path / "SKILL.md").is_file():
+                raise ValueError(f"skill package is not installed: {cap_id}")
+            skill_slug = _safe_token(
+                row.get("skill_slug")
+                or (rec.get("install_spec") or {}).get("skill_slug")
+                or rec.get("name")
+                or cap_id
+            )
+            target = staging_skills / skill_slug
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(extracted_path, target)
+            skill_name = _rewrite_openclaw_skill_name(target / "SKILL.md", cap_id)
+            selected_names.append(skill_name)
+            managed[cap_id] = {
+                "capability_id": cap_id,
+                "name": skill_name,
+                "skill_slug": skill_slug,
+                "path": str(root / skill_slug),
+                "sha256": str(row.get("sha256") or row.get("package_sha256") or "").strip(),
+            }
+        staging_root.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(staging_root / "managed-skills.json", {"v": 1, "skills": managed}, indent=2)
+        _publish_openclaw_actor_skill_root(staging_root, actor_root)
+    except Exception:
+        if staging_root.exists() or staging_root.is_symlink():
+            _remove_openclaw_skill_path(staging_root)
+        raise
+    fingerprint = hashlib.sha256(
+        json.dumps(managed, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    managed_names = sorted(
+        {str(item.get("name") or "").strip() for item in managed.values() if str(item.get("name") or "").strip()}
+    )
+    return {
+        "root": str(root) if managed else "",
+        "managed_root": str(managed_root),
+        "selected_names": sorted(set(selected_names)),
+        "managed_names": managed_names,
+        "fingerprint": fingerprint,
     }

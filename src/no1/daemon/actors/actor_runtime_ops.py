@@ -20,6 +20,7 @@ from ..terminal_theme import TERMINAL_COLOR_SCHEME_ENV, with_terminal_color_sche
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...runners.platform_support import pty_support_error_message
+from ...util.conv import coerce_bool
 
 
 def _prepare_codex_skill_overlay(group: Any, actor_id: str, env: Dict[str, Any]) -> Dict[str, str]:
@@ -275,7 +276,19 @@ def start_actor_process(
     supported_runtimes: tuple[str, ...],
     resolve_linked_actor_before_start: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
     load_actor_private_env: Optional[Callable[[str, str], Dict[str, str]]] = None,
+    start_guard: Optional[Callable[[], bool]] = None,
+    start_phase: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
+    def phase(value: str) -> None:
+        if start_phase is not None:
+            start_phase(value)
+
+    def guard() -> bool:
+        return start_guard is None or bool(start_guard())
+
+    if not guard():
+        return {"success": False, "cancelled": True, "error": "OpenClaw startup was cancelled"}
+    phase("resolving")
     try:
         launch_spec = resolve_actor_launch_spec(
             group,
@@ -305,6 +318,9 @@ def start_actor_process(
     runtime = launch_spec["runtime"]
     runner = launch_spec["runner"]
     terminal_color_scheme = str(env.get(TERMINAL_COLOR_SCHEME_ENV) or terminal_color_scheme)
+
+    if not guard():
+        return {"success": False, "cancelled": True, "error": "OpenClaw startup was cancelled"}
 
     if runtime == "codex":
         try:
@@ -336,6 +352,7 @@ def start_actor_process(
         return {"success": False, "error": runtime_error}
 
     if effective_runner != "headless":
+        phase("preflight")
         if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):
             error_message = pty_support_error_message() or "PTY runner is not supported in this environment."
             return {"success": False, "error": error_message}
@@ -345,6 +362,7 @@ def start_actor_process(
                     runtime,
                     cwd,
                     env=dict(launch_env),
+                    command=list(effective_cmd),
                 )
             )
         except Exception as e:
@@ -413,6 +431,7 @@ def start_actor_process(
             except Exception:
                 pass
         else:
+            phase("starting_tui")
             session = start_pty_actor_with_runtime_resume(
                 group_id=group.group_id,
                 actor_id=actor_id,
@@ -423,13 +442,35 @@ def start_actor_process(
                 model=model_from_runtime_command(effective_cmd, effective_env),
                 max_backlog_bytes=pty_backlog_bytes(),
                 runtime_start_preflight_error=runtime_start_preflight_error,
+                openclaw_start_guard=start_guard,
+                openclaw_phase_callback=start_phase,
             )
             try:
                 write_pty_state(group.group_id, actor_id, session.pid)
             except Exception:
                 pass
     except Exception as e:
+        if runtime == "openclaw":
+            try:
+                from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+                stop_openclaw_actor_gateway(group.group_id, actor_id)
+            except Exception:
+                pass
         return {"success": False, "error": f"failed to start session: {e}"}
+
+    if not guard():
+        try:
+            pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+        finally:
+            if runtime == "openclaw":
+                try:
+                    from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+                    stop_openclaw_actor_gateway(group.group_id, actor_id)
+                except Exception:
+                    pass
+        return {"success": False, "cancelled": True, "error": "OpenClaw startup was cancelled"}
 
     clear_preamble_sent(group, actor_id)
     throttle_reset_actor(group.group_id, actor_id)
@@ -439,10 +480,30 @@ def start_actor_process(
         pass
 
     try:
-        if str(group.doc.get("state") or "").strip() == "stopped":
-            group.doc["state"] = "active"
-        group.doc["running"] = True
-        group.save()
+        commit_group = group
+        if start_guard is not None:
+            from ...kernel.group import load_group
+
+            fresh_group = load_group(group.group_id)
+            fresh_actor = find_actor(fresh_group, actor_id) if fresh_group is not None else None
+            if (
+                fresh_group is None
+                or not isinstance(fresh_actor, dict)
+                or not guard()
+                or not coerce_bool(fresh_actor.get("enabled"), default=True)
+                or str(fresh_actor.get("runtime") or "").strip().lower() != runtime.lower()
+            ):
+                pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                if runtime == "openclaw":
+                    from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+                    stop_openclaw_actor_gateway(group.group_id, actor_id)
+                return {"success": False, "cancelled": True, "error": "OpenClaw startup was cancelled"}
+            commit_group = fresh_group
+        if str(commit_group.doc.get("state") or "").strip() == "stopped":
+            commit_group.doc["state"] = "active"
+        commit_group.doc["running"] = True
+        commit_group.save()
     except Exception:
         pass
 

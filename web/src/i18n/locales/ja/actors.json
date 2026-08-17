@@ -1,4 +1,9 @@
 {
+  "initializingRuntime": "初期化中",
+  "connectingTerminal": "ターミナルに接続中...",
+  "waitingForTerminalOutput": "最初のターミナル出力を待っています...",
+  "runtimeStartFailedTitle": "起動に失敗しました",
+  "retryStart": "再起動",
   "agentNotFound": "エージェントが見つかりません",
   "loadingAgent": "エージェントを読み込み中…",
   "foreman": "フォアマン",
@@ -130,6 +135,10 @@
   "applyModel": "適用",
   "modelRequired": "モデル ID を入力してください。",
   "modelInvalid": "モデル ID に空白、制御文字、または安全でないコマンド文字は使用できません。",
+  "openClawRuntimeDescription": "各 actor を分離された OpenClaw Gateway で実行し、モデル、MCP、Skill を統合します。",
+  "loadingOpenClawModels": "OpenClaw モデルを読み込み中…",
+  "openClawModelsLoadFailed": "OpenClaw モデルを読み込めませんでした。モデル ID は手動で入力できます。",
+  "retryOpenClawModels": "OpenClaw モデルを再読み込み",
   "runnerMode": "実行モード",
   "pty": "PTY ターミナル",
   "runnerModeHint": "PTY はターミナル操作向け、Headless は構造化イベントフロー向けです。",
@@ -289,5 +298,6 @@
   "runtimeGroupCodex": "Codex",
   "runtimeGroupGemini": "Gemini",
   "runtimeGroupKimi": "Kimi",
-  "runtimeGroupOpenCode": "OpenCode"
+  "runtimeGroupOpenCode": "OpenCode",
+  "runtimeGroupOpenClaw": "OpenClaw"
 }

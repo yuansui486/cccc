@@ -55,6 +55,8 @@
   "pauseState": "Pause",
   "stopState": "Stop",
   "actorStatus": {
+    "initializing": "Initializing",
+    "failed": "Start failed",
     "working": "Working",
     "run": "Run",
     "stop": "Stop"

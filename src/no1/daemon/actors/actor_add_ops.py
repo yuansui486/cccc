@@ -262,6 +262,7 @@ def handle_actor_add(
             submit=submit or "enter",
             capability_autoload=list(capability_autoload_raw) if isinstance(capability_autoload_raw, list) else None,
             capability_hidden=list(capability_hidden_raw) if isinstance(capability_hidden_raw, list) else None,
+            enabled=coerce_bool(args.get("enabled"), default=True),
             runner=runner,  # type: ignore
             runtime=runtime,  # type: ignore
             runtime_options=runtime_options_raw if isinstance(runtime_options_raw, dict) else None,
@@ -345,6 +346,39 @@ def handle_actor_add(
     start_runner = str(actor.get("runner") or runner).strip() or runner
     start_command = actor.get("command") if isinstance(actor.get("command"), list) else command
     start_env = actor.get("env") if isinstance(actor.get("env"), dict) else env
+    actor_enabled = coerce_bool(
+        actor.get("enabled"),
+        default=coerce_bool(args.get("enabled"), default=True),
+    )
+    if not actor_enabled:
+        return DaemonResponse(
+            ok=True,
+            result={"actor": actor, "event": event, "running": False},
+        )
+    if start_runtime == "openclaw":
+        try:
+            from ..openclaw_startup import queue_openclaw_actor_start
+
+            startup = queue_openclaw_actor_start(
+                group.group_id,
+                start_actor_id,
+                by=by,
+                caller_id=str(args.get("caller_id") or "").strip(),
+                is_admin=coerce_bool(args.get("is_admin"), default=False),
+                start_actor_process=start_actor_process,
+            )
+        except Exception as exc:
+            startup = {"state": "failed", "phase": "failed", "error": str(exc)}
+        return DaemonResponse(
+            ok=True,
+            result={
+                "actor": actor,
+                "event": event,
+                "running": False,
+                "start_queued": startup.get("state") != "failed",
+                "runtime_startup": startup,
+            },
+        )
     start_result = start_actor_process(
         group,
         start_actor_id,

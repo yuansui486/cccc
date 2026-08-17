@@ -55,6 +55,8 @@ from .mcp_install import (
     is_mcp_installed as runtime_is_mcp_installed,
     ensure_mcp_installed as runtime_ensure_mcp_installed,
 )
+from .openclaw_runtime import stop_all_openclaw_gateways
+from .openclaw_startup import shutdown_openclaw_startup_workers, start_openclaw_startup_workers
 from .client_ops import DaemonClientError, send_daemon_request
 from .im.im_bridge_ops import (
     stop_im_bridges_for_group as im_stop_group,
@@ -323,11 +325,24 @@ SUPPORTED_RUNTIMES = (
     "kimi",
     "neovate",
     "opencode",
+    "openclaw",
     "web_model",
     "custom",
 )
 
-AUTO_MCP_RUNTIMES = ("claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode")
+AUTO_MCP_RUNTIMES = (
+    "claude",
+    "codex",
+    "droid",
+    "amp",
+    "auggie",
+    "neovate",
+    "gemini",
+    "hermes",
+    "kimi",
+    "opencode",
+    "openclaw",
+)
 
 
 def _normalize_runtime_command(runtime: str, command: list[str], *, env: Dict[str, Any] | None = None) -> list[str]:
@@ -389,8 +404,20 @@ def _is_mcp_installed(runtime: str) -> bool:
     return runtime_is_mcp_installed(runtime)
 
 
-def _ensure_mcp_installed(runtime: str, cwd: Path, *, env: Dict[str, str] | None = None) -> bool:
-    return runtime_ensure_mcp_installed(runtime, cwd, auto_mcp_runtimes=AUTO_MCP_RUNTIMES, env=env)
+def _ensure_mcp_installed(
+    runtime: str,
+    cwd: Path,
+    *,
+    env: Dict[str, str] | None = None,
+    command: list[str] | None = None,
+) -> bool:
+    return runtime_ensure_mcp_installed(
+        runtime,
+        cwd,
+        auto_mcp_runtimes=AUTO_MCP_RUNTIMES,
+        env=env,
+        command=command,
+    )
 
 
 def _prepare_pty_env(env: Dict[str, Any]) -> Dict[str, str]:
@@ -781,6 +808,7 @@ def _maybe_autostart_running_groups() -> None:
     autostart_running_groups(
         ensure_home(),
         effective_runner_kind=_effective_runner_kind,
+        start_actor_process=_start_actor_process,
         find_scope_url=_find_scope_url,
         supported_runtimes=SUPPORTED_RUNTIMES,
         ensure_mcp_installed=_ensure_mcp_installed,
@@ -871,6 +899,8 @@ def _start_actor_process(
     by: str,
     caller_id: str = "",
     is_admin: bool = False,
+    start_guard: Optional[Callable[[], bool]] = None,
+    start_phase: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     return runtime_start_actor_process(
         group,
@@ -905,6 +935,8 @@ def _start_actor_process(
             caller_id=caller_id,
             is_admin=is_admin,
         ),
+        start_guard=start_guard,
+        start_phase=start_phase,
     )
 
 
@@ -1103,6 +1135,13 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
     except Exception:
         pass
 
+    # A crashed daemon cannot run the normal Gateway shutdown callback. Only
+    # ownership-verified OpenClaw processes under this daemon home are stopped.
+    try:
+        stop_all_openclaw_gateways(env={"CCCC_HOME": str(p.home)})
+    except Exception:
+        pass
+
     computer_control_service = _start_daemon_computer_control_after_lock(p.home, lock_handle)
 
     try:
@@ -1265,6 +1304,8 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         # only enqueue receipts; this worker owns network attempts and retries.
         remote_outbox_worker = RemoteOutboxWorker(home=p.home)
         remote_outbox_worker.start()
+
+        start_openclaw_startup_workers()
 
         # Bootstrap background work only after the daemon socket is ready, but
         # don't block the accept loop (clients should see the daemon as responsive).
@@ -1437,6 +1478,8 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         pid_path=p.pid_path,
         release_lockfile=release_lockfile,
         lock_handle=lock_handle,
+        openclaw_stop_all=lambda: stop_all_openclaw_gateways(env={"CCCC_HOME": str(p.home)}),
+        openclaw_startup_stop=shutdown_openclaw_startup_workers,
     )
 
     return 0

@@ -47,6 +47,21 @@ describe("useGlobalEvents open refresh policy", () => {
     ).toBe(true);
   });
 
+  it("refreshes selected actors while OpenClaw startup progresses or fails", () => {
+    expect(
+      shouldRefreshActorsAfterGlobalEvent(
+        { kind: "actor.starting", data: { group_id: "g-demo", actor_id: "openclaw-1" } },
+        "g-demo",
+      ),
+    ).toBe(true);
+    expect(
+      shouldRefreshActorsAfterGlobalEvent(
+        { kind: "actor.start_failed", data: { group_id: "g-demo", actor_id: "openclaw-1" } },
+        "g-demo",
+      ),
+    ).toBe(true);
+  });
+
   it("ignores lifecycle events for other groups", () => {
     expect(
       shouldRefreshActorsAfterGlobalEvent(

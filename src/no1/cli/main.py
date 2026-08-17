@@ -139,11 +139,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_actor_add.add_argument("--title", default="", help="Display title (optional)")
     p_actor_add.add_argument(
         "--runtime",
-        choices=["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode", "custom"],
+        choices=["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode", "openclaw", "custom"],
         default="codex",
         help="Agent runtime (auto-sets command if not provided)",
     )
     p_actor_add.add_argument("--command", default="", help="Command to run (shell-like string; optional, auto-set by --runtime)")
+    p_actor_add.add_argument("--model", default=None, help="Selected runtime model ID (optional)")
     p_actor_add.add_argument("--env", action="append", default=[], help="Environment var (KEY=VAL), repeatable")
     p_actor_add.add_argument("--scope", default="", help="Default scope path for this actor (optional; must be attached)")
     p_actor_add.add_argument("--submit", choices=["enter", "newline", "none"], default="enter", help="Submit key (default: enter)")
@@ -178,8 +179,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_actor_update = actor_sub.add_parser("update", help="Update an actor (title/command/env/scope/enabled/runtime)")
     p_actor_update.add_argument("actor_id", help="Actor id")
     p_actor_update.add_argument("--title", default=None, help="New title")
-    p_actor_update.add_argument("--runtime", choices=["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode", "custom"], default=None, help="New runtime")
+    p_actor_update.add_argument("--runtime", choices=["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode", "openclaw", "custom"], default=None, help="New runtime")
     p_actor_update.add_argument("--command", default=None, help="Replace command (shell-like string); use empty to clear")
+    p_actor_update.add_argument("--model", default=None, help="Replace selected runtime model ID; use empty to clear")
     p_actor_update.add_argument("--env", action="append", default=[], help="Replace env with these KEY=VAL entries (repeatable)")
     p_actor_update.add_argument("--scope", default="", help="Set default scope path (must be attached)")
     p_actor_update.add_argument("--submit", choices=["enter", "newline", "none"], default=None, help="Submit key")
@@ -382,7 +384,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_setup = sub.add_parser("setup", help="Setup MCP for agent runtimes (configure MCP, print guidance)")
     p_setup.add_argument(
         "--runtime",
-        choices=["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode", "custom"],
+        choices=["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode", "openclaw", "custom"],
         default="",
         help="Target runtime (default: all supported runtimes)",
     )
@@ -440,6 +442,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_runtime_hermes_mcp_test.add_argument("--group-id", default="g_probe", help="ONECOLLEAGUE_GROUP_ID for test subprocess")
     p_runtime_hermes_mcp_test.add_argument("--actor-id", default="hermes-probe", help="ONECOLLEAGUE_ACTOR_ID for test subprocess")
     p_runtime_hermes_mcp_test.set_defaults(func=cmd_runtime_hermes)
+
+    p_runtime_openclaw = runtime_sub.add_parser("openclaw", help="Inspect the local OpenClaw runtime")
+    openclaw_sub = p_runtime_openclaw.add_subparsers(dest="openclaw_action", required=True)
+    p_runtime_openclaw_models = openclaw_sub.add_parser("models", help="List configured OpenClaw models")
+    p_runtime_openclaw_models.add_argument("--refresh", action="store_true", help="Bypass the in-process model catalog cache")
+    openclaw_profile = p_runtime_openclaw_models.add_mutually_exclusive_group()
+    openclaw_profile.add_argument("--profile", default="", help="OpenClaw profile name")
+    openclaw_profile.add_argument("--dev", action="store_true", help="Use the isolated OpenClaw dev profile")
+    p_runtime_openclaw_models.set_defaults(func=cmd_runtime_openclaw)
 
     p_space = sub.add_parser("space", help="Manage Group Space provider-backed shared memory")
     space_sub = p_space.add_subparsers(dest="action", required=True)

@@ -273,6 +273,16 @@ export type Actor = {
   has_custom_avatar?: boolean;
   enabled?: boolean;
   running?: boolean;  // Actual process running status
+  runtime_startup?: {
+    state?: "queued" | "initializing" | "running" | "failed" | "stopped" | string;
+    phase?: string;
+    attempt_id?: string;
+    requested_at?: string;
+    started_at?: string;
+    finished_at?: string;
+    updated_at?: string;
+    error?: string;
+  };
   idle_seconds?: number | null;  // Seconds since last PTY output (null if not running/headless)
   effective_working_state?: "stopped" | "idle" | "working" | "waiting" | "stuck" | string;
   effective_working_reason?: string;
@@ -598,6 +608,16 @@ export type RuntimeInfo = {
   name: string;
   display_name: string;
   recommended_command?: string;
+  available: boolean;
+  models?: string[];
+};
+
+export type OpenClawModel = {
+  id: string;
+  name: string;
+  input: string;
+  context_window: number;
+  tags: string[];
   available: boolean;
 };
 
@@ -1552,6 +1572,7 @@ export const SUPPORTED_RUNTIMES = [
   "hermes",
   "kimi",
   "opencode",
+  "openclaw",
   "web_model",
   "custom",
 ] as const;
@@ -1569,6 +1590,7 @@ export const RUNTIME_INFO: Record<string, { label: string; desc: string }> = {
   kimi: { label: "Kimi CLI", desc: "" },
   neovate: { label: "Neovate Code", desc: "" },
   opencode: { label: "OpenCode", desc: "Uses inline OpenCode MCP config at actor launch" },
+  openclaw: { label: "OpenClaw", desc: "" },
   web_model: { label: "ChatGPT Web Model", desc: "ChatGPT browser delivery + remote MCP connector" },
   custom: { label: "Custom", desc: "Manual MCP installation needed" },
 };
@@ -1627,6 +1649,10 @@ export const RUNTIME_COLORS: Record<string, {
   opencode: {
     bg: "bg-stone-900/40", text: "text-stone-200", border: "border-stone-500/60", dot: "bg-stone-300",
     bgLight: "bg-stone-100", textLight: "text-stone-800", borderLight: "border-stone-300", dotLight: "bg-stone-600"
+  },
+  openclaw: {
+    bg: "bg-red-950/35", text: "text-red-300", border: "border-red-600/50", dot: "bg-red-400",
+    bgLight: "bg-red-50", textLight: "text-red-800", borderLight: "border-red-300", dotLight: "bg-red-600"
   },
   web_model: {
     bg: "bg-indigo-900/30", text: "text-indigo-300", border: "border-indigo-600/50", dot: "bg-indigo-400",

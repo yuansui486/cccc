@@ -11,6 +11,17 @@ class TestRuntimeCommandDefaults(unittest.TestCase):
         self.assertEqual(get_runtime_command_with_flags("kimi"), ["kimi", "--yolo"])
         self.assertEqual(get_runtime_command_with_flags("hermes"), ["hermes", "--tui", "--yolo"])
         self.assertEqual(get_runtime_command_with_flags("opencode"), ["opencode", "--auto"])
+        self.assertEqual(get_runtime_command_with_flags("openclaw"), ["openclaw", "tui"])
+
+    def test_openclaw_detection_resolves_the_executable_without_tui_arguments(self) -> None:
+        from no1.kernel.runtime import detect_runtime
+
+        with patch("no1.kernel.runtime.find_subprocess_executable", return_value=r"C:\Tools\openclaw.cmd") as find:
+            runtime = detect_runtime("openclaw")
+
+        find.assert_called_once_with("openclaw")
+        self.assertTrue(runtime.available)
+        self.assertEqual(runtime.path, r"C:\Tools\openclaw.cmd")
 
     def test_direct_opencode_commands_force_auto_mode(self) -> None:
         from no1.kernel.runtime import ensure_opencode_auto_command

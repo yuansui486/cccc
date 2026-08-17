@@ -52,6 +52,16 @@ def handle_actor_remove(
         actor_doc = find_actor(group, actor_id)
         if isinstance(actor_doc, dict):
             avatar_rel_path = str(actor_doc.get("avatar_asset_path") or "").strip()
+        if isinstance(actor_doc, dict) and str(actor_doc.get("runtime") or "").strip() == "openclaw":
+            from ..openclaw_startup import cancel_openclaw_actor_start
+            from ..openclaw_runtime import remove_openclaw_actor_runtime
+
+            cancel_openclaw_actor_start(group.group_id, actor_id, remove=True)
+            remove_openclaw_actor_runtime(
+                group.group_id,
+                actor_id,
+                env=dict(actor_doc.get("env") or {}),
+            )
         invalidate_turn_grant(group, actor_id, reason="actor_removed")
         remove_actor(group, actor_id)
         if isinstance(actor_doc, dict) and str(actor_doc.get("runtime") or "").strip() == "web_model":

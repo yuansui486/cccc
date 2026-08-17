@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -47,7 +48,7 @@ class TestRunnerKindNoFallback(unittest.TestCase):
                 group,
                 actor_id="peer1",
                 title="Peer 1",
-                command=["echo", "hello"],
+                command=[sys.executable, "-c", "print('hello')"],
                 runner="pty",
                 runtime="custom",
             )
@@ -95,6 +96,23 @@ class TestRunnerKindNoFallback(unittest.TestCase):
             runner_ops.stop_actor("g1", "a1", "pty")
             codex_stop.assert_not_called()
             pty_stop.assert_called_once_with(group_id="g1", actor_id="a1")
+
+    def test_stop_actor_releases_openclaw_gateway_when_runner_stop_fails(self) -> None:
+        from no1.daemon.actors import runner_ops
+
+        with patch.object(runner_ops, "load_group", return_value=object()), patch.object(
+            runner_ops, "find_actor", return_value={"runtime": "openclaw", "runner": "pty"}
+        ), patch.object(
+            runner_ops.pty_runner.SUPERVISOR,
+            "stop_actor",
+            side_effect=RuntimeError("pty stop failed"),
+        ), patch(
+            "no1.daemon.openclaw_runtime.stop_openclaw_actor_gateway"
+        ) as stop_gateway:
+            with self.assertRaisesRegex(RuntimeError, "pty stop failed"):
+                runner_ops.stop_actor("g1", "a1", "pty")
+
+        stop_gateway.assert_called_once_with("g1", "a1")
 
 
 if __name__ == "__main__":

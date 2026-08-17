@@ -226,6 +226,9 @@ def add_actor(
     if runtime_key == "web_model":
         runner_kind = "headless"
         command_list = []
+    elif runtime_key == "openclaw":
+        runner_kind = "pty"
+        command_list = command_list or ["openclaw", "tui"]
 
     now = utc_now_iso()
     actor = Actor(
@@ -404,7 +407,7 @@ def update_actor(group: Group, actor_id: str, patch: Dict[str, Any]) -> Dict[str
         runtime = patch.get("runtime")
         if runtime is None:
             item["runtime"] = "codex"
-        elif runtime in ("amp", "auggie", "claude", "codex", "droid", "gemini", "hermes", "kimi", "neovate", "opencode", "web_model", "custom"):
+        elif runtime in ("amp", "auggie", "claude", "codex", "droid", "gemini", "hermes", "kimi", "neovate", "opencode", "openclaw", "web_model", "custom"):
             item["runtime"] = runtime
         else:
             raise ValueError("invalid runtime")
@@ -439,6 +442,13 @@ def update_actor(group: Group, actor_id: str, patch: Dict[str, Any]) -> Dict[str
     if str(item.get("runtime") or "").strip() == "web_model":
         item["runner"] = "headless"
         item["command"] = []
+    elif str(item.get("runtime") or "").strip() == "openclaw":
+        item["runner"] = "pty"
+        item["runtime_state_source"] = "terminal"
+        if not item.get("command") or (
+            previous_runtime != "openclaw" and "command" not in patch
+        ):
+            item["command"] = ["openclaw", "tui"]
 
     runtime_changed = str(item.get("runtime") or "codex").strip() != previous_runtime
     runner_changed = str(item.get("runner") or "pty").strip() != previous_runner

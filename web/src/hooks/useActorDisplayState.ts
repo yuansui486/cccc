@@ -43,20 +43,24 @@ export function computeActorDisplayState({
 }: ComputeActorDisplayStateInput): ActorDisplayState {
   const runningKnown = typeof actor.running === "boolean";
   const backendRunning = runningKnown ? Boolean(actor.running) : Boolean(actor.enabled ?? false);
+  const startupState = String(actor.runtime_startup?.state || "").trim().toLowerCase();
+  const startupPending = startupState === "queued" || startupState === "initializing";
   const backendWorkingState = String(actor.effective_working_state || "").trim().toLowerCase();
   const optimisticRunning = actor.enabled !== false && (
     hasLiveTerminalSignal(terminalSignal, now)
     || (selectedGroupRunning && selectedGroupActorsHydrating)
     || (!!backendWorkingState && backendWorkingState !== "stopped")
   );
-  const isRunning = backendRunning || optimisticRunning;
-  const assumeRunning = !backendRunning && optimisticRunning;
+  const isRunning = backendRunning || optimisticRunning || startupPending;
+  const assumeRunning = !backendRunning && (optimisticRunning || startupPending);
   let workingState = getActorDisplayWorkingState(
     isRunning === Boolean(actor.running) ? actor : { ...actor, running: isRunning },
     terminalSignal,
     now,
   );
-  if (assumeRunning && workingState === "stopped") {
+  if (startupPending) {
+    workingState = "waiting";
+  } else if (assumeRunning && workingState === "stopped") {
     workingState = selectedGroupActorsHydrating ? "waiting" : "idle";
   }
   const indicator = getActorTabIndicatorState({

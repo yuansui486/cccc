@@ -1689,6 +1689,40 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             },
         }
 
+    @global_router.get("/api/v1/runtimes/openclaw/models", dependencies=[Depends(require_user)])
+    async def openclaw_models() -> Dict[str, Any]:
+        """Return the OneColleague model catalog used by managed OpenClaw actors."""
+        if ctx.read_only:
+            raise HTTPException(status_code=403, detail={"code": "read_only", "message": "Runtime discovery is disabled."})
+        from ....daemon.openclaw_runtime import list_openclaw_models
+
+        try:
+            rows = await run_in_threadpool(list_openclaw_models)
+            models = []
+            for item in rows:
+                if not isinstance(item, dict):
+                    raise ValueError("OpenClaw returned a non-object model entry")
+                model_id = str(item.get("key") or "").strip()
+                if not model_id:
+                    continue
+                tags_raw = item.get("tags") or []
+                if not isinstance(tags_raw, list):
+                    raise ValueError(f"OpenClaw returned invalid tags for model {model_id}")
+                models.append({
+                    "id": model_id,
+                    "name": str(item.get("name") or model_id).strip(),
+                    "input": str(item.get("input") or "").strip(),
+                    "context_window": int(item.get("contextWindow") or 0),
+                    "tags": [str(tag) for tag in tags_raw],
+                    "available": True,
+                })
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"code": "openclaw_model_discovery_failed", "message": str(exc)},
+            ) from exc
+        return {"ok": True, "result": {"models": models}}
+
     @global_router.get("/api/v1/fs/list", dependencies=[Depends(require_admin)])
     async def fs_list(path: str = "~", show_hidden: bool = False) -> Dict[str, Any]:
         """List directory contents for path picker UI."""

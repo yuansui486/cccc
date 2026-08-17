@@ -7,6 +7,146 @@ from unittest.mock import patch
 
 
 class TestActorLifecycleOps(unittest.TestCase):
+    def test_actor_runtime_switch_stops_openclaw_tui_before_removing_state(self) -> None:
+        from no1.daemon.actors.actor_update_ops import handle_actor_update
+
+        group = type("Group", (), {"group_id": "g-test", "doc": {"running": True}, "ledger_path": Path("events.jsonl")})()
+        actor = {"id": "peer1", "runtime": "openclaw", "runner": "pty", "enabled": True, "env": {}}
+        updated_actor = {**actor, "runtime": "codex", "command": ["codex"]}
+        calls = []
+        with patch("no1.daemon.actors.actor_update_ops.load_group", return_value=group), patch(
+            "no1.daemon.actors.actor_update_ops.find_actor", return_value=actor
+        ), patch("no1.daemon.actors.actor_update_ops.update_actor", return_value=updated_actor), patch(
+            "no1.daemon.actors.actor_update_ops.require_actor_permission"
+        ), patch("no1.daemon.actors.actor_update_ops.append_event", return_value={"id": "event-a"}), patch(
+            "no1.daemon.actors.actor_update_ops.pty_runner.SUPERVISOR.stop_actor",
+            side_effect=lambda **_kwargs: calls.append("stop_tui"),
+        ), patch(
+            "no1.daemon.openclaw_runtime.remove_openclaw_actor_runtime",
+            side_effect=lambda *_args, **_kwargs: calls.append("remove_state"),
+        ):
+            response = handle_actor_update(
+                {
+                    "group_id": "g-test",
+                    "actor_id": "peer1",
+                    "patch": {"runtime": "codex", "command": ["codex"]},
+                    "by": "user",
+                },
+                foreman_id=lambda _group: "",
+                maybe_reset_automation_on_foreman_change=lambda *_args, **_kwargs: None,
+                find_scope_url=lambda *_args, **_kwargs: "",
+                effective_runner_kind=lambda runner: runner,
+                ensure_mcp_installed=lambda *_args, **_kwargs: True,
+                merge_actor_env_with_private=lambda _group_id, _actor_id, env: dict(env),
+                inject_actor_context_env=lambda env, **_kwargs: dict(env),
+                normalize_runtime_command=lambda _runtime, command: list(command),
+                prepare_pty_env=lambda env: dict(env),
+                pty_backlog_bytes=lambda: 1024,
+                write_headless_state=lambda *_args, **_kwargs: None,
+                write_pty_state=lambda *_args, **_kwargs: None,
+                clear_preamble_sent=lambda *_args, **_kwargs: None,
+                throttle_reset_actor=lambda *_args, **_kwargs: None,
+                remove_headless_state=lambda *_args, **_kwargs: None,
+                remove_pty_state_if_pid=lambda *_args, **_kwargs: None,
+                supported_runtimes=("codex", "openclaw"),
+                get_actor_profile=lambda _profile_id: None,
+                load_actor_profile_secrets=lambda _profile_id: {},
+                update_actor_private_env=lambda *_args, **_kwargs: {},
+            )
+
+        self.assertTrue(response.ok, getattr(response, "error", None))
+        self.assertEqual(calls, ["stop_tui", "remove_state"])
+
+    def test_actor_stop_releases_openclaw_gateway_when_pty_stop_fails(self) -> None:
+        from no1.daemon.actors.actor_lifecycle_ops import handle_actor_stop
+
+        group = type("Group", (), {"group_id": "g-test", "doc": {}})()
+        actor = {"id": "peer1", "runtime": "openclaw", "runner": "pty", "enabled": True}
+        with patch("no1.daemon.actors.actor_lifecycle_ops.load_group", return_value=group), patch(
+            "no1.daemon.actors.actor_lifecycle_ops.find_actor", return_value=actor
+        ), patch("no1.daemon.actors.actor_lifecycle_ops.update_actor", return_value={**actor, "enabled": False}), patch(
+            "no1.daemon.actors.actor_lifecycle_ops.require_actor_permission"
+        ), patch("no1.daemon.actors.actor_lifecycle_ops.invalidate_turn_grant"), patch(
+            "no1.daemon.actors.actor_lifecycle_ops.pty_runner.SUPERVISOR.stop_actor",
+            side_effect=RuntimeError("pty stop failed"),
+        ), patch("no1.daemon.openclaw_runtime.stop_openclaw_actor_gateway") as stop_gateway:
+            response = handle_actor_stop(
+                {"group_id": "g-test", "actor_id": "peer1", "by": "user"},
+                foreman_id=lambda _group: "",
+                maybe_reset_automation_on_foreman_change=lambda *_args, **_kwargs: None,
+                effective_runner_kind=lambda runner: runner,
+                remove_headless_state=lambda *_args, **_kwargs: None,
+                remove_pty_state_if_pid=lambda *_args, **_kwargs: None,
+            )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(getattr(response.error, "code", ""), "actor_stop_failed")
+        self.assertIn("pty stop failed", getattr(response.error, "message", ""))
+        stop_gateway.assert_called_once_with("g-test", "peer1")
+
+    def test_restart_cleanup_releases_openclaw_gateway_when_runner_stop_fails(self) -> None:
+        from no1.daemon.actors.actor_lifecycle_ops import _stop_actor_runtime_handles
+
+        with patch(
+            "no1.daemon.actors.actor_lifecycle_ops.codex_app_supervisor.stop_actor",
+            side_effect=RuntimeError("runner stop failed"),
+        ), patch("no1.daemon.openclaw_runtime.stop_openclaw_actor_gateway") as stop_gateway:
+            with self.assertRaisesRegex(RuntimeError, "runner stop failed"):
+                _stop_actor_runtime_handles(
+                    "g-test",
+                    "peer1",
+                    remove_headless_state=lambda *_args, **_kwargs: None,
+                    remove_pty_state_if_pid=lambda *_args, **_kwargs: None,
+                )
+
+        stop_gateway.assert_called_once_with("g-test", "peer1")
+
+    def test_actor_update_disable_releases_openclaw_gateway_when_pty_stop_fails(self) -> None:
+        from no1.daemon.actors.actor_update_ops import handle_actor_update
+
+        group = type("Group", (), {"group_id": "g-test", "doc": {"running": True}})()
+        actor = {"id": "peer1", "runtime": "openclaw", "runner": "pty", "enabled": True}
+        disabled_actor = {**actor, "enabled": False}
+        with patch("no1.daemon.actors.actor_update_ops.load_group", return_value=group), patch(
+            "no1.daemon.actors.actor_update_ops.find_actor", return_value=actor
+        ), patch("no1.daemon.actors.actor_update_ops.update_actor", return_value=disabled_actor), patch(
+            "no1.daemon.actors.actor_update_ops.require_actor_permission"
+        ), patch(
+            "no1.daemon.actors.actor_update_ops.pty_runner.SUPERVISOR.stop_actor",
+            side_effect=RuntimeError("pty stop failed"),
+        ), patch("no1.daemon.openclaw_runtime.stop_openclaw_actor_gateway") as stop_gateway:
+            with self.assertRaisesRegex(RuntimeError, "pty stop failed"):
+                handle_actor_update(
+                    {
+                        "group_id": "g-test",
+                        "actor_id": "peer1",
+                        "patch": {"enabled": False},
+                        "by": "user",
+                    },
+                    foreman_id=lambda _group: "",
+                    maybe_reset_automation_on_foreman_change=lambda *_args, **_kwargs: None,
+                    find_scope_url=lambda *_args, **_kwargs: "",
+                    effective_runner_kind=lambda runner: runner,
+                    ensure_mcp_installed=lambda *_args, **_kwargs: True,
+                    merge_actor_env_with_private=lambda _group_id, _actor_id, env: dict(env),
+                    inject_actor_context_env=lambda env, **_kwargs: dict(env),
+                    normalize_runtime_command=lambda _runtime, command: list(command),
+                    prepare_pty_env=lambda env: dict(env),
+                    pty_backlog_bytes=lambda: 1024,
+                    write_headless_state=lambda *_args, **_kwargs: None,
+                    write_pty_state=lambda *_args, **_kwargs: None,
+                    clear_preamble_sent=lambda *_args, **_kwargs: None,
+                    throttle_reset_actor=lambda *_args, **_kwargs: None,
+                    remove_headless_state=lambda *_args, **_kwargs: None,
+                    remove_pty_state_if_pid=lambda *_args, **_kwargs: None,
+                    supported_runtimes=("openclaw",),
+                    get_actor_profile=lambda _profile_id: None,
+                    load_actor_profile_secrets=lambda _profile_id: {},
+                    update_actor_private_env=lambda *_args, **_kwargs: {},
+                )
+
+        stop_gateway.assert_called_once_with("g-test", "peer1")
+
     def test_actor_terminal_theme_refresh_dispatches_to_codex_app_session(self) -> None:
         from no1.daemon.actors.actor_lifecycle_ops import handle_actor_terminal_theme_refresh
 
@@ -577,6 +717,7 @@ class TestActorLifecycleOps(unittest.TestCase):
                     "title": "Peer 1",
                     "runtime": "codex",
                     "runner": "headless",
+                    "enabled": False,
                     "by": "user",
                 },
             )
@@ -592,6 +733,50 @@ class TestActorLifecycleOps(unittest.TestCase):
             self.assertIsInstance(group_doc, dict)
             assert isinstance(group_doc, dict)
             self.assertFalse(bool(group_doc.get("running")))
+        finally:
+            cleanup()
+
+    def test_openclaw_actor_remove_cleanup_failure_keeps_actor(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "openclaw-remove", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "OpenClaw Peer",
+                    "runtime": "openclaw",
+                    "runner": "pty",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            with patch(
+                "no1.daemon.openclaw_runtime.remove_openclaw_actor_runtime",
+                side_effect=RuntimeError("cleanup failed"),
+            ), patch("no1.daemon.actors.actor_membership_ops.remove_actor") as remove_actor:
+                remove, _ = self._call(
+                    "actor_remove",
+                    {"group_id": group_id, "actor_id": "peer1", "by": "user"},
+                )
+
+            self.assertFalse(remove.ok)
+            self.assertEqual(getattr(remove.error, "code", ""), "actor_remove_failed")
+            remove_actor.assert_not_called()
+
+            from no1.kernel.actors import find_actor
+            from no1.kernel.group import load_group
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            self.assertIsInstance(find_actor(group, "peer1"), dict)
         finally:
             cleanup()
 
@@ -801,6 +986,47 @@ class TestActorLifecycleOps(unittest.TestCase):
             self.assertIsInstance(group_doc_after_enable, dict)
             assert isinstance(group_doc_after_enable, dict)
             self.assertFalse(bool(group_doc_after_enable.get("running")))
+        finally:
+            cleanup()
+
+    def test_openclaw_actor_update_failure_does_not_cleanup_runtime(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "openclaw-update", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "OpenClaw Peer",
+                    "runtime": "openclaw",
+                    "runner": "pty",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            with patch(
+                "no1.daemon.actors.actor_update_ops.update_actor",
+                side_effect=RuntimeError("update failed"),
+            ), patch("no1.daemon.openclaw_runtime.remove_openclaw_actor_runtime") as remove_runtime:
+                update, _ = self._call(
+                    "actor_update",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "peer1",
+                        "patch": {"runtime": "codex"},
+                        "by": "user",
+                    },
+                )
+
+            self.assertFalse(update.ok)
+            self.assertEqual(getattr(update.error, "code", ""), "actor_update_failed")
+            remove_runtime.assert_not_called()
         finally:
             cleanup()
 

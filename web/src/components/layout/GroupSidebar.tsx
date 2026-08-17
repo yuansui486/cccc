@@ -542,6 +542,25 @@ export function GroupSidebar({
 
   const getActorIndicator = useCallback(
     (actor: Actor) => {
+      const startupState = String(actor.runtime_startup?.state || "").trim();
+      if (startupState === "queued" || startupState === "initializing") {
+        return {
+          tone: "working" as const,
+          statusLabel: t("actorStatus.initializing"),
+          statusBadgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+          dotClass: "bg-amber-500",
+          labelClass: "text-[var(--color-text-secondary)]",
+        };
+      }
+      if (startupState === "failed") {
+        return {
+          tone: "stop" as const,
+          statusLabel: t("actorStatus.failed"),
+          statusBadgeClass: "bg-red-500/12 text-red-700 dark:text-red-300",
+          dotClass: "bg-red-500",
+          labelClass: "text-[var(--color-text-secondary)]",
+        };
+      }
       const terminalSignal = terminalSignals[getTerminalSignalKey(selectedGroupId, actor.id)];
       const workingState = getActorDisplayWorkingState(actor, terminalSignal);
       const isRunning = actor.running ?? actor.enabled ?? false;

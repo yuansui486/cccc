@@ -1,5 +1,5 @@
 import { RUNTIME_INFO, SUPPORTED_RUNTIMES, type RuntimeInfo, type SupportedRuntime } from "../types";
-import { runtimePresetsForModels, type RuntimePreset } from "./runtimePresets";
+import { runtimePresetsForModels, runtimePresetsForRuntime, type RuntimePreset } from "./runtimePresets";
 import { runtimePriceLabel, type RuntimePriceMap } from "./runtimePrices";
 
 export type RuntimeChoiceOption =
@@ -12,10 +12,10 @@ export type RuntimeChoiceGroup = {
   options: RuntimeChoiceOption[];
 };
 
-const GROUP_ORDER = ["codex", "claude", "gemini", "kimi", "opencode"] as const;
+const GROUP_ORDER = ["codex", "claude", "gemini", "kimi", "opencode", "openclaw"] as const;
 type GroupKey = typeof GROUP_ORDER[number];
-const VISIBLE_RUNTIME_CHOICES = new Set<SupportedRuntime>(["gemini", "opencode"]);
-export const ACTOR_RUNTIME_CHOICES: SupportedRuntime[] = ["codex", "claude", "gemini", "hermes", "kimi", "opencode"];
+const VISIBLE_RUNTIME_CHOICES = new Set<SupportedRuntime>(["gemini", "opencode", "openclaw"]);
+export const ACTOR_RUNTIME_CHOICES: SupportedRuntime[] = ["codex", "claude", "gemini", "hermes", "kimi", "opencode", "openclaw"];
 
 export type RuntimeSelectorOption = {
   value: SupportedRuntime;
@@ -33,6 +33,7 @@ export type RuntimeModelOption = {
 export function buildRuntimeSelectorOptions(
   runtimes: RuntimeInfo[],
   allowedRuntimes: readonly SupportedRuntime[] = ACTOR_RUNTIME_CHOICES,
+  runtimeDescriptions: Partial<Record<SupportedRuntime, string>> = {},
 ): RuntimeSelectorOption[] {
   const byName = new Map(runtimes.map((item) => [item.name, item]));
   return allowedRuntimes.map((runtime) => {
@@ -40,7 +41,7 @@ export function buildRuntimeSelectorOptions(
     return {
       value: runtime,
       label: info?.display_name || RUNTIME_INFO[runtime]?.label || runtime,
-      description: RUNTIME_INFO[runtime]?.desc || "",
+      description: runtimeDescriptions[runtime] ?? RUNTIME_INFO[runtime]?.desc ?? "",
       disabled: runtime === "custom" || runtime === "web_model" ? false : !info?.available,
     };
   });
@@ -51,11 +52,13 @@ export function buildRuntimeModelOptions(
   priceMap?: RuntimePriceMap | null,
   modelCatalog?: string[],
 ): RuntimeModelOption[] {
-  return runtimePresetsForModels(modelCatalog || [])
+  return runtimePresetsForRuntime(runtime, modelCatalog || [])
     .filter((preset) => preset.runtime === runtime && Boolean(preset.model))
     .map((preset) => ({
       value: String(preset.model || ""),
-      label: runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
+      label: runtime === "openclaw"
+        ? preset.label
+        : runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
       preset,
     }));
 }
@@ -66,6 +69,7 @@ const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }
   gemini: { labelKey: "runtimeGroupGemini", labelFallback: "Gemini" },
   kimi: { labelKey: "runtimeGroupKimi", labelFallback: "Kimi" },
   opencode: { labelKey: "runtimeGroupOpenCode", labelFallback: "OpenCode" },
+  openclaw: { labelKey: "runtimeGroupOpenClaw", labelFallback: "OpenClaw" },
 };
 
 export function buildRuntimeChoiceGroups(
@@ -77,7 +81,11 @@ export function buildRuntimeChoiceGroups(
   for (const key of GROUP_ORDER) groups.set(key, []);
 
   const includeOpenCodeModels = Array.isArray(modelCatalog) && modelCatalog.length > 0;
-  const presets = runtimePresetsForModels(modelCatalog || []).filter(
+  const openclawModels = runtimes.find((item) => item.name === "openclaw")?.models || [];
+  const presets = [
+    ...runtimePresetsForModels(modelCatalog || []),
+    ...runtimePresetsForRuntime("openclaw", openclawModels).filter((preset) => preset.runtime === "openclaw"),
+  ].filter(
     (preset) => preset.runtime !== "opencode" || includeOpenCodeModels,
   );
   for (const preset of presets) {
@@ -85,7 +93,9 @@ export function buildRuntimeChoiceGroups(
     groups.get(groupKeyForRuntime(preset.runtime))?.push({
       kind: "preset",
       id: preset.id,
-      label: runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
+      label: preset.runtime === "openclaw"
+        ? preset.label
+        : runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
       runtime: preset.runtime,
       disabled: !runtimeAvailable,
     });
@@ -99,7 +109,9 @@ export function buildRuntimeChoiceGroups(
     groups.get(groupKeyForRuntime(runtime))?.push({
       kind: "runtime",
       id: runtime,
-      label: runtimePriceLabel({ id: runtime, kind: "runtime", label: RUNTIME_INFO[runtime]?.label || runtime }, priceMap),
+      label: runtime === "openclaw"
+        ? (RUNTIME_INFO[runtime]?.label || runtime)
+        : runtimePriceLabel({ id: runtime, kind: "runtime", label: RUNTIME_INFO[runtime]?.label || runtime }, priceMap),
       runtime,
       disabled: !selectable,
     });
@@ -115,6 +127,7 @@ function groupKeyForRuntime(runtime: SupportedRuntime): GroupKey {
   if (runtime === "gemini") return "gemini";
   if (runtime === "kimi") return "kimi";
   if (runtime === "opencode") return "opencode";
+  if (runtime === "openclaw") return "openclaw";
   return "claude";
 }
 

@@ -267,6 +267,12 @@ def _read_actor_list_local(group_id: str, *, include_unread: bool) -> Dict[str, 
         effective_runner = "headless" if runner_kind == "headless" else "pty"
         uses_codex_app_server_state = actor_uses_codex_app_server_state(actor)
         runtime = str(actor.get("runtime") or "").strip()
+        if runtime.lower() == "openclaw":
+            from ....daemon.openclaw_startup import project_openclaw_startup
+
+            startup = project_openclaw_startup(gid, aid)
+            if startup is not None:
+                actor["runtime_startup"] = startup
         running = False
         idle_seconds = None
         headless_state = None

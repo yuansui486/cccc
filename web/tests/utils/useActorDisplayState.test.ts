@@ -3,6 +3,22 @@ import { describe, expect, it } from "vitest";
 import { computeActorDisplayState } from "../../src/hooks/useActorDisplayState";
 
 describe("computeActorDisplayState", () => {
+  it("keeps an initializing OpenClaw actor attachable", () => {
+    const state = computeActorDisplayState({
+      actor: {
+        id: "openclaw-1",
+        enabled: true,
+        running: false,
+        runtime: "openclaw",
+        runtime_startup: { state: "initializing", phase: "validating" },
+      },
+    });
+
+    expect(state.isRunning).toBe(true);
+    expect(state.assumeRunning).toBe(true);
+    expect(state.workingState).toBe("waiting");
+  });
+
   it("keeps backend running actors as running", () => {
     const state = computeActorDisplayState({
       actor: {

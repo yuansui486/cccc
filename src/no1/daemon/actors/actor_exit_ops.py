@@ -74,4 +74,11 @@ def persist_actor_process_exit_stopped(*, group_id: str, actor_id: str, runner: 
     except Exception:
         pass
 
+    try:
+        from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+        stop_openclaw_actor_gateway(gid, aid)
+    except Exception:
+        pass
+
     return True

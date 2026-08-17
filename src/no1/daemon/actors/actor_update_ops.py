@@ -69,6 +69,7 @@ def handle_actor_update(
     *,
     foreman_id: Callable[[Any], str],
     maybe_reset_automation_on_foreman_change: Callable[..., None],
+    start_actor_process: Optional[Callable[..., Dict[str, Any]]] = None,
     find_scope_url: Callable[[Any, str], str],
     effective_runner_kind: Callable[[str], str],
     ensure_mcp_installed: Callable[..., Any],
@@ -132,6 +133,8 @@ def handle_actor_update(
     actor_existing = find_actor(group, actor_id)
     if not isinstance(actor_existing, dict):
         return _error("actor_not_found", f"actor not found: {actor_id}")
+    previous_runtime = str(actor_existing.get("runtime") or "codex").strip()
+    previous_env = dict(actor_existing.get("env") or {}) if isinstance(actor_existing.get("env"), dict) else {}
     linked_before = is_actor_profile_linked(actor_existing)
     controlled_patch_keys = sorted([key for key in PROFILE_CONTROLLED_FIELDS if key in patch])
     if linked_before and controlled_patch_keys:
@@ -157,6 +160,7 @@ def handle_actor_update(
     applied_profile_id = ""
     applied_profile_ref: Any = None
     profile_converted = False
+    cleanup_previous_openclaw = False
     if "capability_autoload" in patch:
         patch["capability_autoload"] = _normalize_capability_id_list(patch.get("capability_autoload"))
     if "capability_hidden" in patch:
@@ -174,6 +178,12 @@ def handle_actor_update(
         if str(patch.get("runtime") or "").strip().lower() == "web_model":
             require_standard_chatgpt_web_model_actor(current_actor)
             require_no_other_chatgpt_web_model_actor(group_id=group.group_id, actor_id=actor_id)
+        if (
+            previous_runtime == "openclaw"
+            and "runtime" in patch
+            and str(patch.get("runtime") or "").strip().lower() != "openclaw"
+        ):
+            cleanup_previous_openclaw = True
         if profile_action == "convert_to_custom":
             current = find_actor(group, actor_id)
             if not isinstance(current, dict) or not is_actor_profile_linked(current):
@@ -221,6 +231,8 @@ def handle_actor_update(
             if str(profile.get("runtime") or "").strip().lower() == "web_model":
                 require_standard_chatgpt_web_model_actor(current_actor)
                 require_no_other_chatgpt_web_model_actor(group_id=group.group_id, actor_id=actor_id)
+            if previous_runtime == "openclaw" and str(profile.get("runtime") or "").strip().lower() != "openclaw":
+                cleanup_previous_openclaw = True
             apply_profile_link_to_actor(
                 group,
                 actor_id,
@@ -240,6 +252,19 @@ def handle_actor_update(
     except Exception as e:
         return _error("actor_update_failed", str(e))
 
+    if cleanup_previous_openclaw:
+        try:
+            from ..openclaw_startup import cancel_openclaw_actor_start
+            from ..openclaw_runtime import remove_openclaw_actor_runtime
+
+            cancel_openclaw_actor_start(group.group_id, actor_id, remove=True)
+            pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            remove_headless_state(group.group_id, actor_id)
+            remove_openclaw_actor_runtime(group.group_id, actor_id, env=previous_env)
+        except Exception as exc:
+            return _error("actor_update_failed", f"failed to clean up the previous OpenClaw runtime: {exc}")
+
     if enabled_patched:
         if coerce_bool(actor.get("enabled"), default=False):
             if coerce_bool(group.doc.get("running"), default=False):
@@ -255,6 +280,37 @@ def handle_actor_update(
                     )
                 except Exception as e:
                     return _error("profile_not_found", str(e))
+                if str(actor.get("runtime") or "").strip().lower() == "openclaw":
+                    if start_actor_process is None:
+                        return _error("actor_update_failed", "OpenClaw startup executor is unavailable")
+                    from ..openclaw_startup import queue_openclaw_actor_start
+
+                    startup = queue_openclaw_actor_start(
+                        group.group_id,
+                        actor_id,
+                        by=by,
+                        caller_id=str(args.get("caller_id") or "").strip(),
+                        is_admin=coerce_bool(args.get("is_admin"), default=False),
+                        start_actor_process=start_actor_process,
+                    )
+                    maybe_reset_automation_on_foreman_change(group, before_foreman_id=before_foreman)
+                    event = append_event(
+                        group.ledger_path,
+                        kind="actor.update",
+                        group_id=group.group_id,
+                        scope_key="",
+                        by=by,
+                        data={"actor_id": actor_id, "patch": patch, "start_queued": True},
+                    )
+                    return DaemonResponse(
+                        ok=True,
+                        result={
+                            "actor": actor,
+                            "event": event,
+                            "start_queued": True,
+                            "runtime_startup": startup,
+                        },
+                    )
                 try:
                     launch_spec = resolve_actor_launch_spec(
                         group,
@@ -352,6 +408,7 @@ def handle_actor_update(
                                 runtime,
                                 cwd,
                                 env=dict(launch_env),
+                                command=list(launch_spec["effective_command"]),
                             )
                         )
                     except Exception as e:
@@ -425,32 +482,41 @@ def handle_actor_update(
                 clear_preamble_sent(group, actor_id)
                 throttle_reset_actor(group.group_id, actor_id, keep_pending=True)
         else:
+            if previous_runtime == "openclaw" or str(actor.get("runtime") or "").strip().lower() == "openclaw":
+                from ..openclaw_startup import cancel_openclaw_actor_start
+
+                cancel_openclaw_actor_start(group.group_id, actor_id)
             runner_kind = str(actor.get("runner") or "pty").strip() or "pty"
             runner_effective = effective_runner_kind(runner_kind)
             runtime = str(actor.get("runtime") or "codex").strip() or "codex"
-            if runtime == "web_model" and runner_effective == "headless":
-                remove_headless_state(group.group_id, actor_id)
-                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-            elif actor_uses_codex_app_server_state(actor):
-                codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
-                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-                remove_headless_state(group.group_id, actor_id)
-            elif runtime == "codex" and runner_effective == "headless":
-                codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
-                remove_headless_state(group.group_id, actor_id)
-                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-            elif runtime == "claude" and runner_effective == "headless":
-                claude_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
-                remove_headless_state(group.group_id, actor_id)
-                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-            elif runner_effective == "headless":
-                headless_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
-                remove_headless_state(group.group_id, actor_id)
-                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-            else:
-                pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
-                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-                remove_headless_state(group.group_id, actor_id)
+            try:
+                if runtime == "web_model" and runner_effective == "headless":
+                    remove_headless_state(group.group_id, actor_id)
+                    remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                elif actor_uses_codex_app_server_state(actor):
+                    codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                    remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                    remove_headless_state(group.group_id, actor_id)
+                elif runtime == "codex" and runner_effective == "headless":
+                    codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                    remove_headless_state(group.group_id, actor_id)
+                    remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                elif runtime == "claude" and runner_effective == "headless":
+                    claude_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                    remove_headless_state(group.group_id, actor_id)
+                    remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                elif runner_effective == "headless":
+                    headless_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                    remove_headless_state(group.group_id, actor_id)
+                    remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                else:
+                    pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                    remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                    remove_headless_state(group.group_id, actor_id)
+            finally:
+                from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+                stop_openclaw_actor_gateway(group.group_id, actor_id)
             throttle_reset_actor(group.group_id, actor_id, keep_pending=True)
             try:
                 any_enabled = any(
@@ -495,6 +561,7 @@ def try_handle_actor_update_op(
     *,
     foreman_id: Callable[[Any], str],
     maybe_reset_automation_on_foreman_change: Callable[..., None],
+    start_actor_process: Callable[..., Dict[str, Any]],
     find_scope_url: Callable[[Any, str], str],
     effective_runner_kind: Callable[[str], str],
     ensure_mcp_installed: Callable[..., Any],
@@ -519,6 +586,7 @@ def try_handle_actor_update_op(
             args,
             foreman_id=foreman_id,
             maybe_reset_automation_on_foreman_change=maybe_reset_automation_on_foreman_change,
+            start_actor_process=start_actor_process,
             find_scope_url=find_scope_url,
             effective_runner_kind=effective_runner_kind,
             ensure_mcp_installed=ensure_mcp_installed,

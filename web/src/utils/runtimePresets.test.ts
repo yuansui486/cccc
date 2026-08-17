@@ -9,12 +9,14 @@ import {
   commandForRuntimePreset,
   defaultCommandForRuntime,
   defaultRuntimePresetFor,
+  knownPresetSecretKeysForRuntime,
   mergePresetSecrets,
   mergeAllPresetUnsetKeys,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
   modelFromRuntimeConfiguration,
   needsDedicatedOneColleagueKey,
+  openclawRuntimePresetId,
   opencodeDeepSeekModelFromCommand,
   opencodeRuntimePreset,
   opencodeRuntimePresetId,
@@ -41,6 +43,7 @@ describe("runtime presets", () => {
       "codex -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox --search"
     );
     expect(defaultCommandForRuntime("gemini")).toBe("gemini --yolo");
+    expect(defaultCommandForRuntime("openclaw")).toBe("openclaw tui");
     expect(defaultCommandForRuntime("custom-runtime")).toBe("custom-runtime");
     expect(defaultCommandForRuntime("  ")).toBe("");
   });
@@ -58,6 +61,12 @@ describe("runtime presets", () => {
     expect(buildRuntimeModelOptions("claude").every((item) => item.preset.runtime === "claude")).toBe(true);
     expect(buildRuntimeModelOptions("opencode", null, ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
     expect(buildRuntimeModelOptions("hermes", null, ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
+    expect(buildRuntimeModelOptions("openclaw", null, ["claude-cli/claude-sonnet-4-6"]).map((item) => item.value)).toEqual([
+      "claude-cli/claude-sonnet-4-6",
+    ]);
+    expect(buildRuntimeModelOptions("openclaw", null, ["catalog-model"]).map((item) => item.value)).toEqual(
+      buildRuntimeModelOptions("opencode", null, ["catalog-model"]).map((item) => item.value),
+    );
   });
 
   it("reads, replaces, and clears models using each known runtime protocol", () => {
@@ -65,6 +74,10 @@ describe("runtime presets", () => {
     expect(modelFromRuntimeConfiguration("opencode", "opencode -m onecolleague/deepseek-v4-pro")).toBe("deepseek-v4-pro");
     expect(modelFromRuntimeConfiguration("kimi", "kimi --yolo", "kimi-k2.6")).toBe("kimi-k2.6");
     expect(modelFromRuntimeConfiguration("hermes", "hermes --tui", "deepseek-v4-pro")).toBe("deepseek-v4-pro");
+    expect(modelFromRuntimeConfiguration("openclaw", "openclaw", "claude-cli/claude-sonnet-4-6")).toBe(
+      "claude-cli/claude-sonnet-4-6"
+    );
+    expect(modelFromRuntimeConfiguration("openclaw", "openclaw", "onecolleague/gpt-5.5")).toBe("gpt-5.5");
     expect(withRuntimeModel("codex", "codex -m old --search", "gpt-5.5")).toBe("codex --search -m gpt-5.5");
     expect(withRuntimeModel("claude", "claude --model=old --effort high", "new-model")).toBe(
       "claude --effort high --model new-model"
@@ -75,12 +88,14 @@ describe("runtime presets", () => {
     );
     expect(withRuntimeModel("kimi", "kimi --yolo", "kimi-k2.6")).toBe("kimi --yolo");
     expect(withRuntimeModel("hermes", "hermes --tui --yolo", "deepseek-v4-pro")).toBe("hermes --tui --yolo");
+    expect(withRuntimeModel("openclaw", "openclaw --model old/model", "provider/new-model")).toBe("openclaw");
   });
 
   it("allows manual models only for known protocols and rejects unsafe IDs", () => {
     expect(runtimeSupportsModelSelection("codex")).toBe(true);
     expect(runtimeSupportsModelSelection("kimi")).toBe(true);
     expect(runtimeSupportsModelSelection("hermes")).toBe(true);
+    expect(runtimeSupportsModelSelection("openclaw")).toBe(true);
     expect(runtimeSupportsModelSelection("droid")).toBe(false);
     expect(validateRuntimeModelId("onecolleague/deepseek-v4-pro")).toBe("");
     expect(validateRuntimeModelId(" model with spaces ")).not.toBe("");
@@ -111,8 +126,14 @@ describe("runtime presets", () => {
   it("warns when a Peer runtime only has an ordinary OpenAI key", () => {
     expect(needsDedicatedOneColleagueKey("opencode", 'OPENAI_API_KEY="openai"')).toBe(true);
     expect(needsDedicatedOneColleagueKey("codex", '$env:OPENAI_API_KEY = "openai"')).toBe(true);
+    expect(needsDedicatedOneColleagueKey("openclaw", 'OPENAI_API_KEY="openai"')).toBe(true);
     expect(needsDedicatedOneColleagueKey("opencode", 'OPENAI_API_KEY="openai"\nONECOLLEAGUE_API_KEY="peer"')).toBe(false);
+    expect(needsDedicatedOneColleagueKey("openclaw", 'ONECOLLEAGUE_API_KEY="peer"')).toBe(false);
     expect(needsDedicatedOneColleagueKey("claude", 'OPENAI_API_KEY="openai"')).toBe(false);
+    expect(mergeRuntimeAuthSecret('CUSTOM_FLAG="keep"', "openclaw", "done-hub-key")).toBe(
+      'CUSTOM_FLAG="keep"\nONECOLLEAGUE_API_KEY="done-hub-key"',
+    );
+    expect(knownPresetSecretKeysForRuntime("openclaw")).toContain("ONECOLLEAGUE_API_KEY");
   });
 
   it("shows OpenCode as a selectable runtime when discovered", () => {
@@ -147,6 +168,32 @@ describe("runtime presets", () => {
     expect(mergePresetSecrets("", preset!, "done-hub-key")).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
   });
 
+  it("adds discovered OpenClaw models without changing the launch command", () => {
+    const model = "claude-cli/claude-sonnet-4-6";
+    const groups = buildRuntimeChoiceGroups(
+      [{
+          name: "openclaw",
+          display_name: "OpenClaw",
+          available: true,
+          recommended_command: "openclaw",
+          models: [model],
+      }],
+      { [model]: { model, input: 1, output: 2 } },
+    );
+    const options = groups.find((group) => group.labelKey === "runtimeGroupOpenClaw")?.options || [];
+
+    expect(options.map((option) => option.id)).toEqual([openclawRuntimePresetId(model)]);
+    expect(options[0]?.label).toBe(model);
+    const preset = runtimePresetForModel("openclaw", model, [model]);
+    expect(preset?.model).toBe(model);
+    expect(commandForRuntimePreset(preset!, {
+      name: "openclaw",
+      display_name: "OpenClaw",
+      available: true,
+      recommended_command: "openclaw",
+    })).toBe("openclaw");
+  });
+
   it("groups model choices by CLI family", () => {
     const groups = buildRuntimeChoiceGroups([
       { name: "claude", display_name: "Claude Code", available: true, recommended_command: "claude" },
@@ -161,6 +208,7 @@ describe("runtime presets", () => {
       "runtimeGroupGemini",
       "runtimeGroupKimi",
       "runtimeGroupOpenCode",
+      "runtimeGroupOpenClaw",
     ]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options.map((option) => option.id)).toEqual([
       "model:deepseek-v4-pro-claude",

@@ -55,6 +55,8 @@
   "pauseState": "暂停",
   "stopState": "停止",
   "actorStatus": {
+    "initializing": "初始化中",
+    "failed": "启动失败",
     "working": "工作中",
     "run": "运行",
     "stop": "停止"

@@ -266,6 +266,8 @@ def _save_actor_profile(
     now = utc_now_iso()
     runtime = str(profile.get("runtime") if "runtime" in profile else existing.get("runtime") or "codex").strip() or "codex"
     runner = str(profile.get("runner") if "runner" in profile else existing.get("runner") or "pty").strip() or "pty"
+    if runtime == "openclaw":
+        runner = "pty"
     if runtime == "web_model":
         runner = "headless"
     submit = str(profile.get("submit") if "submit" in profile else existing.get("submit") or "enter").strip() or "enter"
@@ -281,6 +283,8 @@ def _save_actor_profile(
 
     command_in = profile.get("command") if "command" in profile else existing.get("command")
     command = [] if runtime == "web_model" else _normalize_profile_command(runtime=runtime, runner=runner, command=command_in)
+    if runtime == "openclaw" and not command:
+        command = ["openclaw", "tui"]
 
     runtime_options_in = profile.get("runtime_options") if "runtime_options" in profile else existing.get("runtime_options")
     runtime_options = dict(runtime_options_in) if isinstance(runtime_options_in, dict) else {}

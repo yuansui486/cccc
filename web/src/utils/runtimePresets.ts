@@ -38,7 +38,7 @@ function envTextHasAssignment(text: string, key: string): boolean {
 
 export function needsDedicatedOneColleagueKey(runtime: string, secretsText: string): boolean {
   const normalizedRuntime = String(runtime || "").trim().toLowerCase();
-  if (!["codex", "opencode", "hermes"].includes(normalizedRuntime)) return false;
+  if (!["codex", "opencode", "openclaw", "hermes"].includes(normalizedRuntime)) return false;
   return envTextHasAssignment(secretsText, "OPENAI_API_KEY")
     && !envTextHasAssignment(secretsText, "ONECOLLEAGUE_API_KEY");
 }
@@ -54,6 +54,7 @@ const FALLBACK_RUNTIME_COMMANDS: Partial<Record<SupportedRuntime, string[]>> = {
   kimi: ["kimi", "--yolo"],
   neovate: ["neovate"],
   opencode: ["opencode", "--auto"],
+  openclaw: ["openclaw", "tui"],
 };
 
 export function defaultCommandForRuntime(runtime: string): string {
@@ -218,6 +219,21 @@ export function hermesRuntimePreset(model: string, label?: string): RuntimePrese
   };
 }
 
+export function openclawRuntimePresetId(model: string): RuntimePresetId {
+  return `model:openclaw:${encodeURIComponent(String(model || "").trim())}`;
+}
+
+export function openclawRuntimePreset(model: string, label?: string): RuntimePreset | null {
+  const normalized = String(model || "").trim();
+  if (!normalized) return null;
+  return {
+    id: openclawRuntimePresetId(normalized),
+    label: String(label || normalized).trim() || normalized,
+    runtime: "openclaw",
+    model: normalized,
+  };
+}
+
 export function runtimePresetsForModels(models: string[]): RuntimePreset[] {
   const normalizedModels = models
     .map((model) => String(model || "").trim())
@@ -237,16 +253,39 @@ export function runtimePresetsForModels(models: string[]): RuntimePreset[] {
   return [...RUNTIME_PRESETS.filter((preset) => preset.runtime !== "opencode" && preset.runtime !== "hermes"), ...dynamic];
 }
 
+export function runtimePresetsForRuntime(runtime: string, models: string[]): RuntimePreset[] {
+  if (String(runtime || "").trim() !== "openclaw") return runtimePresetsForModels(models);
+  const seen = new Set<string>();
+  const dynamic = models
+    .map((model) => String(model || "").trim())
+    .filter((model) => {
+      if (!model) return false;
+      const key = model.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((model) => openclawRuntimePreset(model))
+    .filter((preset): preset is RuntimePreset => Boolean(preset));
+  return [...RUNTIME_PRESETS.filter((preset) => preset.runtime !== "openclaw"), ...dynamic];
+}
+
 export function runtimePresetById(id: string): RuntimePreset | null {
   const needle = String(id || "").trim();
   if (!needle) return null;
   const existing = RUNTIME_PRESETS.find((preset) => preset.id === needle);
   if (existing) return existing;
-  const prefix = needle.startsWith("model:hermes:") ? "model:hermes:" : "model:opencode:";
+  const prefix = needle.startsWith("model:hermes:")
+    ? "model:hermes:"
+    : needle.startsWith("model:openclaw:")
+      ? "model:openclaw:"
+      : "model:opencode:";
   if (!needle.startsWith(prefix)) return null;
   try {
     const model = decodeURIComponent(needle.slice(prefix.length));
-    return prefix === "model:hermes:" ? hermesRuntimePreset(model) : opencodeRuntimePreset(model);
+    if (prefix === "model:hermes:") return hermesRuntimePreset(model);
+    if (prefix === "model:openclaw:") return openclawRuntimePreset(model);
+    return opencodeRuntimePreset(model);
   } catch {
     return null;
   }
@@ -255,7 +294,8 @@ export function runtimePresetById(id: string): RuntimePreset | null {
 export function defaultRuntimePresetFor(runtime: string, modelCatalog: string[] = []): RuntimePreset | null {
   const normalizedRuntime = String(runtime || "").trim();
   if (!normalizedRuntime) return null;
-  return runtimePresetsForModels(modelCatalog).find((preset) => preset.runtime === normalizedRuntime) || null;
+  return runtimePresetsForRuntime(normalizedRuntime, modelCatalog)
+    .find((preset) => preset.runtime === normalizedRuntime) || null;
 }
 
 export function runtimePresetIdFor(runtime: string, command: string | string[] | undefined): RuntimePresetId | "" {
@@ -297,7 +337,7 @@ const MODEL_ARGUMENTS: Partial<Record<SupportedRuntime, "-m" | "--model">> = {
 
 export function runtimeSupportsModelSelection(runtime: string): boolean {
   const normalized = String(runtime || "").trim() as SupportedRuntime;
-  return normalized === "kimi" || Boolean(MODEL_ARGUMENTS[normalized]);
+  return normalized === "kimi" || normalized === "openclaw" || Boolean(MODEL_ARGUMENTS[normalized]);
 }
 
 export function validateRuntimeModelId(value: string): string {
@@ -317,11 +357,17 @@ export function modelFromRuntimeConfiguration(
 ): string {
   const normalizedRuntime = String(runtime || "").trim();
   const persisted = String(selectedModel || "").trim();
-  if (normalizedRuntime === "kimi" || normalizedRuntime === "hermes") return persisted || modelFromCommand(
-    Array.isArray(command)
-      ? command.map((item) => String(item || "").trim()).filter(Boolean)
-      : splitCommand(String(command || "").trim()),
-  );
+  if (normalizedRuntime === "kimi" || normalizedRuntime === "hermes" || normalizedRuntime === "openclaw") {
+    const model = persisted || modelFromCommand(
+      Array.isArray(command)
+        ? command.map((item) => String(item || "").trim()).filter(Boolean)
+        : splitCommand(String(command || "").trim()),
+    );
+    if (normalizedRuntime === "openclaw" && model.toLowerCase().startsWith(`${OPENCODE_PROVIDER_ID}/`)) {
+      return model.slice(OPENCODE_PROVIDER_ID.length + 1);
+    }
+    return model;
+  }
   const tokens = Array.isArray(command)
     ? command.map((item) => String(item || "").trim()).filter(Boolean)
     : splitCommand(String(command || "").trim());
@@ -342,7 +388,7 @@ export function withRuntimeModel(
     ? command.map((item) => String(item || "").trim()).filter(Boolean)
     : splitCommand(String(command || "").trim());
   const cleaned = withoutCommandModel(tokens);
-  if (normalizedRuntime === "kimi" || normalizedRuntime === "hermes") return cleaned.join(" ");
+  if (normalizedRuntime === "kimi" || normalizedRuntime === "hermes" || normalizedRuntime === "openclaw") return cleaned.join(" ");
   const flag = MODEL_ARGUMENTS[normalizedRuntime];
   const normalizedModel = String(model || "").trim();
   if (!flag || !normalizedModel) return cleaned.join(" ");
@@ -355,7 +401,7 @@ export function withRuntimeModel(
 export function runtimePresetForModel(runtime: string, model: string, modelCatalog: string[] = []): RuntimePreset | null {
   const normalizedModel = String(model || "").trim().toLowerCase();
   if (!normalizedModel) return null;
-  return runtimePresetsForModels(modelCatalog).find(
+  return runtimePresetsForRuntime(runtime, modelCatalog).find(
     (preset) => preset.runtime === runtime && String(preset.model || "").trim().toLowerCase() === normalizedModel,
   ) || null;
 }
@@ -529,7 +575,7 @@ export function knownPresetSecretKeysForRuntime(runtime: string): Set<string> {
     for (const key of Object.keys(preset.envPrivate || {})) out.add(key);
   }
   if (runtime === "claude") out.add("ANTHROPIC_AUTH_TOKEN");
-  if (runtime === "codex" || runtime === "opencode" || runtime === "hermes") {
+  if (runtime === "codex" || runtime === "opencode" || runtime === "openclaw" || runtime === "hermes") {
     out.add("ONECOLLEAGUE_API_KEY");
     out.add("OPENAI_API_KEY");
   }
@@ -561,7 +607,7 @@ function authSecretKeyForRuntimePreset(preset: RuntimePreset): string {
 }
 
 function authSecretKeyForRuntime(runtime: string): string {
-  if (["codex", "opencode", "hermes"].includes(String(runtime || "").trim())) return "ONECOLLEAGUE_API_KEY";
+  if (["codex", "opencode", "openclaw", "hermes"].includes(String(runtime || "").trim())) return "ONECOLLEAGUE_API_KEY";
   return "";
 }
 

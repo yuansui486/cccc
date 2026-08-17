@@ -538,6 +538,60 @@ class TestActorRuntimeOps(unittest.TestCase):
         self.assertEqual(doc["mcp"]["onecolleague"]["environment"]["ONECOLLEAGUE_GROUP_ID"], "g-test")
         self.assertEqual(doc["mcp"]["onecolleague"]["environment"]["ONECOLLEAGUE_ACTOR_ID"], "open-1")
 
+    def test_openclaw_pty_start_failure_stops_prepared_gateway(self) -> None:
+        from no1.daemon.actors import actor_runtime_ops
+
+        with tempfile.TemporaryDirectory() as td:
+            group = SimpleNamespace(
+                group_id="g-test",
+                doc={"active_scope_key": "scope1", "state": "active", "running": False},
+                save=lambda: None,
+                ledger_path=Path(td) / "ledger.jsonl",
+            )
+            actor = {
+                "id": "openclaw-1",
+                "default_scope_key": "scope1",
+                "runner": "pty",
+                "runtime": "openclaw",
+                "command": ["openclaw"],
+                "env": {},
+            }
+            with patch.object(actor_runtime_ops, "find_actor", return_value=actor), patch.object(
+                actor_runtime_ops.pty_runner,
+                "PTY_SUPPORTED",
+                True,
+            ), patch.object(actor_runtime_ops, "runtime_start_preflight_error", return_value=""), patch.object(
+                actor_runtime_ops,
+                "start_pty_actor_with_runtime_resume",
+                side_effect=RuntimeError("spawn failed"),
+            ), patch("no1.daemon.openclaw_runtime.stop_openclaw_actor_gateway") as stop_gateway:
+                result = actor_runtime_ops.start_actor_process(
+                    group,
+                    "openclaw-1",
+                    command=[],
+                    env={},
+                    runner="pty",
+                    runtime="openclaw",
+                    by="user",
+                    find_scope_url=lambda _group, _scope_key: td,
+                    effective_runner_kind=lambda runner: runner,
+                    merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+                    normalize_runtime_command=lambda _runtime, command: list(command),
+                    ensure_mcp_installed=lambda _runtime, _cwd, **_kwargs: True,
+                    inject_actor_context_env=lambda env, _gid, _aid: dict(env),
+                    prepare_pty_env=lambda env: dict(env),
+                    pty_backlog_bytes=lambda: 1024,
+                    write_headless_state=lambda _gid, _aid: None,
+                    write_pty_state=lambda _gid, _aid, _pid: None,
+                    clear_preamble_sent=lambda _group, _aid: None,
+                    throttle_reset_actor=lambda _gid, _aid: None,
+                    supported_runtimes=("openclaw",),
+                )
+
+        self.assertFalse(bool(result.get("success")))
+        self.assertIn("spawn failed", str(result.get("error") or ""))
+        stop_gateway.assert_called_once_with("g-test", "openclaw-1")
+
 
 if __name__ == "__main__":
     unittest.main()

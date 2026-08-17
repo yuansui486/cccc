@@ -258,6 +258,8 @@ def prepare_runtime_mcp_env(
         result["KIMI_MODEL_NAME"] = selected_model
     if normalized_runtime == "hermes" and selected_model:
         result["HERMES_SELECTED_MODEL"] = selected_model
+    if normalized_runtime == "openclaw" and selected_model:
+        result["OPENCLAW_SELECTED_MODEL"] = selected_model
     if normalized_runtime == "hermes" and not str(result.get("HERMES_TUI_DIR") or "").strip():
         tui_dir = hermes_prebuilt_tui_dir(command or [])
         if tui_dir is not None:
@@ -536,9 +538,19 @@ def ensure_mcp_installed(
     *,
     auto_mcp_runtimes: tuple[str, ...],
     env: Dict[str, str] | None = None,
+    command: list[str] | None = None,
 ) -> bool:
     if runtime not in auto_mcp_runtimes:
         return True
+    if runtime == "openclaw":
+        try:
+            from .openclaw_runtime import ensure_openclaw_mcp_installed
+
+            return ensure_openclaw_mcp_installed(cwd, env=env, command=command)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"openclaw_runtime_setup_failed: {exc}") from exc
     if runtime == "hermes":
         try:
             state = _runtime_mcp_state(runtime, env=env)

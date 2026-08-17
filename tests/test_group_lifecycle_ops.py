@@ -175,6 +175,27 @@ class TestGroupLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_group_stop_releases_openclaw_gateway_when_runner_stop_fails(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "group-stop-openclaw", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+
+            with patch(
+                "no1.daemon.group.group_lifecycle_ops.pty_runner.SUPERVISOR.stop_group",
+                side_effect=RuntimeError("pty stop failed"),
+            ), patch(
+                "no1.daemon.openclaw_runtime.stop_openclaw_group_gateways"
+            ) as stop_gateways:
+                stop, _ = self._call("group_stop", {"group_id": group_id, "by": "user"})
+
+            self.assertFalse(stop.ok)
+            self.assertEqual(getattr(stop.error, "code", ""), "group_stop_failed")
+            stop_gateways.assert_called_once_with(group_id)
+        finally:
+            cleanup()
+
     def _append_legacy_internal_actor(self, group_id: str, *, actor_id: str = "pet-peer", enabled: bool = False) -> None:
         from no1.kernel.group import load_group
 

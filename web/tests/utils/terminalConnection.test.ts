@@ -23,11 +23,15 @@ describe("buildTerminalConnectionKey", () => {
       isHeadless: false,
       groupId: "g1",
       actorId: "peer1",
+      termEpoch: 0,
       reconnectTrigger: 0,
     };
 
     expect(buildTerminalConnectionKey({ ...base, canControl: false })).not.toBe(
       buildTerminalConnectionKey({ ...base, canControl: true }),
+    );
+    expect(buildTerminalConnectionKey({ ...base, canControl: true, termEpoch: 0 })).not.toBe(
+      buildTerminalConnectionKey({ ...base, canControl: true, termEpoch: 1 }),
     );
   });
 

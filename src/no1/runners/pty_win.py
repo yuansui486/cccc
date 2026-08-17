@@ -5,7 +5,6 @@ import queue
 import selectors
 import secrets
 import socket
-import subprocess
 import threading
 import time
 from collections import deque
@@ -117,7 +116,6 @@ class PtySession:
         cmd = [str(x) for x in command if isinstance(x, str) and str(x).strip()]
         if not cmd:
             cmd = ["cmd.exe"]
-        cmdline = subprocess.list2cmdline(cmd)
 
         proc_env = os.environ.copy()
         proc_env.update({k: v for k, v in env.items() if isinstance(k, str) and isinstance(v, str)})
@@ -126,8 +124,8 @@ class PtySession:
         spawn_err: Optional[Exception] = None
         proc = None
         for attempt in (
-            lambda: _WINPTY_PROCESS.spawn(cmdline, cwd=str(cwd), env=proc_env, dimensions=(int(cols), int(rows))),  # type: ignore[misc]
-            lambda: _WINPTY_PROCESS.spawn(cmdline, cwd=str(cwd), env=proc_env),  # type: ignore[misc]
+            lambda: _WINPTY_PROCESS.spawn(cmd, cwd=str(cwd), env=proc_env, dimensions=(int(rows), int(cols))),  # type: ignore[misc]
+            lambda: _WINPTY_PROCESS.spawn(cmd, cwd=str(cwd), env=proc_env),  # type: ignore[misc]
         ):
             try:
                 proc = attempt()

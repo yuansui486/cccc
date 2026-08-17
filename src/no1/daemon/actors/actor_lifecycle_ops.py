@@ -53,10 +53,15 @@ def _stop_actor_runtime_handles(
     remove_headless_state: Callable[[str, str], None],
     remove_pty_state_if_pid: Callable[..., None],
 ) -> None:
-    codex_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
-    claude_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
-    headless_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
-    pty_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+    try:
+        codex_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
+        claude_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
+        headless_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+        pty_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+    finally:
+        from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+        stop_openclaw_actor_gateway(group_id, actor_id)
     remove_headless_state(group_id, actor_id)
     remove_pty_state_if_pid(group_id, actor_id, pid=0)
 
@@ -137,6 +142,22 @@ def handle_actor_start(
 
     try:
         start_env = with_terminal_color_scheme(dict(env or {}), args.get("terminal_color_scheme"))
+        if runtime == "openclaw":
+            from ..openclaw_startup import queue_openclaw_actor_start
+
+            startup = queue_openclaw_actor_start(
+                group.group_id,
+                actor_id,
+                by=by,
+                caller_id=caller_id,
+                is_admin=is_admin,
+                start_actor_process=start_actor_process,
+            )
+            maybe_reset_automation_on_foreman_change(group, before_foreman_id=before_foreman)
+            return DaemonResponse(
+                ok=True,
+                result={"actor": actor, "start_queued": True, "runtime_startup": startup},
+            )
         start_result = start_actor_process(
             group,
             actor_id,
@@ -186,6 +207,10 @@ def handle_actor_stop(
         current_actor = find_actor(group, actor_id)
         if not isinstance(current_actor, dict):
             return _error("actor_stop_failed", f"actor not found: {actor_id}")
+        if str(current_actor.get("runtime") or "").strip().lower() == "openclaw":
+            from ..openclaw_startup import cancel_openclaw_actor_start
+
+            cancel_openclaw_actor_start(group.group_id, actor_id)
         invalidate_turn_grant(group, actor_id, reason="actor_stop")
         if isinstance(current_actor, dict) and is_internal_actor(current_actor):
             actor = dict(current_actor)
@@ -194,25 +219,30 @@ def handle_actor_stop(
         runner_kind = str(actor.get("runner") or "pty").strip()
         runner_effective = effective_runner_kind(runner_kind)
         runtime = str(actor.get("runtime") or "codex").strip() or "codex"
-        if runtime == "web_model" and runner_effective == "headless":
-            remove_headless_state(group.group_id, actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-        elif runtime == "codex" and runner_effective == "headless":
-            codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_headless_state(group.group_id, actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-        elif runtime == "claude" and runner_effective == "headless":
-            claude_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_headless_state(group.group_id, actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-        elif runner_effective == "headless":
-            headless_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_headless_state(group.group_id, actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-        else:
-            pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-            remove_headless_state(group.group_id, actor_id)
+        try:
+            if runtime == "web_model" and runner_effective == "headless":
+                remove_headless_state(group.group_id, actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            elif runtime == "codex" and runner_effective == "headless":
+                codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                remove_headless_state(group.group_id, actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            elif runtime == "claude" and runner_effective == "headless":
+                claude_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                remove_headless_state(group.group_id, actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            elif runner_effective == "headless":
+                headless_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                remove_headless_state(group.group_id, actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            else:
+                pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                remove_headless_state(group.group_id, actor_id)
+        finally:
+            from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+            stop_openclaw_actor_gateway(group.group_id, actor_id)
     except Exception as e:
         return _error("actor_stop_failed", str(e))
 
@@ -285,6 +315,7 @@ def handle_actor_restart(
     *,
     foreman_id: Callable[[Any], str],
     maybe_reset_automation_on_foreman_change: Callable[..., None],
+    start_actor_process: Optional[Callable[..., Dict[str, Any]]] = None,
     effective_runner_kind: Callable[[str], str],
     remove_headless_state: Callable[[str, str], None],
     remove_pty_state_if_pid: Callable[..., None],
@@ -352,6 +383,39 @@ def handle_actor_restart(
         if isinstance(e, ActorProfileAccessDeniedError):
             return _error("permission_denied", msg)
         return _error("actor_restart_failed", msg)
+
+    if start_actor_process is not None and str(actor.get("runtime") or "").strip().lower() == "openclaw" and coerce_bool(
+        group.doc.get("running"), default=False
+    ):
+        try:
+            from ..openclaw_startup import queue_openclaw_actor_start
+
+            startup = queue_openclaw_actor_start(
+                group.group_id,
+                actor_id,
+                by=by,
+                caller_id=caller_id,
+                is_admin=is_admin,
+                start_actor_process=start_actor_process,
+            )
+        except Exception as exc:
+            return _error("actor_restart_failed", str(exc))
+        maybe_reset_automation_on_foreman_change(group, before_foreman_id=before_foreman)
+        event = append_event(
+            group.ledger_path,
+            kind="actor.restart",
+            group_id=group.group_id,
+            scope_key="",
+            by=by,
+            data={"actor_id": actor_id, "runner": "pty", "runner_effective": "pty", "queued": True},
+        )
+        from ...kernel.events import publish_event
+
+        publish_event("actor.restart", {"group_id": group.group_id, "actor_id": actor_id})
+        return DaemonResponse(
+            ok=True,
+            result={"actor": actor, "event": event, "start_queued": True, "runtime_startup": startup},
+        )
 
     runner_effective = effective_runner_kind(str(actor.get("runner") or "pty"))
     if coerce_bool(group.doc.get("running"), default=False):
@@ -450,6 +514,7 @@ def handle_actor_restart(
                         runtime,
                         cwd,
                         env=dict(launch_env),
+                        command=list(launch_spec["effective_command"]),
                     )
                 )
             except Exception as e:
@@ -606,6 +671,7 @@ def try_handle_actor_lifecycle_op(
             args,
             foreman_id=foreman_id,
             maybe_reset_automation_on_foreman_change=maybe_reset_automation_on_foreman_change,
+            start_actor_process=start_actor_process,
             effective_runner_kind=effective_runner_kind,
             remove_headless_state=remove_headless_state,
             remove_pty_state_if_pid=remove_pty_state_if_pid,

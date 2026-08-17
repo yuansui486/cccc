@@ -9,6 +9,7 @@ from no1.daemon.actors.actor_add_ops import handle_actor_add
 def _handle(
     args: dict,
     *,
+    start_actor_process: Mock | None = None,
     update_actor_private_env: Mock | None = None,
     delete_actor_private_env: Mock | None = None,
     load_actor_profile_secrets: Mock | None = None,
@@ -21,7 +22,7 @@ def _handle(
         args,
         foreman_id=lambda _group: "",
         maybe_reset_automation_on_foreman_change=Mock(),
-        start_actor_process=Mock(),
+        start_actor_process=start_actor_process or Mock(),
         effective_runner_kind=lambda runner: runner,
         validate_private_env_key=lambda key: str(key),
         coerce_private_env_value=lambda value: str(value),
@@ -29,11 +30,83 @@ def _handle(
         delete_actor_private_env=delete_private,
         load_actor_private_env=Mock(return_value={}),
         private_env_max_keys=32,
-        supported_runtimes=("codex", "web_model"),
+        supported_runtimes=("codex", "openclaw", "web_model"),
         get_actor_profile=get_actor_profile or Mock(return_value=None),
         load_actor_profile_secrets=load_profile_secrets,
     )
     return response, update_private, delete_private
+
+
+def test_disabled_actor_is_persisted_without_starting_runtime() -> None:
+    group = SimpleNamespace(group_id="g-test", ledger_path="ledger.jsonl")
+    actor = {
+        "id": "peer1",
+        "runtime": "codex",
+        "runner": "headless",
+        "command": ["codex"],
+        "enabled": False,
+    }
+    start_actor_process = Mock()
+
+    with patch("no1.daemon.actors.actor_add_ops.load_group", return_value=group), patch(
+        "no1.daemon.actors.actor_add_ops.require_actor_permission"
+    ), patch("no1.daemon.actors.actor_add_ops.add_actor", return_value=actor), patch(
+        "no1.daemon.actors.actor_add_ops.append_event", return_value={"id": "evt-1", "ts": "now"}
+    ):
+        response, _update_private, _delete_private = _handle(
+            {
+                "group_id": "g-test",
+                "actor_id": "peer1",
+                "runtime": "codex",
+                "runner": "headless",
+                "enabled": False,
+                "by": "user",
+            },
+            start_actor_process=start_actor_process,
+        )
+
+    assert response.ok
+    assert response.result is not None
+    assert response.result.get("running") is False
+    start_actor_process.assert_not_called()
+
+
+def test_openclaw_actor_add_queues_start_without_blocking_on_runtime() -> None:
+    group = SimpleNamespace(group_id="g-test", ledger_path="ledger.jsonl")
+    actor = {
+        "id": "actor-a",
+        "runtime": "openclaw",
+        "runner": "pty",
+        "command": ["openclaw", "tui"],
+        "enabled": True,
+    }
+    start_actor_process = Mock()
+
+    with patch("no1.daemon.actors.actor_add_ops.load_group", return_value=group), patch(
+        "no1.daemon.actors.actor_add_ops.require_actor_permission"
+    ), patch("no1.daemon.actors.actor_add_ops.add_actor", return_value=actor), patch(
+        "no1.daemon.actors.actor_add_ops.append_event", return_value={"id": "evt-1", "ts": "now"}
+    ), patch(
+        "no1.daemon.openclaw_startup.queue_openclaw_actor_start",
+        return_value={"state": "queued", "phase": "queued", "attempt_id": "attempt-1"},
+    ) as queue_start:
+        response, _update_private, _delete_private = _handle(
+            {
+                "group_id": "g-test",
+                "actor_id": "actor-a",
+                "runtime": "openclaw",
+                "runner": "pty",
+                "by": "user",
+            },
+            start_actor_process=start_actor_process,
+        )
+
+    assert response.ok
+    assert response.result is not None
+    assert response.result.get("start_queued") is True
+    assert response.result.get("runtime_startup", {}).get("state") == "queued"
+    start_actor_process.assert_not_called()
+    queue_start.assert_called_once()
 
 
 def test_profile_initialization_failure_rolls_back_created_actor_and_private_env() -> None:

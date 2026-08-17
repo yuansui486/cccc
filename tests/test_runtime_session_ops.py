@@ -1096,6 +1096,30 @@ class TestRuntimeSessionOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_openclaw_pty_wrapper_stops_gateway_when_launch_fails(self) -> None:
+        from no1.daemon import runtime_session_ops
+
+        with patch(
+            "no1.daemon.openclaw_runtime.prepare_openclaw_actor_runtime",
+            return_value=["openclaw", "tui", "--session", "agent:test:onecolleague"],
+        ), patch.object(
+            runtime_session_ops,
+            "_start_pty_actor_with_runtime_resume_impl",
+            side_effect=RuntimeError("pty failed"),
+        ), patch("no1.daemon.openclaw_runtime.stop_openclaw_actor_gateway") as stop_gateway:
+            with self.assertRaisesRegex(RuntimeError, "pty failed"):
+                runtime_session_ops.start_pty_actor_with_runtime_resume(
+                    group_id="group-a",
+                    actor_id="actor-a",
+                    cwd=Path("."),
+                    base_command=["openclaw"],
+                    env={},
+                    runtime="openclaw",
+                    runtime_start_preflight_error=lambda *_args, **_kwargs: "",
+                )
+
+        stop_gateway.assert_called_once_with("group-a", "actor-a")
+
 
 if __name__ == "__main__":
     unittest.main()

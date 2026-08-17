@@ -134,6 +134,9 @@ function secretsPlaceholderForRuntime(runtime: SupportedRuntime): string {
   if (runtime === "opencode") {
     return 'ONECOLLEAGUE_API_KEY="..."';
   }
+  if (runtime === "openclaw") {
+    return 'ONECOLLEAGUE_API_KEY="..."';
+  }
   if (runtime === "gemini") {
     return 'GOOGLE_API_KEY="..."';
   }
@@ -231,6 +234,7 @@ export function AddActorModal({
   const { modalRef } = useModalA11y(isOpen, handleClose);
 
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
+  const modelCatalog = opencodeModels;
   const runtimeAvailable = runtimeInfo?.available ?? false;
   const defaultCommand = runtimeInfo?.recommended_command || "";
   const derivedRuntimePresetId = runtimePresetIdFor(newActorRuntime, newActorCommand);
@@ -242,7 +246,9 @@ export function AddActorModal({
   const effectiveSelectedModel = modelFromRuntimeConfiguration(
     newActorRuntime,
     newActorCommand,
-    selectedModel === null && newActorRuntime === "kimi" ? defaultRuntimePresetFor("kimi", opencodeModels)?.model : selectedModel,
+    selectedModel === null && newActorRuntime === "kimi"
+      ? defaultRuntimePresetFor(newActorRuntime, modelCatalog)?.model
+      : selectedModel,
   );
   const newActorSecretsPlaceholder = secretsPlaceholderForRuntime(newActorRuntime);
   const needsOneColleagueKey = !newActorUseProfile
@@ -280,7 +286,7 @@ export function AddActorModal({
     }
     if (
       selectedRuntimePreset.envPrivate ||
-      (["codex", "opencode", "hermes"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
+      (["codex", "opencode", "openclaw", "hermes"].includes(selectedRuntimePreset.runtime) && currentDoneHubCodexApiKey)
     ) {
       setShowAdvancedActor(true);
     }
@@ -308,7 +314,7 @@ export function AddActorModal({
     if (nextSecrets !== newActorSecretsSetText) {
       setNewActorSecretsSetText(nextSecrets);
     }
-    if (["codex", "opencode", "hermes"].includes(newActorRuntime) && currentDoneHubCodexApiKey) {
+    if (["codex", "opencode", "openclaw", "hermes"].includes(newActorRuntime) && currentDoneHubCodexApiKey) {
       setShowAdvancedActor(true);
     }
   }, [
@@ -323,7 +329,7 @@ export function AddActorModal({
 
   useEffect(() => {
     if (!isOpen || newActorUseProfile || newActorCommand.trim()) return;
-    const defaultPreset = defaultRuntimePresetFor(newActorRuntime, opencodeModels);
+    const defaultPreset = defaultRuntimePresetFor(newActorRuntime, modelCatalog);
     const commandToPrime = defaultPreset
       ? commandForRuntimePreset(defaultPreset, runtimeInfo).trim()
       : defaultCommand.trim();
@@ -333,7 +339,7 @@ export function AddActorModal({
     primedCommandRef.current = primeKey;
     // The modal defaults are derived from the selected runtime preset.
     setNewActorCommand(commandToPrime);
-  }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, opencodeModels, setNewActorCommand]);
+  }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, modelCatalog, setNewActorCommand]);
 
   if (!isOpen) return null;
 
@@ -392,14 +398,14 @@ export function AddActorModal({
     if (!preset) return;
     const apiKey = getCurrentDoneHubCodexApiKey();
     setNewActorSecretsSetText(mergePresetSecrets(newActorSecretsSetText, preset, apiKey));
-    if (preset.envPrivate || (["codex", "opencode", "hermes"].includes(preset.runtime) && apiKey)) {
+    if (preset.envPrivate || (["codex", "opencode", "openclaw", "hermes"].includes(preset.runtime) && apiKey)) {
       setShowAdvancedActor(true);
     }
   };
 
   const changeRuntime = (next: SupportedRuntime) => {
     const nextInfo = runtimes.find((item) => item.name === next);
-    const preset = defaultRuntimePresetFor(next, opencodeModels);
+    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next, opencodeModels);
     const nextCommand = preset
       ? commandForRuntimePreset(preset, nextInfo)
       : String(nextInfo?.recommended_command || "").trim();
@@ -415,13 +421,13 @@ export function AddActorModal({
         ? mergePresetSecrets(clearedSecrets, preset, apiKey)
         : mergeRuntimeAuthSecret(clearedSecrets, next, apiKey),
     );
-    if (preset?.envPrivate || (["codex", "opencode", "hermes"].includes(next) && apiKey)) setShowAdvancedActor(true);
+    if (preset?.envPrivate || (["codex", "opencode", "openclaw", "hermes"].includes(next) && apiKey)) setShowAdvancedActor(true);
     setOpencodeDefaultVariant("high");
   };
 
   const changeModel = (model: string) => {
     const normalized = model.trim();
-    const preset = runtimePresetForModel(newActorRuntime, normalized, opencodeModels);
+    const preset = runtimePresetForModel(newActorRuntime, normalized, modelCatalog);
     const baseCommand = newActorCommand.trim() || defaultCommand.trim();
     const nextCommand = withRuntimeModel(newActorRuntime, baseCommand, normalized);
     setNewActorCommand(nextCommand);
@@ -553,7 +559,8 @@ export function AddActorModal({
                         onRuntimeChange={changeRuntime}
                         onModelChange={changeModel}
                         priceMap={runtimePriceMap}
-                        opencodeModels={opencodeModels}
+                        modelCatalog={modelCatalog}
+                        runtimeDescriptions={{ openclaw: t("openClawRuntimeDescription") }}
                         disabled={busy === "actor-add"}
                         labels={{
                           runtime: t("runtime"),
@@ -568,6 +575,9 @@ export function AddActorModal({
                           notInstalled: t("notInstalled"),
                           modelRequired: t("modelRequired"),
                           modelInvalid: t("modelInvalid"),
+                          loadingModels: t("loadingOpenClawModels"),
+                          modelCatalogError: t("openClawModelsLoadFailed"),
+                          retryModelCatalog: t("retryOpenClawModels"),
                         }}
                       />
 

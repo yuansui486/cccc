@@ -27,6 +27,7 @@ AgentRuntime = Literal[
     "kimi",
     "neovate",
     "opencode",
+    "openclaw",
     "web_model",
     "custom",
 ]

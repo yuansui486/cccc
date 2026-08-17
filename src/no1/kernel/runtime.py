@@ -92,6 +92,12 @@ KNOWN_RUNTIMES: Dict[str, Dict[str, Any]] = {
         "capabilities": "MCP; MCP setup: auto via launch config",
         "mcp_add_pattern": None,
     },
+    "openclaw": {
+        "display_name": "OpenClaw",
+        "command": "openclaw",
+        "capabilities": "Gateway multi-agent runtime; MCP and skills: auto per actor",
+        "mcp_add_pattern": None,
+    },
     "custom": {
         "display_name": "Custom Runtime",
         "command": "custom",
@@ -107,7 +113,20 @@ KNOWN_RUNTIMES: Dict[str, Dict[str, Any]] = {
 }
 
 # First-class supported runtimes (OneColleague manages startup defaults + MCP wiring)
-PRIMARY_RUNTIMES = ["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "hermes", "kimi", "opencode", "web_model"]
+PRIMARY_RUNTIMES = [
+    "claude",
+    "codex",
+    "droid",
+    "amp",
+    "auggie",
+    "neovate",
+    "gemini",
+    "hermes",
+    "kimi",
+    "opencode",
+    "openclaw",
+    "web_model",
+]
 def detect_runtime(name: str) -> RuntimeInfo:
     """Detect if a specific runtime is available on the system."""
     config = KNOWN_RUNTIMES.get(name)
@@ -285,6 +304,7 @@ def get_runtime_command_with_flags(name: str) -> List[str]:
         "kimi": ["kimi", "--yolo"],
         "neovate": ["neovate"],
         "opencode": ["opencode", "--auto"],
+        "openclaw": ["openclaw", "tui"],
         "custom": [],
         "web_model": [],
     }

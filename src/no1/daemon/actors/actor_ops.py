@@ -69,6 +69,12 @@ def handle_actor_list(
         runner_kind = str(actor.get("runner") or "pty").strip()
         effective_runner = effective_runner_kind(runner_kind)
         runtime = str(actor.get("runtime") or "").strip()
+        if runtime.lower() == "openclaw":
+            from ..openclaw_startup import project_openclaw_startup
+
+            startup = project_openclaw_startup(group_id, aid)
+            if startup is not None:
+                actor["runtime_startup"] = startup
         uses_app_server_state = actor_uses_codex_app_server_state(actor)
         headless_state = None
         if not actor_runtime_enabled(actor):

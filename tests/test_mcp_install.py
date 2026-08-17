@@ -42,6 +42,15 @@ class TestMcpInstall(unittest.TestCase):
         self.assertEqual(prepared["HERMES_SELECTED_MODEL"], "deepseek-v4-pro")
         self.assertEqual(prepared["ONECOLLEAGUE_API_KEY"], "secret")
 
+    def test_prepare_runtime_mcp_env_injects_selected_openclaw_model(self) -> None:
+        prepared = prepare_runtime_mcp_env(
+            "openclaw",
+            {},
+            runtime_options={"selected_model": "provider/model-a"},
+        )
+
+        self.assertEqual(prepared["OPENCLAW_SELECTED_MODEL"], "provider/model-a")
+
     def test_prepare_runtime_mcp_env_injects_prebuilt_hermes_tui(self) -> None:
         tui_dir = Path("/opt/hermes/ui-tui")
         with patch("no1.daemon.mcp_install.hermes_prebuilt_tui_dir", return_value=tui_dir) as discover:

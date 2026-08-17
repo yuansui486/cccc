@@ -1186,7 +1186,7 @@ def _start_fresh_pty_actor_after_resume_failure(
     return session
 
 
-def start_pty_actor_with_runtime_resume(
+def _start_pty_actor_with_runtime_resume_impl(
     *,
     group_id: str,
     actor_id: str,
@@ -1377,3 +1377,55 @@ def start_pty_actor_with_runtime_resume(
                 base_command=base_cmd,
             )
         return session
+
+
+def start_pty_actor_with_runtime_resume(
+    *,
+    group_id: str,
+    actor_id: str,
+    cwd: Path,
+    base_command: Iterable[str],
+    env: Dict[str, str],
+    runtime: str,
+    model: str = "",
+    max_backlog_bytes: int = 2_000_000,
+    runtime_start_preflight_error: Callable[..., str],
+    openclaw_start_guard: Optional[Callable[[], bool]] = None,
+    openclaw_phase_callback: Optional[Callable[[str], None]] = None,
+) -> Any:
+    runtime_norm = str(runtime or "").strip().lower()
+    base_cmd = [str(item) for item in list(base_command or []) if str(item).strip()]
+    try:
+        if runtime_norm == "openclaw":
+            from .openclaw_runtime import prepare_openclaw_actor_runtime
+
+            base_cmd = prepare_openclaw_actor_runtime(
+                group_id=group_id,
+                actor_id=actor_id,
+                cwd=cwd,
+                command=base_cmd,
+                env=env,
+                model=model,
+                start_guard=openclaw_start_guard,
+                phase_callback=openclaw_phase_callback,
+            )
+        return _start_pty_actor_with_runtime_resume_impl(
+            group_id=group_id,
+            actor_id=actor_id,
+            cwd=cwd,
+            base_command=base_cmd,
+            env=env,
+            runtime=runtime,
+            model=model,
+            max_backlog_bytes=max_backlog_bytes,
+            runtime_start_preflight_error=runtime_start_preflight_error,
+        )
+    except Exception:
+        if runtime_norm == "openclaw":
+            try:
+                from .openclaw_runtime import stop_openclaw_actor_gateway
+
+                stop_openclaw_actor_gateway(group_id, actor_id)
+            except Exception:
+                pass
+        raise

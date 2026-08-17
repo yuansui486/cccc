@@ -1,4 +1,4 @@
-import type { DirItem, DirSuggestion, RuntimeInfo } from "../../types";
+import type { DirItem, DirSuggestion, OpenClawModel, RuntimeInfo } from "../../types";
 import {
   apiJson,
   pingRequestKey,
@@ -21,6 +21,10 @@ export async function fetchPing(options?: { includeHome?: boolean }) {
 
 export async function fetchRuntimes() {
   return apiJson<{ runtimes: RuntimeInfo[]; available: string[] }>("/api/v1/runtimes");
+}
+
+export async function fetchOpenClawModels() {
+  return apiJson<{ models: OpenClawModel[] }>("/api/v1/runtimes/openclaw/models");
 }
 
 export async function fetchDirSuggestions() {

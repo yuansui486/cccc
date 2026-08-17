@@ -10,6 +10,7 @@ from ...contracts.v1 import DaemonError, DaemonResponse
 from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ...kernel.active import load_active, set_active_group_id
+from ...kernel.actors import list_actors
 from ...kernel.group import Group, delete_group, detach_scope_from_group, load_group, set_active_scope, update_group
 from ...kernel.ledger import append_event
 from ...kernel.permissions import require_group_permission
@@ -215,6 +216,20 @@ def handle_group_delete(
         claude_app_supervisor.stop_group(group_id=group_id)
         pty_runner.SUPERVISOR.stop_group(group_id=group_id)
         headless_runner.SUPERVISOR.stop_group(group_id=group_id)
+        from ..openclaw_startup import cancel_openclaw_actor_start
+        from ..openclaw_runtime import remove_openclaw_actor_runtime
+
+        for actor in list_actors(group):
+            if not isinstance(actor, dict):
+                continue
+            actor_id = str(actor.get("id") or "").strip()
+            if actor_id:
+                cancel_openclaw_actor_start(group_id, actor_id, remove=True)
+                remove_openclaw_actor_runtime(
+                    group_id,
+                    actor_id,
+                    env=dict(actor.get("env") or {}) if isinstance(actor.get("env"), dict) else None,
+                )
         delete_group_private_env(group_id)
         reg = load_registry()
         delete_group(reg, group_id=group_id)

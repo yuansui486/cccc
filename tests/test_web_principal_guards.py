@@ -178,6 +178,94 @@ class TestWebPrincipalGuards(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_runtimes_response_does_not_discover_openclaw_models(self) -> None:
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.runtime import RuntimeInfo
+
+        _, cleanup = self._with_home()
+        try:
+            token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
+            runtime = RuntimeInfo(
+                name="openclaw",
+                display_name="OpenClaw",
+                command="openclaw",
+                available=True,
+                path="/usr/bin/openclaw",
+                capabilities="Gateway multi-agent runtime; MCP and skills: auto per actor",
+                mcp_add_command=None,
+            )
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon), patch(
+                "no1.kernel.runtime.detect_all_runtimes",
+                return_value=[runtime],
+            ), patch(
+                "no1.kernel.runtime.get_runtime_command_with_flags",
+                return_value=["openclaw"],
+            ), patch(
+                "no1.daemon.openclaw_runtime.list_openclaw_models",
+                side_effect=AssertionError("model discovery must use the dedicated endpoint"),
+            ) as list_models:
+                client = self._create_client()
+                resp = client.get("/api/v1/runtimes", headers={"Authorization": f"Bearer {token}"})
+
+            self.assertEqual(resp.status_code, 200)
+            result = resp.json().get("result") or {}
+            self.assertEqual(result.get("available"), ["openclaw"])
+            self.assertNotIn("models", (result.get("runtimes") or [])[0])
+            list_models.assert_not_called()
+        finally:
+            cleanup()
+
+    def test_openclaw_models_endpoint_returns_structured_catalog(self) -> None:
+        from no1.kernel.access_tokens import create_access_token
+
+        _, cleanup = self._with_home()
+        try:
+            token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
+            rows = [{
+                "key": "model-a",
+                "name": "Model A",
+                "input": "text+image",
+                "contextWindow": 200000,
+                "tags": ["default"],
+                "available": False,
+            }]
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon), patch(
+                "no1.daemon.openclaw_runtime.list_openclaw_models",
+                return_value=rows,
+            ):
+                client = self._create_client()
+                resp = client.get("/api/v1/runtimes/openclaw/models", headers={"Authorization": f"Bearer {token}"})
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual((resp.json().get("result") or {}).get("models"), [{
+                "id": "model-a",
+                "name": "Model A",
+                "input": "text+image",
+                "context_window": 200000,
+                "tags": ["default"],
+                "available": True,
+            }])
+        finally:
+            cleanup()
+
+    def test_openclaw_models_endpoint_maps_invalid_catalog_to_502(self) -> None:
+        from no1.kernel.access_tokens import create_access_token
+
+        _, cleanup = self._with_home()
+        try:
+            token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
+            rows = [{"key": "provider/model-a", "contextWindow": "invalid", "tags": "not-a-list"}]
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon), patch(
+                "no1.daemon.openclaw_runtime.list_openclaw_models",
+                return_value=rows,
+            ):
+                client = self._create_client()
+                resp = client.get("/api/v1/runtimes/openclaw/models", headers={"Authorization": f"Bearer {token}"})
+
+            self.assertEqual(resp.status_code, 502)
+            self.assertEqual(resp.json()["error"]["code"], "openclaw_model_discovery_failed")
+        finally:
+            cleanup()
+
     def test_empty_scoped_token_sees_no_groups(self) -> None:
         from no1.kernel.access_tokens import create_access_token
 

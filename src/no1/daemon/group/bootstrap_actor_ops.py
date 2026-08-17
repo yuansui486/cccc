@@ -35,6 +35,7 @@ def autostart_running_groups(
     home: Path,
     *,
     effective_runner_kind: Callable[[str], str],
+    start_actor_process: Optional[Callable[..., Dict[str, Any]]] = None,
     find_scope_url: Callable[[Any, str], str],
     supported_runtimes: tuple[str, ...],
     ensure_mcp_installed: Callable[..., bool],
@@ -145,6 +146,26 @@ def autostart_running_groups(
             cwd = launch_spec["cwd"]
             runtime = str(launch_spec["runtime"])
             effective_env = dict(launch_spec["merged_env"])
+            if runtime == "openclaw" and start_actor_process is not None:
+                from ..openclaw_startup import queue_openclaw_actor_start, read_openclaw_startup
+
+                previous_startup = read_openclaw_startup(group.group_id, actor_id)
+                if str(previous_startup.get("state") or "") == "failed":
+                    logger.info(
+                        "autostart skipped failed OpenClaw actor group=%s actor=%s",
+                        group.group_id,
+                        actor_id,
+                    )
+                    continue
+                queue_openclaw_actor_start(
+                    group.group_id,
+                    actor_id,
+                    by="daemon",
+                    caller_id="",
+                    is_admin=True,
+                    start_actor_process=start_actor_process,
+                )
+                continue
             launch_env = prepare_runtime_mcp_env(
                 runtime,
                 inject_actor_context_env(effective_env, group.group_id, actor_id),
@@ -165,6 +186,7 @@ def autostart_running_groups(
                             runtime,
                             cwd,
                             env=dict(launch_env),
+                            command=list(effective_cmd),
                         )
                     )
                 except Exception:

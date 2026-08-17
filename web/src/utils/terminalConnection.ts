@@ -4,6 +4,7 @@ export function buildTerminalConnectionKey(args: {
   isHeadless: boolean;
   groupId: string;
   actorId: string;
+  termEpoch: number;
   reconnectTrigger: number;
   canControl: boolean;
 }): string {
@@ -13,6 +14,7 @@ export function buildTerminalConnectionKey(args: {
     args.isHeadless ? "headless" : "pty",
     String(args.groupId || "").trim(),
     String(args.actorId || "").trim(),
+    String(args.termEpoch || 0),
     String(args.reconnectTrigger || 0),
     args.canControl ? "control" : "readonly",
   ].join(":");

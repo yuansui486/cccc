@@ -15,6 +15,7 @@ __all__ = [
     "cmd_actor_secrets",
     "cmd_runtime_list",
     "cmd_runtime_hermes",
+    "cmd_runtime_openclaw",
 ]
 
 def cmd_actor_list(args: argparse.Namespace) -> int:
@@ -52,6 +53,8 @@ def cmd_actor_add(args: argparse.Namespace) -> int:
     submit = str(args.submit or "enter").strip() or "enter"
     runner = str(getattr(args, "runner", "") or "pty").strip() or "pty"
     runtime = str(getattr(args, "runtime", "") or "codex").strip() or "codex"
+    selected_model = str(getattr(args, "model", "") or "").strip()
+    runtime_options = {"selected_model": selected_model} if getattr(args, "model", None) is not None else {}
     command: list[str] = []
     if args.command:
         try:
@@ -103,6 +106,7 @@ def cmd_actor_add(args: argparse.Namespace) -> int:
                     "by": by,
                     "command": command,
                     "env": env,
+                    "runtime_options": runtime_options,
                     "default_scope_key": default_scope_key,
                 },
             }
@@ -121,7 +125,7 @@ def cmd_actor_add(args: argparse.Namespace) -> int:
             command = []
         elif runner != "pty":
             raise ValueError("invalid runner (must be 'pty')")
-        if runtime not in ("amp", "auggie", "claude", "codex", "droid", "gemini", "hermes", "kimi", "neovate", "opencode", "web_model", "custom"):
+        if runtime not in ("amp", "auggie", "claude", "codex", "droid", "gemini", "hermes", "kimi", "neovate", "opencode", "openclaw", "web_model", "custom"):
             raise ValueError("invalid runtime")
         if runtime == "custom" and not command:
             raise ValueError("custom runtime requires a command (PTY runner)")
@@ -135,6 +139,7 @@ def cmd_actor_add(args: argparse.Namespace) -> int:
             submit=submit,
             runner=runner,  # type: ignore
             runtime=runtime,  # type: ignore
+            runtime_options=runtime_options,
         )
     except Exception as e:
         _print_json({"ok": False, "error": {"code": "actor_add_failed", "message": str(e)}})
@@ -316,6 +321,17 @@ def cmd_actor_update(args: argparse.Namespace) -> int:
         patch["runner"] = str(args.runner)
     if getattr(args, "runtime", None) is not None:
         patch["runtime"] = str(args.runtime)
+    if getattr(args, "model", None) is not None:
+        from ..kernel.actors import find_actor
+
+        actor = find_actor(group, actor_id)
+        existing_options = dict(actor.get("runtime_options") or {}) if isinstance(actor, dict) else {}
+        selected_model = str(getattr(args, "model", "") or "").strip()
+        if selected_model:
+            existing_options["selected_model"] = selected_model
+        else:
+            existing_options.pop("selected_model", None)
+        patch["runtime_options"] = existing_options
     if getattr(args, "runtime_state_source", None) is not None:
         patch["runtime_state_source"] = str(args.runtime_state_source)
     if args.enabled is not None:
@@ -457,3 +473,35 @@ def cmd_runtime_hermes(args: argparse.Namespace) -> int:
         return 0 if result.get("ok") else 2
     _print_json({"ok": False, "error": {"code": "invalid_action", "message": f"unknown Hermes runtime action: {action}"}})
     return 2
+
+
+def cmd_runtime_openclaw(args: argparse.Namespace) -> int:
+    """Inspect the configured model catalog for a local OpenClaw profile."""
+    from ..daemon.openclaw_runtime import list_openclaw_models
+
+    action = str(getattr(args, "openclaw_action", "") or "").strip()
+    if action != "models":
+        _print_json({"ok": False, "error": {"code": "invalid_action", "message": f"unknown OpenClaw runtime action: {action}"}})
+        return 2
+
+    command = ["openclaw"]
+    profile = str(getattr(args, "profile", "") or "").strip()
+    if bool(getattr(args, "dev", False)):
+        command.append("--dev")
+    elif profile:
+        command.extend(["--profile", profile])
+    try:
+        models = list_openclaw_models(
+            command,
+            env=dict(os.environ),
+            refresh=bool(getattr(args, "refresh", False)),
+        )
+    except Exception as exc:
+        _print_json({
+            "ok": False,
+            "error": {"code": "openclaw_model_discovery_failed", "message": str(exc)},
+        })
+        return 2
+
+    _print_json({"ok": True, "result": {"models": models}})
+    return 0

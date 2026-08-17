@@ -22,6 +22,19 @@ import {
 
 export type AgentTerminalConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
 
+export function terminalHasOutputForSession(args: {
+  isRunning: boolean;
+  isHeadless: boolean;
+  terminalSessionKey: string;
+  outputSessionKey: string | null;
+}): boolean {
+  return Boolean(
+    args.isRunning
+      && !args.isHeadless
+      && args.outputSessionKey === args.terminalSessionKey,
+  );
+}
+
 const TERMINAL_SHOW_DELAY_MS = 150;
 const TERMINAL_ATTACH_TIMEOUT_MS = 10000;
 const RECONNECT_BASE_DELAY_MS = 1000;
@@ -65,6 +78,7 @@ export function useAgentTerminalConnection(args: {
 
   const [connectionStatus, setConnectionStatus] = useState<AgentTerminalConnectionStatus>("disconnected");
   const [terminalReady, setTerminalReady] = useState(false);
+  const [terminalOutputSessionKey, setTerminalOutputSessionKey] = useState<string | null>(null);
   const [terminalWritable, setTerminalWritable] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -81,7 +95,12 @@ export function useAgentTerminalConnection(args: {
     key: terminalSessionKey,
     cursor: null,
   });
-  const lastTermEpochRef = useRef(termEpoch);
+  const terminalHasOutput = terminalHasOutputForSession({
+    isRunning,
+    isHeadless,
+    terminalSessionKey,
+    outputSessionKey: terminalOutputSessionKey,
+  });
 
   const isRunningRef = useRef(isRunning);
   const runtimeRef = useRef(actorRuntime);
@@ -123,6 +142,12 @@ export function useAgentTerminalConnection(args: {
     terminalAttachStartupStartedAtRef.current = 0;
   }, [terminalSessionKey]);
 
+  useEffect(() => {
+    if (isRunning && !isHeadless) return;
+    const timer = window.setTimeout(() => setTerminalOutputSessionKey(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [isHeadless, isRunning]);
+
   const requestReconnect = useCallback(() => {
     reconnectAttemptRef.current = 0;
     terminalAttachNoRetryRef.current = false;
@@ -142,6 +167,7 @@ export function useAgentTerminalConnection(args: {
     isHeadless,
     groupId,
     actorId,
+    termEpoch,
     reconnectTrigger,
     canControl,
   });
@@ -323,6 +349,7 @@ export function useAgentTerminalConnection(args: {
           });
         }
         try {
+          if (safe.length > 0) setTerminalOutputSessionKey(terminalSessionKey);
           term.write(safe);
         } catch (err) {
           console.error("terminal write failed", err);
@@ -515,18 +542,13 @@ export function useAgentTerminalConnection(args: {
     isRunning,
     terminalConnectionKey,
     terminalRef,
+    terminalSessionKey,
   ]);
-
-  useEffect(() => {
-    if (!activated || isHeadless || !isRunning || !terminalRef.current) return;
-    if (lastTermEpochRef.current === termEpoch) return;
-    lastTermEpochRef.current = termEpoch;
-    requestReconnect();
-  }, [activated, isHeadless, isRunning, requestReconnect, termEpoch, terminalRef]);
 
   return {
     connectionStatus,
     terminalReady,
+    terminalHasOutput,
     terminalWritable,
     requestReconnect,
     sendInterrupt,

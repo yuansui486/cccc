@@ -44,6 +44,18 @@ export function shouldFetchStoppedTerminalTail(args: {
   return Boolean(args.activated && !args.isRunning && !args.isHeadless && args.groupId && args.actorId && !args.isActorBusy);
 }
 
+export function shouldShowOpenClawTerminalInitializing(args: {
+  isOpenClaw: boolean;
+  isRunning: boolean;
+  terminalHasOutput: boolean;
+}): boolean {
+  return Boolean(
+    args.isOpenClaw
+      && args.isRunning
+      && !args.terminalHasOutput,
+  );
+}
+
 interface AgentTabProps {
   actor: Actor;
   groupId: string;
@@ -90,6 +102,10 @@ export function AgentTab({
   const isWebModel = String(actor.runtime || "").trim().toLowerCase() === "web_model";
   const hasRuntimeResumeFailure = actorHasRuntimeResumeFailure(actor);
   const runtimeResumeError = String(actor.runtime_session_last_resume_error || "").trim();
+  const startupState = String(actor.runtime_startup?.state || "").trim().toLowerCase();
+  const startupPending = startupState === "queued" || startupState === "initializing";
+  const startupError = String(actor.runtime_startup?.error || "").trim();
+  const openClawRuntime = String(actor.runtime || "").trim().toLowerCase() === "openclaw";
   const canControl = !readOnly;
   const isBusy = busy.includes(actor.id);
   const latestHeadlessText = useGroupStore((state) => {
@@ -277,6 +293,8 @@ export function AgentTab({
   })();
 
   const runtimeStatusText = (() => {
+    if (startupPending) return t("initializingRuntime");
+    if (startupState === "failed") return t("runtimeStartFailedTitle");
     if (!isRunning) return t("stopped");
     if (workingState === "working") return t("working");
     return t("running");
@@ -307,6 +325,23 @@ export function AgentTab({
           {runtimeResumeError}
         </pre>
       ) : null}
+    </div>
+  ) : null;
+  const startupFailureNotice = startupState === "failed" ? (
+    <div className="flex w-full max-w-xl flex-col items-center rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-4 text-center text-red-700 dark:text-red-200">
+      <AlertIcon size={40} />
+      <div className="mt-3 text-lg font-semibold text-[var(--color-text-primary)]">
+        {t("runtimeStartFailedTitle")}
+      </div>
+      {startupError ? (
+        <pre className="mt-3 max-h-32 w-full overflow-auto whitespace-pre-wrap break-words rounded-md border border-red-500/25 bg-[var(--glass-panel-bg)] px-3 py-2 text-left font-mono text-xs leading-relaxed text-[var(--color-text-secondary)]">
+          {startupError}
+        </pre>
+      ) : null}
+      <button type="button" className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent-primary)] px-3 py-2 text-sm font-medium text-[var(--color-text-inverse)]" onClick={onRelaunch} disabled={isBusy || readOnly}>
+        <RefreshIcon size={16} />
+        {t("retryStart")}
+      </button>
     </div>
   ) : null;
   const primaryActionButtonClass =
@@ -456,6 +491,7 @@ export function AgentTab({
   const {
     connectionStatus,
     terminalReady,
+    terminalHasOutput,
     requestReconnect,
     sendInterrupt,
   } = useAgentTerminalConnection({
@@ -473,6 +509,11 @@ export function AgentTab({
     setTerminalSignal,
     clearTerminalSignal,
     setReconnectTrigger,
+  });
+  const showOpenClawInitializing = shouldShowOpenClawTerminalInitializing({
+    isOpenClaw: openClawRuntime,
+    isRunning,
+    terminalHasOutput,
   });
 
   useEffect(() => {
@@ -768,6 +809,10 @@ export function AgentTab({
               ) : null}
             </div>
           </div>
+        ) : startupFailureNotice ? (
+          <div className="flex h-full min-h-[420px] items-center justify-center px-5">
+            {startupFailureNotice}
+          </div>
         ) : isRunning ? (
           // PTY agent - show terminal
           // contain: layout paint isolates layout/paint calculations to prevent jitter when terminal content updates
@@ -779,11 +824,29 @@ export function AgentTab({
               style={{
                 contain: 'layout paint',
                 overflow: 'hidden',
-                opacity: terminalReady ? 1 : 0,
+                opacity: terminalReady && (!openClawRuntime || terminalHasOutput) ? 1 : 0,
               }}
             />
+            {showOpenClawInitializing && (
+              <div className={classNames(
+                "absolute inset-0 flex flex-col items-center justify-center p-8",
+                "text-[var(--color-text-secondary)] bg-[var(--glass-panel-bg)]",
+              )}>
+                <div className="mb-4 rounded-full border border-blue-500/30 bg-blue-500/10 p-4 text-blue-600 dark:text-blue-300">
+                  <TerminalIcon size={38} className="animate-pulse" />
+                </div>
+                <div className="text-lg font-medium text-[var(--color-text-primary)]">
+                  {t('initializingRuntime')}
+                </div>
+                <div className="mt-2 text-sm text-center text-[var(--color-text-tertiary)]">
+                  {connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
+                    ? t('connectingTerminal')
+                    : t('waitingForTerminalOutput')}
+                </div>
+              </div>
+            )}
             {/* Connection error overlay — shown when all reconnect attempts failed and terminal never became ready */}
-            {connectionStatus === 'disconnected' && !terminalReady && (
+            {!showOpenClawInitializing && connectionStatus === 'disconnected' && !terminalReady && (
               <div className={classNames(
                 "absolute inset-0 flex flex-col items-center justify-center p-8",
                 "text-[var(--color-text-tertiary)] bg-[var(--glass-panel-bg)]"

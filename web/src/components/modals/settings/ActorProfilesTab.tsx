@@ -167,6 +167,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
     [editor.runtime]
   );
   const effectiveRuntimes = runtimeCatalog.length ? runtimeCatalog : discoveredRuntimes;
+  const modelCatalog = opencodeModels;
 
   useEffect(() => {
     if (!isActive || runtimePriceMap) return;
@@ -224,7 +225,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
 
   const changeEditorRuntime = (next: SupportedRuntime) => {
     const info = effectiveRuntimes.find((item) => item.name === next);
-    const preset = defaultRuntimePresetFor(next, opencodeModels);
+    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next, opencodeModels);
     const command = preset
       ? commandForRuntimePreset(preset, info)
       : String(info?.recommended_command || defaultCommandForRuntime(next)).trim();
@@ -245,7 +246,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
 
   const changeEditorModel = (model: string) => {
     const normalized = model.trim();
-    const preset = runtimePresetForModel(editor.runtime, normalized, opencodeModels);
+    const preset = runtimePresetForModel(editor.runtime, normalized, modelCatalog);
     const nextCommand = withRuntimeModel(
       editor.runtime,
       editor.command.trim() || editorDefaultCommand,
@@ -311,7 +312,8 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                 onRuntimeChange={changeEditorRuntime}
                 onModelChange={changeEditorModel}
                 priceMap={runtimePriceMap}
-                opencodeModels={opencodeModels}
+                modelCatalog={modelCatalog}
+                runtimeDescriptions={{ openclaw: t("actorProfiles.openClawRuntimeDescription") }}
                 disabled={editorBusy}
                 labels={{
                   runtime: t("actorProfiles.runtime"),
@@ -326,6 +328,9 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                   notInstalled: t("actorProfiles.notInstalled"),
                   modelRequired: t("actorProfiles.modelRequired"),
                   modelInvalid: t("actorProfiles.modelInvalid"),
+                  loadingModels: t("actorProfiles.loadingOpenClawModels"),
+                  modelCatalogError: t("actorProfiles.openClawModelsLoadFailed"),
+                  retryModelCatalog: t("actorProfiles.retryOpenClawModels"),
                 }}
               />
             </div>

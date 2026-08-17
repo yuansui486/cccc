@@ -167,7 +167,10 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             spawn_calls: list[dict[str, object]] = []
 
-            def _spawn(_cmdline: str, **kwargs: object) -> object:
+            spawn_commands: list[object] = []
+
+            def _spawn(command: object, **kwargs: object) -> object:
+                spawn_commands.append(command)
                 spawn_calls.append(dict(kwargs))
                 raise TypeError("spawn signature mismatch")
 
@@ -183,6 +186,9 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
                     )
 
             self.assertEqual(len(spawn_calls), 2)
+            self.assertEqual(spawn_commands, [["codex"], ["codex"]])
+            self.assertEqual(spawn_calls[0].get("dimensions"), (40, 120))
+            self.assertNotIn("dimensions", spawn_calls[1])
             self.assertTrue(all("env" in call for call in spawn_calls))
 
     def test_windows_pty_stop_uses_tree_termination(self) -> None:

@@ -467,6 +467,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         "hermes",
         "kimi",
         "opencode",
+        "openclaw",
         "custom",
     ]
 
@@ -503,15 +504,22 @@ def cmd_setup(args: argparse.Namespace) -> int:
             results["notes"].append(f"{rt}: CLI not found; run the command shown in result.mcp.{rt}.command")
 
     def _auto_setup(rt: str) -> None:
-        if rt == "opencode":
+        if rt in {"opencode", "openclaw"}:
             runtime_info = detect_runtime(rt)
+            if rt == "openclaw":
+                hint = (
+                    "OneColleague creates an isolated OpenClaw agent, actor-scoped MCP server, skill filter, "
+                    "and Gateway session when the actor starts; no standalone global MCP entry is required."
+                )
+            else:
+                hint = "OneColleague injects the OpenCode MCP config through OPENCODE_CONFIG_CONTENT when each actor starts; no global OpenCode config is modified."
             results["mcp"][rt] = {
                 "mode": "auto",
                 "status": "runtime_env",
-                "hint": "OneColleague injects the OpenCode MCP config through OPENCODE_CONFIG_CONTENT when each actor starts; no global OpenCode config is modified.",
+                "hint": hint,
             }
             if not runtime_info.available:
-                results["notes"].append("opencode: CLI not found; install OpenCode before starting an opencode actor")
+                results["notes"].append(f"{rt}: CLI not found; install {runtime_info.display_name} before starting an actor")
             return
         runtime_info = detect_runtime(rt)
         was_ready = is_mcp_installed(rt) if runtime_info.available else False

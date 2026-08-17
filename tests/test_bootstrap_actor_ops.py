@@ -429,6 +429,7 @@ class TestBootstrapActorOps(unittest.TestCase):
                     "actor_id": "peer1",
                     "runtime": "codex",
                     "runner": "headless",
+                    "enabled": False,
                     "env": {"OPENAI_API_KEY": "sk-test"},
                     "by": "user",
                 },
@@ -528,6 +529,7 @@ class TestBootstrapActorOps(unittest.TestCase):
                     "actor_id": "peer1",
                     "runtime": "codex",
                     "runner": "pty",
+                    "enabled": False,
                     "by": "user",
                 },
             )
@@ -541,6 +543,7 @@ class TestBootstrapActorOps(unittest.TestCase):
             for actor in group.doc.get("actors", []):
                 if isinstance(actor, dict) and actor.get("id") == "peer1":
                     actor["runtime_state_source"] = "terminal"
+                    actor["enabled"] = True
             group.doc["running"] = True
             group.doc["state"] = "active"
             group.save()
@@ -702,6 +705,39 @@ class TestBootstrapActorOps(unittest.TestCase):
             self.assertEqual(str(resolved.get("profile_scope") or ""), "global")
         finally:
             cleanup()
+
+    def test_profile_apply_failure_preserves_previous_openclaw_runtime(self) -> None:
+        from no1.daemon.actors import actor_profile_runtime
+
+        actor = {
+            "id": "peer1",
+            "runtime": "openclaw",
+            "profile_id": "profile-a",
+            "env": {"OPENCLAW_PROFILE": "work"},
+        }
+
+        class _Group:
+            group_id = "group-a"
+
+        with patch.object(actor_profile_runtime, "find_actor", return_value=actor), patch.object(
+            actor_profile_runtime,
+            "_resolve_profile_for_start",
+            return_value={"id": "profile-a", "runtime": "codex"},
+        ), patch.object(actor_profile_runtime, "actor_profile_ref", return_value=None), patch.object(
+            actor_profile_runtime,
+            "apply_profile_link_to_actor",
+            side_effect=RuntimeError("profile apply failed"),
+        ), patch("no1.daemon.openclaw_runtime.remove_openclaw_actor_runtime") as remove_runtime:
+            with self.assertRaisesRegex(RuntimeError, "profile apply failed"):
+                actor_profile_runtime.resolve_linked_actor_before_start(
+                    _Group(),
+                    "peer1",
+                    get_actor_profile=lambda _profile_id: None,
+                    load_actor_profile_secrets=lambda _profile_ref: {},
+                    update_actor_private_env=lambda *_args, **_kwargs: {},
+                )
+
+        remove_runtime.assert_not_called()
 
     def test_user_scope_profile_start_resolves_via_explicit_ref(self) -> None:
         """User-scope profile start resolves via explicit ref persisted at attach time."""

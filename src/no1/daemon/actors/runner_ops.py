@@ -142,30 +142,45 @@ def stop_actor(group_id: str, actor_id: str, runner_kind: str) -> None:
     actor = find_actor(group, actor_id) if group is not None else None
     runtime = str(actor.get("runtime") or "").strip().lower() if isinstance(actor, dict) else ""
     effective_runner = _effective_runner_kind(runner_kind)
-    if runtime == "codex" and effective_runner == "headless":
-        codex_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
-    elif runtime == "claude" and effective_runner == "headless":
-        claude_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
-    elif effective_runner == "headless":
-        headless_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
-    else:
-        pty_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+    try:
+        if runtime == "codex" and effective_runner == "headless":
+            codex_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
+        elif runtime == "claude" and effective_runner == "headless":
+            claude_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
+        elif effective_runner == "headless":
+            headless_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+        else:
+            pty_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+    finally:
+        from ..openclaw_runtime import stop_openclaw_actor_gateway
+
+        stop_openclaw_actor_gateway(group_id, actor_id)
 
 
 def stop_group(group_id: str) -> None:
     """Stop all actors in a group (both PTY and headless)."""
-    codex_app_supervisor.stop_group(group_id=group_id)
-    claude_app_supervisor.stop_group(group_id=group_id)
-    pty_runner.SUPERVISOR.stop_group(group_id=group_id)
-    headless_runner.SUPERVISOR.stop_group(group_id=group_id)
+    try:
+        codex_app_supervisor.stop_group(group_id=group_id)
+        claude_app_supervisor.stop_group(group_id=group_id)
+        pty_runner.SUPERVISOR.stop_group(group_id=group_id)
+        headless_runner.SUPERVISOR.stop_group(group_id=group_id)
+    finally:
+        from ..openclaw_runtime import stop_openclaw_group_gateways
+
+        stop_openclaw_group_gateways(group_id)
 
 
 def stop_all() -> None:
     """Stop all actors (both PTY and headless)."""
-    codex_app_supervisor.stop_all()
-    claude_app_supervisor.stop_all()
-    pty_runner.SUPERVISOR.stop_all()
-    headless_runner.SUPERVISOR.stop_all()
+    try:
+        codex_app_supervisor.stop_all()
+        claude_app_supervisor.stop_all()
+        pty_runner.SUPERVISOR.stop_all()
+        headless_runner.SUPERVISOR.stop_all()
+    finally:
+        from ..openclaw_runtime import stop_all_openclaw_gateways
+
+        stop_all_openclaw_gateways()
 
 
 def try_handle_headless_op(op: str, args: Dict[str, Any]) -> Optional[DaemonResponse]:
