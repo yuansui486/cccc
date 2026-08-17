@@ -1,4 +1,4 @@
-"""Actor autostart bootstrap helpers."""
+"""Daemon startup helpers for persisted actor runtime state."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from ...kernel.actors import is_internal_actor, is_supported_internal_actor, lis
 from ...kernel.group import load_group
 from ...kernel.runtime import runtime_start_preflight_error
 from ...kernel.runtime_state_source import actor_uses_codex_app_server_state
+from ...util.fs import read_json
+from ...util.time import utc_now_iso
 from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ..mcp_install import prepare_runtime_mcp_env
@@ -25,10 +27,115 @@ from ..assistants.voice_secretary_runtime_ops import (
     restore_voice_secretary_actor_state,
     sync_voice_secretary_actor_from_foreman,
 )
+from ..messaging.turn_provenance import invalidate_turn_grant
+from ..openclaw_startup import cancel_all_openclaw_actor_starts
 
 logger = logging.getLogger("no1.daemon.server")
 
 ResolveLinkedActorBeforeStart = Callable[..., Dict[str, Any]]
+
+
+def _clear_execution_state(group: Any) -> int:
+    storage = ContextStorage(group)
+    agents = storage.load_agents()
+    changed = 0
+    now = utc_now_iso()
+    for agent in agents.agents:
+        if not (
+            agent.hot.active_task_id
+            or agent.hot.focus
+            or agent.hot.next_action
+            or agent.hot.blockers
+            or agent.warm.what_changed
+        ):
+            continue
+        agent.hot.active_task_id = None
+        agent.hot.focus = ""
+        agent.hot.next_action = ""
+        agent.hot.blockers = []
+        agent.warm.what_changed = ""
+        agent.updated_at = now
+        changed += 1
+    if changed:
+        storage.save_agents(agents)
+        storage.bump_version_state(agents_changed=True)
+    return changed
+
+
+def _invalidate_live_turn_grants(group: Any) -> int:
+    state_dir = group.path / "state" / "turn-grants"
+    if not state_dir.exists():
+        return 0
+    changed = 0
+    for path in state_dir.glob("*.json"):
+        state = read_json(path)
+        if not isinstance(state, dict):
+            continue
+        if not isinstance(state.get("pending_attempt"), dict) and not isinstance(state.get("current_grant"), dict):
+            continue
+        invalidate_turn_grant(group, path.stem, reason="daemon_start_stopped")
+        changed += 1
+    return changed
+
+
+def _remove_runner_markers(group: Any) -> int:
+    removed = 0
+    for runner_kind in ("pty", "headless"):
+        state_dir = group.path / "state" / "runners" / runner_kind
+        if not state_dir.exists():
+            continue
+        for path in state_dir.glob("*.json"):
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+def reset_groups_for_daemon_start(home: Path) -> Dict[str, int]:
+    """Persist a stopped baseline before daemon services become reachable."""
+    result = {
+        "groups": 0,
+        "groups_changed": 0,
+        "actors_disabled": 0,
+        "runner_markers_removed": 0,
+        "openclaw_starts_cancelled": 0,
+        "agent_states_cleared": 0,
+        "turn_grants_invalidated": 0,
+    }
+    base = home / "groups"
+    if not base.exists():
+        return result
+
+    for group_yaml in sorted(base.glob("*/group.yaml")):
+        group = load_group(group_yaml.parent.name)
+        if group is None:
+            logger.warning("startup reset skipped unreadable group: %s", group_yaml.parent.name)
+            continue
+        result["groups"] += 1
+        group_changed = False
+        actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+        for actor in actors:
+            if not isinstance(actor, dict):
+                continue
+            if actor.get("enabled") is not False:
+                actor["enabled"] = False
+                result["actors_disabled"] += 1
+                group_changed = True
+        if group.doc.get("running") is not False:
+            group.doc["running"] = False
+            group_changed = True
+        if str(group.doc.get("state") or "").strip().lower() != "stopped":
+            group.doc["state"] = "stopped"
+            group_changed = True
+        if group_changed:
+            group.save()
+            result["groups_changed"] += 1
+
+        result["openclaw_starts_cancelled"] += cancel_all_openclaw_actor_starts(group.group_id)
+        result["runner_markers_removed"] += _remove_runner_markers(group)
+        result["agent_states_cleared"] += _clear_execution_state(group)
+        result["turn_grants_invalidated"] += _invalidate_live_turn_grants(group)
+
+    return result
 
 
 def autostart_running_groups(

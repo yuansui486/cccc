@@ -22,6 +22,7 @@ from ..util.time import utc_now_iso
 LOGGER = logging.getLogger(__name__)
 _STATE_FILE = "actor_startups.json"
 _WORKER_COUNT = 2
+_ACTIVE_STARTUP_STATES = frozenset({"queued", "initializing", "running"})
 _LOCK = threading.RLock()
 _GROUP_LOCKS: Dict[str, threading.RLock] = {}
 _ACTOR_EXECUTION_LOCKS: Dict[tuple[str, str], threading.Lock] = {}
@@ -405,6 +406,43 @@ def cancel_openclaw_actor_start(group_id: str, actor_id: str, *, remove: bool = 
                 "error": "",
             }
         _write_rows(gid, rows)
+
+
+def cancel_all_openclaw_actor_starts(group_id: str) -> int:
+    """Cancel every durable startup attempt for one group.
+
+    This is used before daemon services become reachable. Bumping each active
+    generation also makes queued in-memory work from a prior coordinator run
+    fail its current-attempt guard.
+    """
+    gid = str(group_id or "").strip()
+    if not gid:
+        return 0
+    with _group_lock(gid):
+        rows = _load_rows(gid)
+        active_ids = [
+            actor_id
+            for actor_id, row in rows.items()
+            if str(row.get("state") or "").strip().lower() in _ACTIVE_STARTUP_STATES
+        ]
+        if not active_ids:
+            return 0
+        now = utc_now_iso()
+        for actor_id in active_ids:
+            previous = rows[actor_id]
+            rows[actor_id] = {
+                **previous,
+                "v": 1,
+                "state": "stopped",
+                "phase": "stopped",
+                "generation": int(previous.get("generation") or 0) + 1,
+                "attempt_id": uuid.uuid4().hex,
+                "finished_at": now,
+                "updated_at": now,
+                "error": "",
+            }
+        _write_rows(gid, rows)
+        return len(active_ids)
 
 
 def shutdown_openclaw_startup_workers() -> None:

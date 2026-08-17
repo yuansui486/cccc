@@ -48,7 +48,7 @@ from .codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from .codex_config_ops import codex_command_stem, inject_codex_openai_base_url_config
 from .pty_app_server_exit import stop_codex_app_server_for_pty_actor_if_needed
 from .im.bootstrap_im_ops import autostart_enabled_im_bridges
-from .group.bootstrap_actor_ops import autostart_running_groups
+from .group.bootstrap_actor_ops import reset_groups_for_daemon_start
 from .assistants.voice_idle_review_scheduler import recover_pending_voice_idle_reviews
 from .group_bridge.remote_outbox_worker import RemoteOutboxWorker
 from .mcp_install import (
@@ -802,43 +802,6 @@ def _maybe_autostart_enabled_im_bridges() -> None:
     autostart_enabled_im_bridges(ensure_home())
 
 
-def _maybe_autostart_running_groups() -> None:
-    from ..kernel.group import get_group_state
-
-    autostart_running_groups(
-        ensure_home(),
-        effective_runner_kind=_effective_runner_kind,
-        start_actor_process=_start_actor_process,
-        find_scope_url=_find_scope_url,
-        supported_runtimes=SUPPORTED_RUNTIMES,
-        ensure_mcp_installed=_ensure_mcp_installed,
-        auto_mcp_runtimes=AUTO_MCP_RUNTIMES,
-        merge_actor_env_with_private=_merge_actor_env_with_private,
-        inject_actor_context_env=lambda env, gid, aid: _inject_actor_context_env(env, group_id=gid, actor_id=aid),
-        prepare_pty_env=_prepare_pty_env,
-        normalize_runtime_command=_normalize_runtime_command,
-        pty_backlog_bytes=_pty_backlog_bytes,
-        write_headless_state=_write_headless_state,
-        write_pty_state=lambda gid, aid, pid: _write_pty_state(gid, aid, pid=pid),
-        clear_preamble_sent=clear_preamble_sent,
-        throttle_reset_actor=lambda gid, aid: THROTTLE.reset_actor(gid, aid, keep_pending=True),
-        automation_on_resume=AUTOMATION.on_resume,
-        get_group_state=get_group_state,
-        load_actor_private_env=_load_actor_private_env,
-        update_actor_private_env=_update_actor_private_env,
-        delete_actor_private_env=_delete_actor_private_env,
-        resolve_linked_actor_before_start=lambda grp, aid, caller_id="", is_admin=False: _resolve_linked_actor_before_start(
-            grp,
-            aid,
-            get_actor_profile=_get_actor_profile,
-            load_actor_profile_secrets=_load_actor_profile_secrets,
-            update_actor_private_env=_update_actor_private_env,
-            caller_id=caller_id,
-            is_admin=is_admin,
-        ),
-    )
-
-
 def _maybe_compact_ledgers(home: Path) -> None:
     base = home / "groups"
     if not base.exists():
@@ -1142,6 +1105,15 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
     except Exception:
         pass
 
+    try:
+        reset_summary = reset_groups_for_daemon_start(p.home)
+        if reset_summary.get("groups_changed") or reset_summary.get("runner_markers_removed"):
+            logger.info("daemon startup group reset: %s", reset_summary, extra={"op": "group_startup_reset"})
+    except Exception:
+        logger.exception("daemon startup group reset failed", extra={"op": "group_startup_reset"})
+        release_lockfile(lock_handle)
+        return 1
+
     computer_control_service = _start_daemon_computer_control_after_lock(p.home, lock_handle)
 
     try:
@@ -1311,7 +1283,6 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         # don't block the accept loop (clients should see the daemon as responsive).
         recover_pending_voice_idle_reviews()
         start_bootstrap_thread(
-            maybe_autostart_running_groups=_maybe_autostart_running_groups,
             maybe_autostart_enabled_im_bridges=_maybe_autostart_enabled_im_bridges,
         )
 

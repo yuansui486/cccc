@@ -506,14 +506,9 @@ def start_actor_activity_thread(
 
 def start_bootstrap_thread(
     *,
-    maybe_autostart_running_groups: Callable[[], Any],
     maybe_autostart_enabled_im_bridges: Callable[[], Any],
 ) -> threading.Thread:
     def _bootstrap_after_listen() -> None:
-        try:
-            maybe_autostart_running_groups()
-        except Exception:
-            pass
         try:
             maybe_autostart_enabled_im_bridges()
         except Exception:

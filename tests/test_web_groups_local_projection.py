@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -224,5 +225,42 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
             groups = resp.json()["result"]["groups"]
             match = next(item for item in groups if str(item.get("group_id") or "") == gid)
             self.assertTrue(bool(match.get("running")))
+        finally:
+            cleanup()
+
+    def test_startup_reset_projects_group_as_stopped(self) -> None:
+        cleanup = self._with_home()
+        try:
+            from no1.daemon.group.bootstrap_actor_ops import reset_groups_for_daemon_start
+            from no1.daemon.runner_state_ops import write_headless_state
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import create_group, load_group
+            from no1.kernel.registry import load_registry
+
+            reg = load_registry()
+            gid = create_group(reg, title="startup-reset", topic="").group_id
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            assert group is not None
+            add_actor(group, actor_id="webpeer", title="Web Peer", runtime="web_model", runner="headless")
+            group.doc["running"] = True
+            group.doc["state"] = "active"
+            group.save()
+            write_headless_state(gid, "webpeer")
+
+            reset_groups_for_daemon_start(Path(os.environ["CCCC_HOME"]))
+
+            with self._client() as client:
+                response = client.get(f"/api/v1/groups/{gid}")
+
+            self.assertEqual(response.status_code, 200)
+            doc = response.json()["result"]["group"]
+            self.assertFalse(doc.get("running"))
+            runtime_status = doc.get("runtime_status") or {}
+            self.assertFalse(runtime_status.get("runtime_running"))
+            self.assertFalse(runtime_status.get("booting"))
+            control_state = doc.get("control_state") or {}
+            self.assertEqual(control_state.get("status_key"), "stop")
+            self.assertEqual(control_state.get("primary_action"), "start")
         finally:
             cleanup()

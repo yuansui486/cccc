@@ -694,9 +694,8 @@ def _group_runtime_status_local(group: Any) -> Dict[str, Any]:
         or pty_runner.SUPERVISOR.group_running(gid)
         or headless_runner.SUPERVISOR.group_running(gid)
     )
-    # If the group doc says running=True but no processes are alive yet,
-    # the daemon is still autostarting actors after a restart.  Report
-    # runtime_running=True so the UI doesn't flash "stopped" during boot.
+    # Explicit group starts can persist running=True before an asynchronous
+    # runtime is ready. Keep that short initialization window projected as run.
     doc_running = coerce_bool(group.doc.get("running"), default=False) if group is not None else False
     booting = bool(doc_running and not runtime_running and lifecycle_state not in ("stopped",))
     if booting:
