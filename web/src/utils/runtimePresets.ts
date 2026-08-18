@@ -162,6 +162,30 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     model: "gpt-5.5",
   },
   {
+    id: "model:gpt-5.6-sol-codex",
+    label: "gpt-5.6-sol",
+    runtime: "codex",
+    model: "gpt-5.6-sol",
+  },
+  {
+    id: "model:gpt-5.6-terra-codex",
+    label: "gpt-5.6-terra",
+    runtime: "codex",
+    model: "gpt-5.6-terra",
+  },
+  {
+    id: "model:deepseek-v4-flash-codex",
+    label: "deepseek-v4-flash",
+    runtime: "codex",
+    model: "deepseek-v4-flash",
+  },
+  {
+    id: "model:deepseek-v4-pro-codex",
+    label: "deepseek-v4-pro",
+    runtime: "codex",
+    model: "deepseek-v4-pro",
+  },
+  {
     id: "model:kimi-k2.6-kimi",
     label: "kimi",
     runtime: "kimi",
@@ -314,8 +338,7 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
     return "";
   }
   if (normalizedRuntime === "codex") {
-    if (model === "gpt-5.4") return "model:gpt-5.4-codex";
-    if (model === "gpt-5.5") return "model:gpt-5.5-codex";
+    return RUNTIME_PRESETS.find((preset) => preset.runtime === "codex" && preset.model === model)?.id || "";
   }
   if (normalizedRuntime === "opencode") {
     const modelId = model.startsWith(`${OPENCODE_PROVIDER_ID}/`)
@@ -646,8 +669,9 @@ function withCommandModel(command: string[], model: string, preferredFlag: "-m" 
     if (item === "-m" || item === "--model") {
       return [...cleaned.slice(0, idx + 1), modelName, ...cleaned.slice(idx + 2)];
     }
-    if (item.startsWith("--model=")) {
-      return [...cleaned.slice(0, idx), `--model=${modelName}`, ...cleaned.slice(idx + 1)];
+    if (item.startsWith("--model=") || item.startsWith("-m=")) {
+      const flag = item.startsWith("--model=") ? "--model" : "-m";
+      return [...cleaned.slice(0, idx), `${flag}=${modelName}`, ...cleaned.slice(idx + 1)];
     }
   }
   return [...cleaned, preferredFlag, modelName];
@@ -657,7 +681,7 @@ function modelFromCommand(command: string[]): string {
   for (let idx = 0; idx < command.length; idx += 1) {
     const item = command[idx];
     if ((item === "-m" || item === "--model") && idx + 1 < command.length) return command[idx + 1];
-    if (item.startsWith("--model=")) return item.split("=", 2)[1] || "";
+    if (item.startsWith("--model=") || item.startsWith("-m=")) return item.split("=", 2)[1] || "";
   }
   return "";
 }
@@ -670,7 +694,7 @@ function withoutCommandModel(command: string[]): string[] {
       idx += 1;
       continue;
     }
-    if (item.startsWith("--model=")) continue;
+    if (item.startsWith("--model=") || item.startsWith("-m=")) continue;
     cleaned.push(item);
   }
   return cleaned;

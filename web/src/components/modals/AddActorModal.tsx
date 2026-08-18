@@ -18,7 +18,6 @@ import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/cap
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
 import { RuntimeModelSelector } from "../RuntimeModelSelector";
-import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
   clearKnownPresetSecrets,
@@ -43,7 +42,7 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
-import { fetchDoneHubModels, fetchDoneHubPrices } from "../../services/doneHub";
+import { fetchDoneHubModels } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -54,7 +53,6 @@ export interface AddActorModalProps {
   isDark: boolean;
   busy: string;
   hasForeman: boolean;
-  developerMode: boolean;
   runtimes: RuntimeInfo[];
 
   suggestedActorId: string;
@@ -151,7 +149,6 @@ export function AddActorModal({
   isDark,
   busy,
   hasForeman,
-  developerMode,
   runtimes,
   suggestedActorId,
   newActorId,
@@ -193,7 +190,6 @@ export function AddActorModal({
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
   const primedRuntimePresetRef = useRef("");
@@ -209,11 +205,10 @@ export function AddActorModal({
   }, [avatarPreviewUrl]);
 
   useEffect(() => {
-    if (!isOpen || runtimePriceMap) return;
+    if (!isOpen || opencodeModels.length) return;
     let cancelled = false;
-    void Promise.all([fetchDoneHubPrices(), fetchDoneHubModels()]).then(([priceResp, modelResp]) => {
+    void fetchDoneHubModels().then((modelResp) => {
       if (cancelled) return;
-      setRuntimePriceMap(priceResp.ok ? buildRuntimePriceMap(priceResp.result?.items || []) : {});
       const models = modelResp.ok
         ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
         : [];
@@ -222,7 +217,7 @@ export function AddActorModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, runtimePriceMap]);
+  }, [isOpen, opencodeModels.length]);
 
   const handleClose = () => {
     setAvatarFile(null);
@@ -257,7 +252,6 @@ export function AddActorModal({
   const selectedProfileRuntime = String(selectedProfile?.runtime || "").trim() as SupportedRuntime;
   const selectedProfileCommand = commandPreview(selectedProfile?.command);
   const showRuntimeSetup = !newActorUseProfile && newActorRuntime === "custom";
-  const showCommandEditor = !newActorUseProfile;
   const previewRuntime = newActorUseProfile ? selectedProfileRuntime || null : newActorRuntime;
   const previewTitle = String(newActorId || "").trim() || suggestedActorId;
   const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(newActorCommand) || "medium";
@@ -558,12 +552,11 @@ export function AddActorModal({
                         runtimes={runtimes}
                         onRuntimeChange={changeRuntime}
                         onModelChange={changeModel}
-                        priceMap={runtimePriceMap}
                         modelCatalog={modelCatalog}
                         runtimeDescriptions={{ openclaw: t("openClawRuntimeDescription") }}
                         disabled={busy === "actor-add"}
                         labels={{
-                          runtime: t("runtime"),
+                          runtime: t("agent", { defaultValue: "智能体" }),
                           model: t("model"),
                           runtimeSearch: t("searchRuntime"),
                           modelSearch: t("searchModel"),
@@ -580,6 +573,23 @@ export function AddActorModal({
                           retryModelCatalog: t("retryOpenClawModels"),
                         }}
                       />
+
+                      {newActorRuntime === "custom" ? (
+                        <div>
+                          <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
+                            {t("command")}
+                          </label>
+                          <Input
+                            className="font-mono"
+                            value={newActorCommand}
+                            onChange={(e) => {
+                              setNewActorCommand(e.target.value);
+                              setSelectedRuntimePresetId("");
+                            }}
+                            placeholder={t("enterCommand")}
+                          />
+                        </div>
+                      ) : null}
 
                       {newActorRuntime === "codex" ? (
                         <CodexReasoningEffortSelector value={selectedCodexReasoningEffort} onChange={updateCodexReasoningEffort} labelPlacement="inline" />
@@ -600,32 +610,6 @@ export function AddActorModal({
                   )}
                 </div>
               </div>
-
-                  {developerMode && showCommandEditor ? (
-                    <div>
-                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                        {t("commandOverrideOptional")}
-                      </label>
-                      <Input
-                        className="font-mono"
-                        value={newActorCommand}
-                        onChange={(e) => {
-                          setNewActorCommand(e.target.value);
-                          setSelectedRuntimePresetId("");
-                        }}
-                        placeholder={defaultCommand || t("enterCommand")}
-                      />
-                    </div>
-                  ) : null}
-
-                  {developerMode && defaultCommand.trim() ? (
-                    <div className="text-[10px] text-[var(--color-text-muted)]">
-                      {t("default")}{" "}
-                      <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                        {defaultCommand}
-                      </code>
-                    </div>
-                  ) : null}
 
                   {newActorRuntime === "custom" || !runtimeAvailable ? (
                     <div className="rounded-xl border px-3 py-2 text-[11px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">

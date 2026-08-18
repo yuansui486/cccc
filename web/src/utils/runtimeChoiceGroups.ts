@@ -1,6 +1,5 @@
 import { RUNTIME_INFO, SUPPORTED_RUNTIMES, type RuntimeInfo, type SupportedRuntime } from "../types";
 import { runtimePresetsForModels, runtimePresetsForRuntime, type RuntimePreset } from "./runtimePresets";
-import { runtimePriceLabel, type RuntimePriceMap } from "./runtimePrices";
 
 export type RuntimeChoiceOption =
   | { kind: "preset"; id: string; label: string; runtime: SupportedRuntime; disabled: boolean }
@@ -49,16 +48,13 @@ export function buildRuntimeSelectorOptions(
 
 export function buildRuntimeModelOptions(
   runtime: SupportedRuntime | string,
-  priceMap?: RuntimePriceMap | null,
   modelCatalog?: string[],
 ): RuntimeModelOption[] {
   return runtimePresetsForRuntime(runtime, modelCatalog || [])
     .filter((preset) => preset.runtime === runtime && Boolean(preset.model))
     .map((preset) => ({
       value: String(preset.model || ""),
-      label: runtime === "openclaw"
-        ? preset.label
-        : runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
+      label: preset.label,
       preset,
     }));
 }
@@ -74,7 +70,6 @@ const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }
 
 export function buildRuntimeChoiceGroups(
   runtimes: RuntimeInfo[],
-  priceMap?: RuntimePriceMap | null,
   modelCatalog?: string[],
 ): RuntimeChoiceGroup[] {
   const groups = new Map<GroupKey, RuntimeChoiceOption[]>();
@@ -93,9 +88,7 @@ export function buildRuntimeChoiceGroups(
     groups.get(groupKeyForRuntime(preset.runtime))?.push({
       kind: "preset",
       id: preset.id,
-      label: preset.runtime === "openclaw"
-        ? preset.label
-        : runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
+      label: preset.label,
       runtime: preset.runtime,
       disabled: !runtimeAvailable,
     });
@@ -109,9 +102,7 @@ export function buildRuntimeChoiceGroups(
     groups.get(groupKeyForRuntime(runtime))?.push({
       kind: "runtime",
       id: runtime,
-      label: runtime === "openclaw"
-        ? (RUNTIME_INFO[runtime]?.label || runtime)
-        : runtimePriceLabel({ id: runtime, kind: "runtime", label: RUNTIME_INFO[runtime]?.label || runtime }, priceMap),
+      label: RUNTIME_INFO[runtime]?.label || runtime,
       runtime,
       disabled: !selectable,
     });

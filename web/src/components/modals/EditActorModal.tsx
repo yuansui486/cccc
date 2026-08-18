@@ -15,7 +15,6 @@ import { ActorAvatarField } from "../ActorAvatarField";
 import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector, OpenCodeReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
 import { RuntimeModelSelector } from "../RuntimeModelSelector";
-import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
   clearKnownPresetSecrets,
@@ -41,7 +40,7 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
-import { fetchDoneHubModels, fetchDoneHubPrices } from "../../services/doneHub";
+import { fetchDoneHubModels } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -223,7 +222,6 @@ export function EditActorModal({
   const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
   const secretFetchSeqRef = useRef(0);
@@ -410,11 +408,10 @@ export function EditActorModal({
   }, [editMode, effectiveLinked, secretsPrimed]);
 
   useEffect(() => {
-    if (!isOpen || runtimePriceMap) return;
+    if (!isOpen || opencodeModels.length) return;
     let cancelled = false;
-    void Promise.all([fetchDoneHubPrices(), fetchDoneHubModels()]).then(([priceResp, modelResp]) => {
+    void fetchDoneHubModels().then((modelResp) => {
       if (cancelled) return;
-      setRuntimePriceMap(priceResp.ok ? buildRuntimePriceMap(priceResp.result?.items || []) : {});
       const models = modelResp.ok
         ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
         : [];
@@ -423,7 +420,7 @@ export function EditActorModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, runtimePriceMap]);
+  }, [isOpen, opencodeModels.length]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -943,7 +940,6 @@ export function EditActorModal({
                       runtimes={runtimes}
                       onRuntimeChange={changeRuntime}
                       onModelChange={changeModel}
-                      priceMap={runtimePriceMap}
                       modelCatalog={modelCatalog}
                       runtimeDescriptions={{ openclaw: t("openClawRuntimeDescription") }}
                       disabled={busy === "actor-update"}

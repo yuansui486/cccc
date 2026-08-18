@@ -8,7 +8,6 @@ import {
   buildRuntimeSelectorOptions,
 } from "../utils/runtimeChoiceGroups";
 import { runtimeSupportsModelSelection, validateRuntimeModelId } from "../utils/runtimePresets";
-import type { RuntimePriceMap } from "../utils/runtimePrices";
 import { SelectCombobox, type SelectComboboxItem } from "./SelectCombobox";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -22,7 +21,6 @@ export interface RuntimeModelSelectorProps {
   runtimes: RuntimeInfo[];
   onRuntimeChange: (runtime: SupportedRuntime) => void;
   onModelChange: (model: string) => void;
-  priceMap?: RuntimePriceMap | null;
   modelCatalog?: string[];
   unavailableModels?: ReadonlySet<string>;
   modelCatalogLoading?: boolean;
@@ -56,7 +54,6 @@ export function RuntimeModelSelector({
   runtimes,
   onRuntimeChange,
   onModelChange,
-  priceMap,
   modelCatalog = [],
   unavailableModels = new Set<string>(),
   modelCatalogLoading = false,
@@ -78,8 +75,8 @@ export function RuntimeModelSelector({
     [allowedRuntimes, labels.notInstalled, runtimeDescriptions, runtimes],
   );
   const modelOptions = useMemo(
-    () => buildRuntimeModelOptions(runtime, priceMap, modelCatalog),
-    [runtime, priceMap, modelCatalog],
+    () => buildRuntimeModelOptions(runtime, modelCatalog),
+    [runtime, modelCatalog],
   );
   const presetModels = useMemo(() => new Set(modelOptions.map((item) => item.value)), [modelOptions]);
   const supportsModels = runtimeSupportsModelSelection(runtime);

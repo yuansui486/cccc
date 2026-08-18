@@ -38,8 +38,7 @@ import {
   runtimePresetForModel,
   withRuntimeModel,
 } from "../../../utils/runtimePresets";
-import { buildRuntimePriceMap, type RuntimePriceMap } from "../../../utils/runtimePrices";
-import { fetchDoneHubModels, fetchDoneHubPrices } from "../../../services/doneHub";
+import { fetchDoneHubModels } from "../../../services/doneHub";
 
 interface ActorProfilesTabProps {
   isDark: boolean;
@@ -126,7 +125,6 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
   const [duplicateSourceProfileId, setDuplicateSourceProfileId] = useState("");
   const [sessionUserId, setSessionUserId] = useState("");
   const [runtimeCatalog, setRuntimeCatalog] = useState<RuntimeInfo[]>([]);
-  const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
 
   const isMyScope = scope === "my";
@@ -170,12 +168,11 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
   const modelCatalog = opencodeModels;
 
   useEffect(() => {
-    if (!isActive || runtimePriceMap) return;
+    if (!isActive || opencodeModels.length) return;
     let cancelled = false;
-    void Promise.all([api.fetchRuntimes(), fetchDoneHubPrices(), fetchDoneHubModels()]).then(([runtimeResp, priceResp, modelResp]) => {
+    void Promise.all([api.fetchRuntimes(), fetchDoneHubModels()]).then(([runtimeResp, modelResp]) => {
       if (cancelled) return;
       setRuntimeCatalog(runtimeResp.ok ? runtimeResp.result?.runtimes || [] : []);
-      setRuntimePriceMap(priceResp.ok ? buildRuntimePriceMap(priceResp.result?.items || []) : {});
       const models = modelResp.ok
         ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
         : [];
@@ -184,7 +181,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
     return () => {
       cancelled = true;
     };
-  }, [isActive, runtimePriceMap]);
+  }, [isActive, opencodeModels.length]);
 
   const ensureSessionContext = async () => {
     try {
@@ -311,7 +308,6 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                 allowedRuntimes={SUPPORTED_RUNTIMES}
                 onRuntimeChange={changeEditorRuntime}
                 onModelChange={changeEditorModel}
-                priceMap={runtimePriceMap}
                 modelCatalog={modelCatalog}
                 runtimeDescriptions={{ openclaw: t("actorProfiles.openClawRuntimeDescription") }}
                 disabled={editorBusy}

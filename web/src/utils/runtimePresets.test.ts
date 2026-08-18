@@ -57,20 +57,28 @@ describe("runtime presets", () => {
     expect(runtimes.find((item) => item.value === "claude")?.disabled).toBe(true);
 
     const codexModels = buildRuntimeModelOptions("codex");
-    expect(codexModels.map((item) => item.value)).toEqual(["gpt-5.4", "gpt-5.5"]);
+    expect(codexModels.map((item) => item.value)).toEqual([
+      "gpt-5.4",
+      "gpt-5.5",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+    ]);
     expect(buildRuntimeModelOptions("claude").every((item) => item.preset.runtime === "claude")).toBe(true);
-    expect(buildRuntimeModelOptions("opencode", null, ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
-    expect(buildRuntimeModelOptions("hermes", null, ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
-    expect(buildRuntimeModelOptions("openclaw", null, ["claude-cli/claude-sonnet-4-6"]).map((item) => item.value)).toEqual([
+    expect(buildRuntimeModelOptions("opencode", ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
+    expect(buildRuntimeModelOptions("hermes", ["catalog-model"]).map((item) => item.value)).toEqual(["catalog-model"]);
+    expect(buildRuntimeModelOptions("openclaw", ["claude-cli/claude-sonnet-4-6"]).map((item) => item.value)).toEqual([
       "claude-cli/claude-sonnet-4-6",
     ]);
-    expect(buildRuntimeModelOptions("openclaw", null, ["catalog-model"]).map((item) => item.value)).toEqual(
-      buildRuntimeModelOptions("opencode", null, ["catalog-model"]).map((item) => item.value),
+    expect(buildRuntimeModelOptions("openclaw", ["catalog-model"]).map((item) => item.value)).toEqual(
+      buildRuntimeModelOptions("opencode", ["catalog-model"]).map((item) => item.value),
     );
   });
 
   it("reads, replaces, and clears models using each known runtime protocol", () => {
     expect(modelFromRuntimeConfiguration("codex", "codex --search -m gpt-5.5")).toBe("gpt-5.5");
+    expect(modelFromRuntimeConfiguration("codex", "codex --search -m=gpt-5.6-sol")).toBe("gpt-5.6-sol");
     expect(modelFromRuntimeConfiguration("opencode", "opencode -m onecolleague/deepseek-v4-pro")).toBe("deepseek-v4-pro");
     expect(modelFromRuntimeConfiguration("kimi", "kimi --yolo", "kimi-k2.6")).toBe("kimi-k2.6");
     expect(modelFromRuntimeConfiguration("hermes", "hermes --tui", "deepseek-v4-pro")).toBe("deepseek-v4-pro");
@@ -79,6 +87,9 @@ describe("runtime presets", () => {
     );
     expect(modelFromRuntimeConfiguration("openclaw", "openclaw", "onecolleague/gpt-5.5")).toBe("gpt-5.5");
     expect(withRuntimeModel("codex", "codex -m old --search", "gpt-5.5")).toBe("codex --search -m gpt-5.5");
+    expect(withRuntimeModel("codex", "codex -m=old --search", "gpt-5.6-sol")).toBe(
+      "codex --search -m gpt-5.6-sol"
+    );
     expect(withRuntimeModel("claude", "claude --model=old --effort high", "new-model")).toBe(
       "claude --effort high --model new-model"
     );
@@ -149,7 +160,6 @@ describe("runtime presets", () => {
   it("adds dynamic OpenCode models and uses the OneColleague provider prefix", () => {
     const groups = buildRuntimeChoiceGroups(
       [{ name: "opencode", display_name: "OpenCode", available: true, recommended_command: "opencode" }],
-      null,
       ["gpt-5.4", "deepseek-v4-pro", "qwen3.6-plus", "new-model"],
     );
     const options = groups.find((group) => group.labelKey === "runtimeGroupOpenCode")?.options || [];
@@ -178,7 +188,6 @@ describe("runtime presets", () => {
           recommended_command: "openclaw",
           models: [model],
       }],
-      { [model]: { model, input: 1, output: 2 } },
     );
     const options = groups.find((group) => group.labelKey === "runtimeGroupOpenClaw")?.options || [];
 
@@ -221,6 +230,10 @@ describe("runtime presets", () => {
     expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options.map((option) => option.id)).toEqual([
       "model:gpt-5.4-codex",
       "model:gpt-5.5-codex",
+      "model:gpt-5.6-sol-codex",
+      "model:gpt-5.6-terra-codex",
+      "model:deepseek-v4-flash-codex",
+      "model:deepseek-v4-pro-codex",
     ]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupGemini")?.options.map((option) => option.id)).toEqual(["gemini"]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options.map((option) => option.id)).toEqual([
@@ -228,7 +241,7 @@ describe("runtime presets", () => {
     ]);
   });
 
-  it("adds per-1M token prices to matching model choices", () => {
+  it("shows model names without price decorations", () => {
     const groups = buildRuntimeChoiceGroups(
       [
         { name: "claude", display_name: "Claude Code", available: true, recommended_command: "claude" },
@@ -236,22 +249,37 @@ describe("runtime presets", () => {
         { name: "gemini", display_name: "Gemini CLI", available: true, recommended_command: "gemini" },
         { name: "kimi", display_name: "Kimi CLI", available: true, recommended_command: "kimi" },
       ],
-      {
-        "gpt-5.4": { model: "gpt-5.4", input: 0.625, output: 3.75 },
-        "deepseek-v4-pro": { model: "deepseek-v4-pro", input: 1.5, output: 3 },
-        "qwen3.6-max-preview": { model: "qwen3.6-max-preview", input: 0, output: 0 },
-        "qwen3.6-plus": { model: "qwen3.6-plus", input: 0, output: 0 },
-        "qwen3.6-flash": { model: "qwen3.6-flash", input: 0, output: 0 },
-      }
     );
 
-    expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options[0]?.label).toBe("gpt5.4（输入 ¥1.25/M，输出 ¥7.5/M）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[0]?.label).toBe("deepseek-v4（输入 ¥3/M，输出 ¥6/M）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[1]?.label).toBe("Qwen3.6（输入 ¥0/M，输出 ¥0/M）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[2]?.label).toBe("qwen3.6-plus（输入 ¥0/M，输出 ¥0/M）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[3]?.label).toBe("qwen3.6-flash（输入 ¥0/M，输出 ¥0/M）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[4]?.label).toBe("GLM-4.7（价格暂无）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options[0]?.label).toBe("kimi（价格暂无）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options.map((option) => option.label)).toEqual([
+      "gpt5.4",
+      "gpt5.5",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+    ]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[0]?.label).toBe("deepseek-v4");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options[0]?.label).toBe("kimi");
+  });
+
+  it.each([
+    ["model:gpt-5.6-sol-codex", "gpt-5.6-sol"],
+    ["model:gpt-5.6-terra-codex", "gpt-5.6-terra"],
+    ["model:deepseek-v4-flash-codex", "deepseek-v4-flash"],
+    ["model:deepseek-v4-pro-codex", "deepseek-v4-pro"],
+  ])("round-trips the added Codex preset %s", (presetId, model) => {
+    const preset = runtimePresetById(presetId);
+    expect(preset?.model).toBe(model);
+
+    const command = commandForRuntimePreset(preset!, {
+      name: "codex",
+      display_name: "Codex CLI",
+      available: true,
+      recommended_command: "codex --search",
+    });
+    expect(command).toBe(`codex --search -m ${model}`);
+    expect(runtimePresetIdFor("codex", command)).toBe(presetId);
   });
 
   it("builds Codex model commands from the runtime default", () => {
@@ -265,6 +293,14 @@ describe("runtime presets", () => {
         recommended_command: "codex -c shell_environment_policy.inherit=all --search",
       })
     ).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5");
+    expect(
+      commandForRuntimePreset(preset!, {
+        name: "codex",
+        display_name: "Codex CLI",
+        available: true,
+        recommended_command: "codex --search -m=old",
+      })
+    ).toBe("codex --search -m=gpt-5.5");
   });
 
   it("uses the first Codex preset as the dynamic default model command", () => {

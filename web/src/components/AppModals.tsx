@@ -2044,7 +2044,6 @@ export function AppModals({
         isDark={isDark}
         busy={busy}
         hasForeman={hasForeman}
-        developerMode={developerMode}
         runtimes={runtimes}
         suggestedActorId={suggestedActorId}
         newActorId={newActorId}
