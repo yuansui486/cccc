@@ -8,6 +8,7 @@ import { filterTerminalInputChunk } from "../../utils/terminalInputFilter";
 import {
   buildTerminalWebSocketUrl,
   buildTerminalConnectionKey,
+  buildTerminalSessionKey,
   decodeTerminalJsonFrame,
   encodeTerminalInputFrame,
   encodeTerminalResizeFrame,
@@ -48,6 +49,7 @@ export function useAgentTerminalConnection(args: {
   groupId: string;
   actorId: string;
   actorRuntime: string | undefined;
+  runtimeStartupAttemptId?: string;
   canControl: boolean;
   termEpoch: number;
   reconnectTrigger: number;
@@ -64,6 +66,7 @@ export function useAgentTerminalConnection(args: {
     groupId,
     actorId,
     actorRuntime,
+    runtimeStartupAttemptId,
     canControl,
     termEpoch,
     reconnectTrigger,
@@ -74,7 +77,12 @@ export function useAgentTerminalConnection(args: {
     setReconnectTrigger,
   } = args;
 
-  const terminalSessionKey = `${groupId}\u0000${actorId}\u0000${termEpoch}`;
+  const terminalSessionKey = buildTerminalSessionKey({
+    groupId,
+    actorId,
+    termEpoch,
+    runtimeStartupAttemptId,
+  });
   const terminalSessionKeyRef = useRef(terminalSessionKey);
   useEffect(() => {
     terminalSessionKeyRef.current = terminalSessionKey;
@@ -95,6 +103,7 @@ export function useAgentTerminalConnection(args: {
   const terminalAttachNoRetryRef = useRef(false);
   const terminalAttachStartupRaceCodeRef = useRef("");
   const terminalAttachStartupStartedAtRef = useRef(0);
+  const terminalOutputResetGenerationRef = useRef(0);
   const deliveredCursorRef = useRef<{ key: string; cursor: number | null }>({
     key: terminalSessionKey,
     cursor: null,
@@ -134,28 +143,24 @@ export function useAgentTerminalConnection(args: {
   }, [actorRuntime, canControl, clearTerminalSignal, isHeadless, isRunning, onStatusChange, setTerminalSignal]);
 
   useEffect(() => {
+    const resetGeneration = ++terminalOutputResetGenerationRef.current;
     if (isRunning && !isHeadless) return;
     terminalSignalBufferRef.current = "";
     terminalInputFilterPendingRef.current = "";
-    clearTerminalSignalRef.current(groupId, actorId);
-  }, [actorId, groupId, isHeadless, isRunning]);
+    deliveredCursorRef.current = { key: terminalSessionKey, cursor: null };
+    const timer = window.setTimeout(() => {
+      if (terminalOutputResetGenerationRef.current !== resetGeneration) return;
+      setTerminalOutputSessionKey(null);
+      clearTerminalSignalRef.current(groupId, actorId);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [actorId, groupId, isHeadless, isRunning, terminalSessionKey]);
 
   useEffect(() => {
     if (deliveredCursorRef.current.key === terminalSessionKey) return;
     deliveredCursorRef.current = { key: terminalSessionKey, cursor: null };
     terminalAttachStartupStartedAtRef.current = 0;
   }, [terminalSessionKey]);
-
-  useEffect(() => {
-    if (isRunning && !isHeadless) return;
-    const expectedSessionKey = terminalSessionKey;
-    const timer = window.setTimeout(() => {
-      if (terminalSessionKeyRef.current === expectedSessionKey) {
-        setTerminalOutputSessionKey(null);
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [isHeadless, isRunning, terminalSessionKey]);
 
   const requestReconnect = useCallback(() => {
     reconnectAttemptRef.current = 0;
@@ -332,7 +337,7 @@ export function useAgentTerminalConnection(args: {
       };
 
       const handleDecoded = (data: string) => {
-        if (disposed) return;
+        if (disposed || wsRef.current !== ws) return;
         const term = terminalRef.current;
         if (!term) return;
         const seq = "\x1b[3J";
@@ -358,17 +363,17 @@ export function useAgentTerminalConnection(args: {
           });
         }
         try {
+          term.write(safe);
           if (safe.length > 0 && terminalSessionKeyRef.current === terminalSessionKey) {
             setTerminalOutputSessionKey(terminalSessionKey);
           }
-          term.write(safe);
         } catch (err) {
           console.error("terminal write failed", err);
         }
       };
 
       ws.onmessage = (event) => {
-        if (disposed) return;
+        if (disposed || wsRef.current !== ws) return;
 
         if (event.data instanceof ArrayBuffer) {
           const frame = parseTerminalBinaryFrame(event.data);
@@ -400,6 +405,7 @@ export function useAgentTerminalConnection(args: {
           }
         } else if (event.data instanceof Blob) {
           void event.data.arrayBuffer().then((buf) => {
+            if (disposed || wsRef.current !== ws) return;
             const frame = parseTerminalBinaryFrame(buf);
             if (frame?.type === "output") {
               advanceDeliveredCursor(frame.payload.byteLength);

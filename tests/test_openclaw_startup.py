@@ -91,6 +91,97 @@ class TestOpenClawStartup(unittest.TestCase):
         self.assertEqual(row.get("phase"), "running")
         self.assertEqual(phases, ["called"])
 
+    def test_reserved_start_does_not_execute_until_committed(self) -> None:
+        from no1.daemon.openclaw_startup import (
+            commit_openclaw_actor_start,
+            reserve_openclaw_actor_start,
+            start_openclaw_startup_workers,
+        )
+
+        entered = threading.Event()
+        start_openclaw_startup_workers()
+        reservation = reserve_openclaw_actor_start(
+            "g-test",
+            "actor-a",
+            by="user",
+            caller_id="",
+            is_admin=True,
+            start_actor_process=lambda *_args, **_kwargs: entered.set() or {"success": True},
+        )
+
+        self.assertEqual(reservation.startup.get("state"), "queued")
+        self.assertFalse(entered.wait(timeout=0.1))
+
+        committed = commit_openclaw_actor_start(reservation)
+        self.assertEqual(committed.get("attempt_id"), reservation.startup.get("attempt_id"))
+        self.assertTrue(entered.wait(timeout=2.0))
+        self._wait_for_state("running")
+
+    def test_failed_reservation_cannot_be_committed(self) -> None:
+        from no1.daemon.openclaw_startup import (
+            commit_openclaw_actor_start,
+            fail_openclaw_actor_start_reservation,
+            read_openclaw_startup,
+            reserve_openclaw_actor_start,
+            start_openclaw_startup_workers,
+        )
+
+        entered = threading.Event()
+        start_openclaw_startup_workers()
+        reservation = reserve_openclaw_actor_start(
+            "g-test",
+            "actor-a",
+            by="user",
+            caller_id="",
+            is_admin=True,
+            start_actor_process=lambda *_args, **_kwargs: entered.set() or {"success": True},
+        )
+        self.assertTrue(fail_openclaw_actor_start_reservation(reservation, error="ledger unavailable"))
+
+        with self.assertRaisesRegex(RuntimeError, "superseded"):
+            commit_openclaw_actor_start(reservation)
+
+        self.assertFalse(entered.wait(timeout=0.1))
+        row = read_openclaw_startup("g-test", "actor-a")
+        self.assertEqual(row.get("state"), "failed")
+        self.assertEqual(row.get("error"), "ledger unavailable")
+
+    def test_committed_reservation_cannot_be_submitted_twice(self) -> None:
+        from no1.daemon.openclaw_startup import (
+            commit_openclaw_actor_start,
+            reserve_openclaw_actor_start,
+            start_openclaw_startup_workers,
+        )
+
+        entered = threading.Event()
+        release = threading.Event()
+        call_count = 0
+
+        def start_actor_process(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            entered.set()
+            release.wait(timeout=2.0)
+            return {"success": True}
+
+        start_openclaw_startup_workers()
+        reservation = reserve_openclaw_actor_start(
+            "g-test",
+            "actor-a",
+            by="user",
+            caller_id="",
+            is_admin=True,
+            start_actor_process=start_actor_process,
+        )
+        commit_openclaw_actor_start(reservation)
+        with self.assertRaisesRegex(RuntimeError, "superseded"):
+            commit_openclaw_actor_start(reservation)
+
+        self.assertTrue(entered.wait(timeout=2.0))
+        release.set()
+        self._wait_for_state("running")
+        self.assertEqual(call_count, 1)
+
     def test_cancelled_attempt_cannot_overwrite_stopped_state(self) -> None:
         from no1.daemon.openclaw_startup import (
             cancel_openclaw_actor_start,
@@ -166,8 +257,9 @@ class TestOpenClawStartup(unittest.TestCase):
 
     def test_actor_list_projects_durable_startup_state(self) -> None:
         from no1.daemon.actors.actor_ops import handle_actor_list
-        from no1.daemon.openclaw_startup import queue_openclaw_actor_start
+        from no1.daemon.openclaw_startup import queue_openclaw_actor_start, start_openclaw_startup_workers
 
+        start_openclaw_startup_workers()
         queued = queue_openclaw_actor_start(
             "g-test",
             "actor-a",
@@ -186,7 +278,29 @@ class TestOpenClawStartup(unittest.TestCase):
         self.assertTrue(response.ok)
         actors = response.result.get("actors") if isinstance(response.result, dict) else []
         actor = next(item for item in actors if item.get("id") == "actor-a")
-        self.assertEqual(actor.get("runtime_startup", {}).get("state"), "queued")
+        projected = actor.get("runtime_startup", {})
+        self.assertIn(projected.get("state"), {"queued", "initializing", "running"})
+        self.assertEqual(projected.get("attempt_id"), queued.get("attempt_id"))
+
+    def test_disabled_coordinator_rejects_queue_and_marks_attempt_failed(self) -> None:
+        from no1.daemon.openclaw_startup import queue_openclaw_actor_start, read_openclaw_startup
+
+        with patch("no1.daemon.openclaw_startup.publish_event") as publish:
+            with self.assertRaisesRegex(RuntimeError, "coordinator is not running"):
+                queue_openclaw_actor_start(
+                    "g-test",
+                    "actor-a",
+                    by="user",
+                    caller_id="",
+                    is_admin=True,
+                    start_actor_process=lambda *_args, **_kwargs: {"success": True},
+                )
+
+        row = read_openclaw_startup("g-test", "actor-a")
+        self.assertEqual(row.get("state"), "failed")
+        self.assertEqual(row.get("phase"), "failed")
+        self.assertIn("coordinator is not running", str(row.get("error") or ""))
+        publish.assert_not_called()
 
 
 if __name__ == "__main__":

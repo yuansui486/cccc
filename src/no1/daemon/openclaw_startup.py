@@ -163,6 +163,41 @@ class _StartupTask:
     start_actor_process: Callable[..., Dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class OpenClawStartupReservation:
+    task: _StartupTask
+    startup: Dict[str, Any]
+
+
+def _claim_startup_task(task: _StartupTask) -> bool:
+    """Atomically claim one committed queued attempt for worker execution."""
+    with _group_lock(task.group_id):
+        rows = _load_rows(task.group_id)
+        current = rows.get(task.actor_id)
+        if not isinstance(current, dict):
+            return False
+        if (
+            str(current.get("attempt_id") or "") != task.attempt_id
+            or int(current.get("generation") or 0) != task.generation
+            or str(current.get("state") or "").strip().lower() != "queued"
+            or not bool(current.get("committed"))
+        ):
+            return False
+        now = utc_now_iso()
+        current.update(
+            {
+                "state": "initializing",
+                "phase": "resolving",
+                "started_at": now,
+                "error": "",
+                "updated_at": now,
+            }
+        )
+        rows[task.actor_id] = current
+        _write_rows(task.group_id, rows)
+        return True
+
+
 class _OpenClawStartupCoordinator:
     def __init__(self) -> None:
         self._queue: Queue[Optional[_StartupTask]] = Queue()
@@ -186,13 +221,15 @@ class _OpenClawStartupCoordinator:
                 worker.start()
                 self._workers.append(worker)
 
-    def submit(self, task: _StartupTask) -> None:
+    def submit(self, task: _StartupTask) -> bool:
         with self._lock:
-            enabled = self._enabled
-        if not enabled:
-            return
-        self._queue.put(task)
-        self._ensure_workers()
+            if not self._enabled or self._stopping:
+                return False
+            self._ensure_workers()
+            if not self._enabled or self._stopping:
+                return False
+            self._queue.put(task)
+        return True
 
     def start(self) -> None:
         with self._lock:
@@ -224,7 +261,24 @@ class _OpenClawStartupCoordinator:
     def _execute(self, task: _StartupTask) -> None:
         with self._lock:
             active = self._enabled and not self._stopping
-        if not active or not _attempt_is_current(task.group_id, task.actor_id, task.attempt_id, task.generation):
+        if not active:
+            now = utc_now_iso()
+            _update_current(
+                task.group_id,
+                task.actor_id,
+                attempt_id=task.attempt_id,
+                generation=task.generation,
+                patch={
+                    "state": "stopped",
+                    "phase": "stopped",
+                    "finished_at": now,
+                    "error": "OpenClaw startup coordinator stopped before execution",
+                },
+            )
+            return
+        if not _attempt_is_current(task.group_id, task.actor_id, task.attempt_id, task.generation):
+            return
+        if not _claim_startup_task(task):
             return
 
         def guard() -> bool:
@@ -255,20 +309,37 @@ class _OpenClawStartupCoordinator:
                     },
                 )
 
-        now = utc_now_iso()
-        if not _update_current(
-            task.group_id,
-            task.actor_id,
-            attempt_id=task.attempt_id,
-            generation=task.generation,
-            patch={"state": "initializing", "phase": "resolving", "started_at": now, "error": ""},
-        ):
-            return
         phase("resolving")
 
         group = load_group(task.group_id)
         actor = find_actor(group, task.actor_id) if group is not None else None
-        if group is None or not isinstance(actor, dict) or not guard():
+        if group is None or not isinstance(actor, dict):
+            _update_current(
+                task.group_id,
+                task.actor_id,
+                attempt_id=task.attempt_id,
+                generation=task.generation,
+                patch={
+                    "state": "failed",
+                    "phase": "failed",
+                    "finished_at": utc_now_iso(),
+                    "error": "OpenClaw actor disappeared during startup",
+                },
+            )
+            return
+        if not guard():
+            _update_current(
+                task.group_id,
+                task.actor_id,
+                attempt_id=task.attempt_id,
+                generation=task.generation,
+                patch={
+                    "state": "stopped",
+                    "phase": "stopped",
+                    "finished_at": utc_now_iso(),
+                    "error": "OpenClaw startup stopped before launch",
+                },
+            )
             return
         try:
             result = task.start_actor_process(
@@ -288,6 +359,18 @@ class _OpenClawStartupCoordinator:
             result = {"success": False, "error": str(exc)}
 
         if not guard():
+            _update_current(
+                task.group_id,
+                task.actor_id,
+                attempt_id=task.attempt_id,
+                generation=task.generation,
+                patch={
+                    "state": "stopped",
+                    "phase": "stopped",
+                    "finished_at": utc_now_iso(),
+                    "error": "OpenClaw startup stopped before completion",
+                },
+            )
             return
         finished = utc_now_iso()
         if bool(result.get("success")):
@@ -323,7 +406,7 @@ class _OpenClawStartupCoordinator:
 _COORDINATOR = _OpenClawStartupCoordinator()
 
 
-def queue_openclaw_actor_start(
+def reserve_openclaw_actor_start(
     group_id: str,
     actor_id: str,
     *,
@@ -331,7 +414,7 @@ def queue_openclaw_actor_start(
     caller_id: str,
     is_admin: bool,
     start_actor_process: Callable[..., Dict[str, Any]],
-) -> Dict[str, Any]:
+) -> OpenClawStartupReservation:
     gid = str(group_id or "").strip()
     aid = str(actor_id or "").strip()
     group = load_group(gid)
@@ -358,17 +441,15 @@ def queue_openclaw_actor_start(
             "finished_at": "",
             "updated_at": now,
             "error": "",
+            "committed": False,
             "desired_fingerprint": _actor_fingerprint(actor),
         }
         rows[aid] = row
         _write_rows(gid, rows)
 
-    publish_event(
-        "actor.starting",
-        {"group_id": gid, "actor_id": aid, "attempt_id": attempt_id, "phase": "queued"},
-    )
-    _COORDINATOR.submit(
-        _StartupTask(
+    startup = project_openclaw_startup(gid, aid) or row
+    return OpenClawStartupReservation(
+        task=_StartupTask(
             group_id=gid,
             actor_id=aid,
             by=str(by or "user").strip() or "user",
@@ -377,9 +458,133 @@ def queue_openclaw_actor_start(
             attempt_id=attempt_id,
             generation=generation,
             start_actor_process=start_actor_process,
-        )
+        ),
+        startup=dict(startup),
     )
-    return project_openclaw_startup(gid, aid) or row
+
+
+def fail_openclaw_actor_start_reservation(
+    reservation: OpenClawStartupReservation,
+    *,
+    error: str,
+) -> bool:
+    task = reservation.task
+    with _group_lock(task.group_id):
+        rows = _load_rows(task.group_id)
+        current = rows.get(task.actor_id)
+        if not isinstance(current, dict):
+            return False
+        if (
+            str(current.get("attempt_id") or "") != task.attempt_id
+            or int(current.get("generation") or 0) != task.generation
+            or str(current.get("state") or "").strip().lower() != "queued"
+            or bool(current.get("committed"))
+        ):
+            return False
+        now = utc_now_iso()
+        current.update(
+            {
+                "state": "failed",
+                "phase": "failed",
+                "finished_at": now,
+                "updated_at": now,
+                "error": str(error or "OpenClaw startup was not submitted").strip(),
+            }
+        )
+        rows[task.actor_id] = current
+        _write_rows(task.group_id, rows)
+        return True
+
+
+def commit_openclaw_actor_start(
+    reservation: OpenClawStartupReservation,
+) -> Dict[str, Any]:
+    task = reservation.task
+    with _group_lock(task.group_id):
+        rows = _load_rows(task.group_id)
+        current = rows.get(task.actor_id)
+        if (
+            not isinstance(current, dict)
+            or str(current.get("state") or "").strip().lower() != "queued"
+            or str(current.get("attempt_id") or "") != task.attempt_id
+            or int(current.get("generation") or 0) != task.generation
+            or bool(current.get("committed"))
+            or not _attempt_is_current(task.group_id, task.actor_id, task.attempt_id, task.generation)
+        ):
+            raise RuntimeError("OpenClaw startup attempt was superseded before submission")
+        current["committed"] = True
+        current["updated_at"] = utc_now_iso()
+        rows[task.actor_id] = current
+        _write_rows(task.group_id, rows)
+    try:
+        submitted = _COORDINATOR.submit(task)
+    except Exception as exc:
+        _update_current(
+            task.group_id,
+            task.actor_id,
+            attempt_id=task.attempt_id,
+            generation=task.generation,
+            patch={
+                "state": "failed",
+                "phase": "failed",
+                "finished_at": utc_now_iso(),
+                "error": str(exc),
+            },
+        )
+        raise
+    if not submitted:
+        error = "OpenClaw startup coordinator is not running"
+        _update_current(
+            task.group_id,
+            task.actor_id,
+            attempt_id=task.attempt_id,
+            generation=task.generation,
+            patch={
+                "state": "failed",
+                "phase": "failed",
+                "finished_at": utc_now_iso(),
+                "error": error,
+            },
+        )
+        raise RuntimeError(error)
+    try:
+        publish_event(
+            "actor.starting",
+            {
+                "group_id": task.group_id,
+                "actor_id": task.actor_id,
+                "attempt_id": task.attempt_id,
+                "phase": "queued",
+            },
+        )
+    except Exception:
+        LOGGER.exception(
+            "Failed to publish queued OpenClaw startup group=%s actor=%s attempt=%s",
+            task.group_id,
+            task.actor_id,
+            task.attempt_id,
+        )
+    return dict(reservation.startup)
+
+
+def queue_openclaw_actor_start(
+    group_id: str,
+    actor_id: str,
+    *,
+    by: str,
+    caller_id: str,
+    is_admin: bool,
+    start_actor_process: Callable[..., Dict[str, Any]],
+) -> Dict[str, Any]:
+    reservation = reserve_openclaw_actor_start(
+        group_id,
+        actor_id,
+        by=by,
+        caller_id=caller_id,
+        is_admin=is_admin,
+        start_actor_process=start_actor_process,
+    )
+    return commit_openclaw_actor_start(reservation)
 
 
 def cancel_openclaw_actor_start(group_id: str, actor_id: str, *, remove: bool = False) -> None:

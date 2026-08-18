@@ -347,6 +347,17 @@ def handle_actor_restart(
     caller_context_explicit = "caller_id" in args or "is_admin" in args
     caller_id = str(args.get("caller_id") or "").strip()
     is_admin = coerce_bool(args.get("is_admin"), default=not caller_context_explicit)
+    previous_enabled: Optional[bool] = None
+    enabled_was_updated = False
+
+    def _restore_previous_enabled() -> None:
+        if not enabled_was_updated or previous_enabled is None:
+            return
+        try:
+            update_actor(group, actor_id, {"enabled": previous_enabled})
+        except Exception:
+            pass
+
     try:
         require_actor_permission(group, by=by, action="actor.restart", target_actor_id=actor_id)
         current_actor = find_actor(group, actor_id)
@@ -354,8 +365,10 @@ def handle_actor_restart(
             return _error("actor_restart_failed", f"actor not found: {actor_id}")
         if _is_unsupported_internal_actor(current_actor):
             return _unsupported_internal_actor_error(group.group_id, actor_id, current_actor)
+        previous_enabled = coerce_bool(current_actor.get("enabled"), default=True)
         invalidate_turn_grant(group, actor_id, reason="actor_restart")
         actor = update_actor(group, actor_id, {"enabled": True})
+        enabled_was_updated = True
         actor = resolve_linked_actor_before_start(
             group,
             actor_id,
@@ -365,6 +378,10 @@ def handle_actor_restart(
             caller_id=caller_id,
             is_admin=is_admin,
         )
+        if str(actor.get("runtime") or "").strip().lower() == "openclaw":
+            from ..openclaw_startup import cancel_openclaw_actor_start
+
+            cancel_openclaw_actor_start(group.group_id, actor_id)
         _stop_actor_runtime_handles(
             group.group_id,
             actor_id,
@@ -377,6 +394,7 @@ def handle_actor_restart(
         clear_preamble_sent(group, actor_id)
         throttle_reset_actor(group.group_id, actor_id, keep_pending=True)
     except Exception as e:
+        _restore_previous_enabled()
         msg = str(e)
         if "profile not found:" in msg:
             return _error("profile_not_found", msg)
@@ -388,9 +406,13 @@ def handle_actor_restart(
         group.doc.get("running"), default=False
     ):
         try:
-            from ..openclaw_startup import queue_openclaw_actor_start
+            from ..openclaw_startup import (
+                commit_openclaw_actor_start,
+                fail_openclaw_actor_start_reservation,
+                reserve_openclaw_actor_start,
+            )
 
-            startup = queue_openclaw_actor_start(
+            reservation = reserve_openclaw_actor_start(
                 group.group_id,
                 actor_id,
                 by=by,
@@ -399,16 +421,27 @@ def handle_actor_restart(
                 start_actor_process=start_actor_process,
             )
         except Exception as exc:
+            _restore_previous_enabled()
+            return _error("actor_restart_failed", str(exc))
+        try:
+            event = append_event(
+                group.ledger_path,
+                kind="actor.restart",
+                group_id=group.group_id,
+                scope_key="",
+                by=by,
+                data={"actor_id": actor_id, "runner": "pty", "runner_effective": "pty"},
+            )
+        except Exception as exc:
+            fail_openclaw_actor_start_reservation(reservation, error=str(exc))
+            _restore_previous_enabled()
+            return _error("actor_restart_failed", str(exc))
+        try:
+            startup = commit_openclaw_actor_start(reservation)
+        except Exception as exc:
+            _restore_previous_enabled()
             return _error("actor_restart_failed", str(exc))
         maybe_reset_automation_on_foreman_change(group, before_foreman_id=before_foreman)
-        event = append_event(
-            group.ledger_path,
-            kind="actor.restart",
-            group_id=group.group_id,
-            scope_key="",
-            by=by,
-            data={"actor_id": actor_id, "runner": "pty", "runner_effective": "pty", "queued": True},
-        )
         from ...kernel.events import publish_event
 
         publish_event("actor.restart", {"group_id": group.group_id, "actor_id": actor_id})

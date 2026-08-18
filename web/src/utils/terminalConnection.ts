@@ -20,6 +20,20 @@ export function buildTerminalConnectionKey(args: {
   ].join(":");
 }
 
+export function buildTerminalSessionKey(args: {
+  groupId: string;
+  actorId: string;
+  termEpoch: number;
+  runtimeStartupAttemptId?: string;
+}): string {
+  return [
+    String(args.groupId || "").trim(),
+    String(args.actorId || "").trim(),
+    String(args.termEpoch || 0),
+    String(args.runtimeStartupAttemptId || "").trim(),
+  ].join("\u0000");
+}
+
 export function buildTerminalWebSocketUrl(args: {
   protocol: string;
   host: string;

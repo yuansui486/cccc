@@ -8,6 +8,7 @@ import { getActorTabIndicatorState, type ActorTabIndicator } from "../components
 
 export type ActorDisplayState = {
   isRunning: boolean;
+  terminalRunning: boolean;
   assumeRunning: boolean;
   workingState: string;
   indicator: ActorTabIndicator;
@@ -42,6 +43,7 @@ export function computeActorDisplayState({
   now = Date.now(),
 }: ComputeActorDisplayStateInput): ActorDisplayState {
   const runningKnown = typeof actor.running === "boolean";
+  const terminalRunning = actor.running === true;
   const backendRunning = runningKnown ? Boolean(actor.running) : Boolean(actor.enabled ?? false);
   const startupState = String(actor.runtime_startup?.state || "").trim().toLowerCase();
   const startupPending = startupState === "queued" || startupState === "initializing";
@@ -71,6 +73,7 @@ export function computeActorDisplayState({
 
   return {
     isRunning,
+    terminalRunning,
     assumeRunning,
     workingState,
     indicator,

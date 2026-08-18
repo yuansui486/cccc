@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTerminalWebSocketUrl,
   buildTerminalConnectionKey,
+  buildTerminalSessionKey,
   decodeTerminalJsonFrame,
   encodeTerminalInputFrame,
   encodeTerminalResizeFrame,
@@ -80,6 +81,17 @@ describe("buildTerminalConnectionKey", () => {
     expect(terminalAttachRetryDelayMs({ code: "actor_not_running", attempt: 0, startupElapsedMs: 60000 })).toBeNull();
     expect(terminalAttachRetryDelayMs({ code: "terminal_attach_busy", attempt: 0, startupElapsedMs: 0 })).toBe(1000);
     expect(terminalAttachRetryDelayMs({ code: "terminal_attach_busy", attempt: 10, startupElapsedMs: 0 })).toBeNull();
+  });
+});
+
+describe("buildTerminalSessionKey", () => {
+  it("isolates OpenClaw startup attempts while preserving reconnect identity", () => {
+    const base = { groupId: "g1", actorId: "peer1", termEpoch: 0 };
+    const first = buildTerminalSessionKey({ ...base, runtimeStartupAttemptId: "attempt-a" });
+
+    expect(buildTerminalSessionKey({ ...base, runtimeStartupAttemptId: "attempt-a" })).toBe(first);
+    expect(buildTerminalSessionKey({ ...base, runtimeStartupAttemptId: "attempt-b" })).not.toBe(first);
+    expect(buildTerminalSessionKey({ ...base, termEpoch: 1, runtimeStartupAttemptId: "attempt-a" })).not.toBe(first);
   });
 });
 

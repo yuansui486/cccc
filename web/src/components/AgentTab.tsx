@@ -99,7 +99,7 @@ export function AgentTab({
 }: AgentTabProps) {
   const { t } = useTranslation('actors');
   // Derived state (must be defined before refs that use them)
-  const { isRunning, workingState } = useActorDisplayState({ groupId, actor });
+  const { isRunning, terminalRunning, workingState } = useActorDisplayState({ groupId, actor });
   const effectiveRunner = getEffectiveActorRunner(actor);
   const isHeadless = effectiveRunner === "headless";
   const isWebModel = String(actor.runtime || "").trim().toLowerCase() === "web_model";
@@ -500,11 +500,12 @@ export function AgentTab({
     sendInterrupt,
   } = useAgentTerminalConnection({
     activated,
-    isRunning,
+    isRunning: terminalRunning,
     isHeadless,
     groupId,
     actorId: actor.id,
     actorRuntime: actor.runtime,
+    runtimeStartupAttemptId: actor.runtime_startup?.attempt_id,
     canControl,
     termEpoch,
     reconnectTrigger,
@@ -516,7 +517,7 @@ export function AgentTab({
   });
   const showRuntimeInitializing = shouldShowRuntimeTerminalInitializing({
     runtime: actor.runtime,
-    isRunning,
+    isRunning: startupPending || terminalRunning,
     isHeadless,
     terminalHasOutput,
   });

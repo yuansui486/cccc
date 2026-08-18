@@ -56,6 +56,7 @@ from .turn_provenance import (
     finalize_turn_delivery_attempt,
     invalidate_turn_grant,
     terminalize_uncertain_delivery_attempt,
+    turn_delivery_attempt_receipt,
     turn_delivery_completion_receipt,
     turn_delivery_grant_receipt,
 )
@@ -1173,6 +1174,9 @@ def _finalize_delivery_success(
     )
     if attempt is not None:
         finalize_turn_delivery_attempt(group, actor_id=aid, attempt=attempt)
+        receipt = turn_delivery_attempt_receipt(group, actor_id=aid, attempt=attempt)
+        if not bool(receipt.get("finalized")):
+            raise RuntimeError("turn delivery attempt was superseded before finalization")
     if chat_total > 0:
         THROTTLE.add_delivered_chat_count(gid, aid, chat_total)
     if experience_decision is not None:
@@ -1197,12 +1201,15 @@ def _record_uncertain_accepted_delivery(
     attempt: dict[str, Any],
     error: BaseException,
 ) -> None:
-    terminalize_uncertain_delivery_attempt(
-        group,
-        actor_id=actor_id,
-        attempt=attempt,
-        reason="pty_accepted_finalize_uncertain",
-    )
+    try:
+        terminalize_uncertain_delivery_attempt(
+            group,
+            actor_id=actor_id,
+            attempt=attempt,
+            reason="pty_accepted_finalize_uncertain",
+        )
+    except Exception:
+        logger.exception("[flush] failed to terminalize accepted delivery attempt")
     try:
         append_event(
             group.ledger_path,
@@ -1406,19 +1413,100 @@ def _start_async_first_delivery(
     """
     gid = str(group.group_id or "").strip()
     aid = str(actor_id or "").strip()
+    openclaw_first_turn = str(actor.get("runtime") or "").strip().lower() == "openclaw"
 
     def worker() -> None:
         delivery_attempt: Optional[dict[str, Any]] = None
         allow_followup = True
+        transport_accepted = False
         try:
             prompt = render_system_prompt(group=group, actor=actor)
-            if prompt and prompt.strip():
+            prompt_text = str(prompt or "").strip()
+
+            # OpenClaw ignores or buffers PTY input while its first TUI turn is
+            # running. Submit the protocol preamble and first business batch as
+            # one turn so a successful write cannot strand the real message in
+            # the TUI composer while OpenClaw is processing the preamble.
+            if openclaw_first_turn and message_text:
+                delivery_attempt = begin_turn_delivery_attempt(
+                    group,
+                    actor_id=aid,
+                    event_ids=[str(msg.event_id or "") for msg in deliverable],
+                    binding={"transport": "pty"},
+                )
+                delivery_text = append_turn_grant_receipt(
+                    append_turn_completion_receipt(message_text, delivery_attempt),
+                    delivery_attempt,
+                )
+                first_turn_text = "\n\n".join(
+                    part for part in (prompt_text, delivery_text.strip()) if part
+                )
+                try:
+                    submit_outcome = _coerce_pty_submit_outcome(
+                        pty_submit_text(
+                            group,
+                            actor_id=aid,
+                            text=first_turn_text,
+                            wait_for_submit=True,
+                            detailed_result=True,
+                        )
+                    )
+                except Exception as exc:
+                    submit_outcome = PtySubmitOutcome(False, False, "submit_call_unknown", str(exc))
+                if submit_outcome.retryable:
+                    fail_turn_delivery_attempt(
+                        group,
+                        actor_id=aid,
+                        attempt=delivery_attempt,
+                        reason="pty_delivery_failed",
+                    )
+                    THROTTLE.requeue_front(gid, aid, messages)
+                    return
+                if not submit_outcome.accepted:
+                    _record_uncertain_pty_submission(
+                        group,
+                        actor_id=aid,
+                        attempt=delivery_attempt,
+                        outcome=submit_outcome,
+                    )
+                    allow_followup = False
+                    return
+                transport_accepted = True
+                try:
+                    mark_preamble_sent(group, aid)
+                    _finalize_delivery_success(
+                        group,
+                        actor_id=aid,
+                        chat_total=chat_total,
+                        deliverable=deliverable,
+                        requeue=requeue,
+                        delivery_attempt=delivery_attempt,
+                        experience_decision=experience_decision,
+                    )
+                except Exception as exc:
+                    _record_uncertain_accepted_delivery(
+                        group,
+                        actor_id=aid,
+                        attempt=delivery_attempt,
+                        error=exc,
+                    )
+                    if requeue:
+                        THROTTLE.requeue_front(gid, aid, requeue)
+                    allow_followup = False
+                    logger.exception(
+                        "[flush] accepted OpenClaw first delivery could not be finalized gid=%s aid=%s",
+                        gid,
+                        aid,
+                    )
+                return
+
+            if prompt_text:
                 try:
                     preamble_outcome = _coerce_pty_submit_outcome(
                         pty_submit_text(
                             group,
                             actor_id=aid,
-                            text=prompt.strip(),
+                            text=prompt_text,
                             wait_for_submit=True,
                             detailed_result=True,
                         )
@@ -1489,6 +1577,7 @@ def _start_async_first_delivery(
             except Exception as exc:
                 submit_outcome = PtySubmitOutcome(False, False, "submit_call_unknown", str(exc))
             if submit_outcome.accepted:
+                transport_accepted = True
                 try:
                     _finalize_delivery_success(
                         group,
@@ -1506,6 +1595,9 @@ def _start_async_first_delivery(
                         attempt=delivery_attempt,
                         error=exc,
                     )
+                    if requeue:
+                        THROTTLE.requeue_front(gid, aid, requeue)
+                    allow_followup = False
                     logger.exception("[flush] accepted first delivery could not publish grant gid=%s aid=%s", gid, aid)
                     return
             elif submit_outcome.retryable:
@@ -1527,7 +1619,24 @@ def _start_async_first_delivery(
                 return
         except TurnDeliveryBusyError:
             THROTTLE.requeue_front(gid, aid, messages)
-        except Exception:
+        except Exception as exc:
+            if transport_accepted:
+                if delivery_attempt is not None:
+                    _record_uncertain_accepted_delivery(
+                        group,
+                        actor_id=aid,
+                        attempt=delivery_attempt,
+                        error=exc,
+                    )
+                if requeue:
+                    THROTTLE.requeue_front(gid, aid, requeue)
+                allow_followup = False
+                logger.exception(
+                    "[flush] accepted first delivery failed during finalization gid=%s aid=%s",
+                    gid,
+                    aid,
+                )
+                return
             if delivery_attempt is not None:
                 fail_turn_delivery_attempt(
                     group,

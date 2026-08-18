@@ -15,6 +15,7 @@ describe("computeActorDisplayState", () => {
     });
 
     expect(state.isRunning).toBe(true);
+    expect(state.terminalRunning).toBe(false);
     expect(state.assumeRunning).toBe(true);
     expect(state.workingState).toBe("waiting");
   });
@@ -30,6 +31,7 @@ describe("computeActorDisplayState", () => {
     } as any);
 
     expect(state.isRunning).toBe(true);
+    expect(state.terminalRunning).toBe(true);
     expect(state.assumeRunning).toBe(false);
     expect(state.workingState).toBe("waiting");
   });

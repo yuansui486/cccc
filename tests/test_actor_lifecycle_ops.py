@@ -736,6 +736,193 @@ class TestActorLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_openclaw_restart_ledger_failure_does_not_queue_and_restores_enabled(self) -> None:
+        from no1.kernel.actors import find_actor, update_actor
+        from no1.kernel.group import load_group
+
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "openclaw-restart-ledger", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "OpenClaw Peer",
+                    "runtime": "openclaw",
+                    "runner": "pty",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            update_actor(group, "peer1", {"enabled": False})
+            group.doc["running"] = True
+            group.save()
+
+            with patch(
+                "no1.daemon.actors.actor_lifecycle_ops.append_event",
+                side_effect=RuntimeError("ledger unavailable"),
+            ), patch("no1.daemon.openclaw_startup.commit_openclaw_actor_start") as commit_start:
+                restart, _ = self._call(
+                    "actor_restart",
+                    {"group_id": group_id, "actor_id": "peer1", "by": "user"},
+                )
+
+            self.assertFalse(restart.ok)
+            self.assertEqual(getattr(restart.error, "code", ""), "actor_restart_failed")
+            self.assertIn("ledger unavailable", getattr(restart.error, "message", ""))
+            commit_start.assert_not_called()
+
+            refreshed = load_group(group_id)
+            self.assertIsNotNone(refreshed)
+            stored = find_actor(refreshed, "peer1") if refreshed is not None else None
+            self.assertIsInstance(stored, dict)
+            assert isinstance(stored, dict)
+            self.assertFalse(bool(stored.get("enabled", True)))
+        finally:
+            cleanup()
+
+    def test_openclaw_restart_keeps_queue_state_out_of_lifecycle_event(self) -> None:
+        from no1.kernel.group import load_group
+
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "openclaw-restart-event", "topic": "", "by": "user"})
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "OpenClaw Peer",
+                    "runtime": "openclaw",
+                    "runner": "pty",
+                    "enabled": False,
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            group.doc["running"] = True
+            group.save()
+
+            with patch(
+                "no1.daemon.openclaw_startup.commit_openclaw_actor_start",
+                side_effect=lambda reservation: dict(reservation.startup),
+            ):
+                restart, _ = self._call(
+                    "actor_restart",
+                    {"group_id": group_id, "actor_id": "peer1", "by": "user"},
+                )
+
+            self.assertTrue(restart.ok, getattr(restart, "error", None))
+            self.assertTrue(bool((restart.result or {}).get("start_queued")))
+            event = (restart.result or {}).get("event") or {}
+            data = event.get("data") if isinstance(event, dict) else {}
+            self.assertEqual(data.get("actor_id"), "peer1")
+            self.assertNotIn("queued", data)
+        finally:
+            cleanup()
+
+    def test_openclaw_update_keeps_queue_state_out_of_update_event(self) -> None:
+        from no1.kernel.group import load_group
+
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "openclaw-update-event", "topic": "", "by": "user"})
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "OpenClaw Peer",
+                    "runtime": "openclaw",
+                    "runner": "pty",
+                    "enabled": False,
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            group.doc["running"] = True
+            group.save()
+
+            with patch(
+                "no1.daemon.openclaw_startup.commit_openclaw_actor_start",
+                side_effect=lambda reservation: dict(reservation.startup),
+            ):
+                update, _ = self._call(
+                    "actor_update",
+                    {"group_id": group_id, "actor_id": "peer1", "patch": {"enabled": True}, "by": "user"},
+                )
+
+            self.assertTrue(update.ok, getattr(update, "error", None))
+            self.assertTrue(bool((update.result or {}).get("start_queued")))
+            event = (update.result or {}).get("event") or {}
+            data = event.get("data") if isinstance(event, dict) else {}
+            self.assertEqual(data.get("actor_id"), "peer1")
+            self.assertNotIn("start_queued", data)
+        finally:
+            cleanup()
+
+    def test_openclaw_update_start_failure_restores_disabled_state(self) -> None:
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
+
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "openclaw-update-failure", "topic": "", "by": "user"})
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "OpenClaw Peer",
+                    "runtime": "openclaw",
+                    "runner": "pty",
+                    "enabled": False,
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            group.doc["running"] = True
+            group.save()
+
+            with patch(
+                "no1.daemon.openclaw_startup.commit_openclaw_actor_start",
+                side_effect=RuntimeError("coordinator stopped"),
+            ):
+                update, _ = self._call(
+                    "actor_update",
+                    {"group_id": group_id, "actor_id": "peer1", "patch": {"enabled": True}, "by": "user"},
+                )
+
+            self.assertFalse(update.ok)
+            refreshed = load_group(group_id)
+            stored = find_actor(refreshed, "peer1") if refreshed is not None else None
+            self.assertIsInstance(stored, dict)
+            assert isinstance(stored, dict)
+            self.assertFalse(bool(stored.get("enabled", True)))
+        finally:
+            cleanup()
+
     def test_openclaw_actor_remove_cleanup_failure_keeps_actor(self) -> None:
         _, cleanup = self._with_home()
         try:

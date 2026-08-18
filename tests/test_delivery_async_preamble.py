@@ -9,6 +9,187 @@ class TestAsyncFirstDelivery(unittest.TestCase):
     def _group(self):
         return SimpleNamespace(group_id="g-test", doc={})
 
+    def test_openclaw_first_delivery_submits_preamble_and_message_as_one_turn(self) -> None:
+        from no1.daemon.messaging import delivery
+
+        group = self._group()
+        message = delivery.PendingMessage(
+            event_id="e1",
+            by="user",
+            to=["peer1"],
+            text="hello first",
+        )
+        submitted: list[str] = []
+        order: list[str] = []
+        worker_done = threading.Event()
+        attempt = {"attempt_id": "attempt-1"}
+
+        def submit(_group, *, text: str, **_kwargs):
+            order.append("submit")
+            submitted.append(text)
+            return delivery.PtySubmitOutcome(True, False, "accepted")
+
+        with patch(
+            "no1.daemon.messaging.delivery.render_system_prompt",
+            return_value="SYSTEM PROMPT",
+        ), patch(
+            "no1.daemon.messaging.delivery.begin_turn_delivery_attempt",
+            return_value=attempt,
+        ), patch(
+            "no1.daemon.messaging.delivery.append_turn_completion_receipt",
+            side_effect=lambda text, _attempt: f"COMPLETION RECEIPT\n{text}",
+        ), patch(
+            "no1.daemon.messaging.delivery.append_turn_grant_receipt",
+            side_effect=lambda text, _attempt: f"TURN GRANT RECEIPT\n{text}",
+        ), patch(
+            "no1.daemon.messaging.delivery.pty_submit_text",
+            side_effect=submit,
+        ), patch(
+            "no1.daemon.messaging.delivery.mark_preamble_sent",
+            side_effect=lambda *_args: order.append("mark_preamble"),
+        ), patch(
+            "no1.daemon.messaging.delivery._finalize_delivery_success",
+            side_effect=lambda *_args, **_kwargs: order.append("finalize"),
+        ), patch(
+            "no1.daemon.messaging.delivery._finish_delivery_chain",
+            side_effect=lambda *_args, **_kwargs: worker_done.set(),
+        ):
+            delivery._start_async_first_delivery(
+                group,
+                actor_id="peer1",
+                messages=[message],
+                deliverable=[message],
+                requeue=[],
+                message_text="hello first",
+                chat_total=1,
+                actor={"id": "peer1", "runtime": "openclaw", "runner": "pty"},
+                experience_decision=unittest.mock.Mock(),
+            )
+
+            self.assertTrue(worker_done.wait(1.0))
+
+        self.assertEqual(len(submitted), 1)
+        self.assertIn("SYSTEM PROMPT", submitted[0])
+        self.assertIn("COMPLETION RECEIPT", submitted[0])
+        self.assertIn("TURN GRANT RECEIPT", submitted[0])
+        self.assertIn("hello first", submitted[0])
+        self.assertEqual(order, ["submit", "mark_preamble", "finalize"])
+
+    def test_openclaw_retryable_first_delivery_requeues_complete_batch(self) -> None:
+        from no1.daemon.messaging import delivery
+
+        group = self._group()
+        message = delivery.PendingMessage(
+            event_id="e1",
+            by="user",
+            to=["peer1"],
+            text="hello first",
+        )
+        attempt = {"attempt_id": "attempt-1"}
+        failed = threading.Event()
+        requeued = threading.Event()
+        worker_done = threading.Event()
+
+        with patch(
+            "no1.daemon.messaging.delivery.render_system_prompt",
+            return_value="SYSTEM PROMPT",
+        ), patch(
+            "no1.daemon.messaging.delivery.begin_turn_delivery_attempt",
+            return_value=attempt,
+        ), patch(
+            "no1.daemon.messaging.delivery.pty_submit_text",
+            return_value=delivery.PtySubmitOutcome(False, True, "pre_write_failed", "not running"),
+        ), patch(
+            "no1.daemon.messaging.delivery.fail_turn_delivery_attempt",
+            side_effect=lambda *_args, **_kwargs: failed.set(),
+        ), patch.object(
+            delivery.THROTTLE,
+            "requeue_front",
+            side_effect=lambda _gid, _aid, messages: requeued.set() if messages == [message] else None,
+        ), patch(
+            "no1.daemon.messaging.delivery._finish_delivery_chain",
+            side_effect=lambda *_args, **_kwargs: worker_done.set(),
+        ), patch(
+            "no1.daemon.messaging.delivery.mark_preamble_sent",
+        ) as mark_preamble, patch(
+            "no1.daemon.messaging.delivery._finalize_delivery_success",
+        ) as finalize:
+            delivery._start_async_first_delivery(
+                group,
+                actor_id="peer1",
+                messages=[message],
+                deliverable=[message],
+                requeue=[],
+                message_text="hello first",
+                chat_total=1,
+                actor={"id": "peer1", "runtime": "openclaw", "runner": "pty"},
+                experience_decision=unittest.mock.Mock(),
+            )
+
+            self.assertTrue(worker_done.wait(1.0))
+
+        self.assertTrue(failed.is_set())
+        self.assertTrue(requeued.is_set())
+        mark_preamble.assert_not_called()
+        finalize.assert_not_called()
+
+    def test_openclaw_accepted_first_delivery_never_requeues_sent_messages(self) -> None:
+        from no1.daemon.messaging import delivery
+
+        group = self._group()
+        delivered = delivery.PendingMessage(event_id="e1", by="user", to=["peer1"], text="hello")
+        blocked = delivery.PendingMessage(event_id="e2", by="peer2", to=["peer1"], text="later")
+        attempt = {"attempt_id": "attempt-1", "generation": 1}
+        requeued: list[list[delivery.PendingMessage]] = []
+        worker_done = threading.Event()
+
+        with patch(
+            "no1.daemon.messaging.delivery.render_system_prompt",
+            return_value="SYSTEM PROMPT",
+        ), patch(
+            "no1.daemon.messaging.delivery.begin_turn_delivery_attempt",
+            return_value=attempt,
+        ), patch(
+            "no1.daemon.messaging.delivery.pty_submit_text",
+            return_value=delivery.PtySubmitOutcome(True, False, "accepted"),
+        ), patch(
+            "no1.daemon.messaging.delivery.mark_preamble_sent",
+        ), patch(
+            "no1.daemon.messaging.delivery._finalize_delivery_success",
+            side_effect=RuntimeError("ledger unavailable after PTY acceptance"),
+        ), patch(
+            "no1.daemon.messaging.delivery.terminalize_uncertain_delivery_attempt",
+            side_effect=OSError("state file locked"),
+        ), patch(
+            "no1.daemon.messaging.delivery.append_event",
+        ), patch(
+            "no1.daemon.messaging.delivery.fail_turn_delivery_attempt",
+        ) as fail_attempt, patch.object(
+            delivery.THROTTLE,
+            "requeue_front",
+            side_effect=lambda _gid, _aid, batch: requeued.append(list(batch)),
+        ), patch.object(
+            delivery.THROTTLE,
+            "end_delivery",
+            side_effect=lambda *_args: worker_done.set(),
+        ):
+            delivery._start_async_first_delivery(
+                group,
+                actor_id="peer1",
+                messages=[delivered, blocked],
+                deliverable=[delivered],
+                requeue=[blocked],
+                message_text="hello",
+                chat_total=1,
+                actor={"id": "peer1", "runtime": "openclaw", "runner": "pty"},
+                experience_decision=unittest.mock.Mock(),
+            )
+
+            self.assertTrue(worker_done.wait(1.0))
+
+        self.assertEqual(requeued, [[blocked]])
+        fail_attempt.assert_not_called()
+
     def test_first_flush_returns_without_waiting_for_preamble_submit(self) -> None:
         from no1.daemon.messaging import delivery
 
@@ -74,6 +255,70 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             self.assertLess(elapsed, 0.1)
             self.assertTrue(prompt_started.wait(0.2))
             self.assertTrue(message_sent.wait(1.0))
+
+    def test_openclaw_first_flush_submits_preamble_and_message_as_one_turn(self) -> None:
+        from no1.daemon.messaging import delivery
+
+        group = self._group()
+        submitted = threading.Event()
+        submitted_text: list[str] = []
+
+        def fake_submit(
+            _group,
+            *,
+            actor_id: str,
+            text: str,
+            file_fallback: bool = False,
+            wait_for_submit: bool = False,
+            detailed_result: bool = False,
+        ):
+            self.assertEqual(actor_id, "peer1")
+            self.assertTrue(wait_for_submit)
+            self.assertTrue(detailed_result)
+            submitted_text.append(text)
+            submitted.set()
+            return delivery.PtySubmitOutcome(True, False, "accepted")
+
+        with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
+            "no1.daemon.messaging.delivery.find_actor",
+            return_value={"id": "peer1", "runner": "pty", "runtime": "openclaw"},
+        ), patch("no1.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
+            "no1.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
+        ), patch("no1.daemon.messaging.delivery.is_preamble_sent", return_value=False), patch(
+            "no1.daemon.messaging.delivery.mark_preamble_sent"
+        ) as mark_preamble, patch(
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times", return_value=(None, None)
+        ), patch(
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
+        ), patch(
+            "no1.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
+        ), patch(
+            "no1.daemon.messaging.delivery.begin_turn_delivery_attempt", return_value={"attempt_id": "attempt-a"}
+        ), patch(
+            "no1.daemon.messaging.delivery.append_turn_completion_receipt", side_effect=lambda text, _attempt: text
+        ), patch(
+            "no1.daemon.messaging.delivery.append_turn_grant_receipt", side_effect=lambda text, _attempt: text
+        ), patch(
+            "no1.daemon.messaging.delivery._finalize_delivery_success"
+        ) as finalize:
+            delivery.queue_chat_message(
+                group,
+                actor_id="peer1",
+                event_id="e1",
+                by="user",
+                to=["@all"],
+                text="hello OpenClaw",
+                ts="2026-03-23T00:00:00Z",
+            )
+
+            self.assertTrue(delivery.flush_pending_messages(group, actor_id="peer1"))
+            self.assertTrue(submitted.wait(1.0))
+
+        self.assertEqual(len(submitted_text), 1)
+        self.assertIn("SYSTEM PROMPT", submitted_text[0])
+        self.assertIn("hello OpenClaw", submitted_text[0])
+        mark_preamble.assert_called_once_with(group, "peer1")
+        finalize.assert_called_once()
 
     def test_async_first_delivery_serializes_followup_flushes(self) -> None:
         from no1.daemon.messaging import delivery

@@ -135,6 +135,16 @@ def handle_actor_update(
         return _error("actor_not_found", f"actor not found: {actor_id}")
     previous_runtime = str(actor_existing.get("runtime") or "codex").strip()
     previous_env = dict(actor_existing.get("env") or {}) if isinstance(actor_existing.get("env"), dict) else {}
+    previous_enabled = coerce_bool(actor_existing.get("enabled"), default=True)
+
+    def _restore_enabled_after_start_failure() -> None:
+        if not enabled_patched or not coerce_bool(patch.get("enabled"), default=False):
+            return
+        try:
+            update_actor(group, actor_id, {"enabled": previous_enabled})
+        except Exception:
+            pass
+
     linked_before = is_actor_profile_linked(actor_existing)
     controlled_patch_keys = sorted([key for key in PROFILE_CONTROLLED_FIELDS if key in patch])
     if linked_before and controlled_patch_keys:
@@ -279,29 +289,49 @@ def handle_actor_update(
                         is_admin=coerce_bool(args.get("is_admin"), default=False),
                     )
                 except Exception as e:
+                    _restore_enabled_after_start_failure()
                     return _error("profile_not_found", str(e))
                 if str(actor.get("runtime") or "").strip().lower() == "openclaw":
                     if start_actor_process is None:
+                        _restore_enabled_after_start_failure()
                         return _error("actor_update_failed", "OpenClaw startup executor is unavailable")
-                    from ..openclaw_startup import queue_openclaw_actor_start
+                    from ..openclaw_startup import (
+                        commit_openclaw_actor_start,
+                        fail_openclaw_actor_start_reservation,
+                        reserve_openclaw_actor_start,
+                    )
 
-                    startup = queue_openclaw_actor_start(
-                        group.group_id,
-                        actor_id,
-                        by=by,
-                        caller_id=str(args.get("caller_id") or "").strip(),
-                        is_admin=coerce_bool(args.get("is_admin"), default=False),
-                        start_actor_process=start_actor_process,
-                    )
+                    try:
+                        reservation = reserve_openclaw_actor_start(
+                            group.group_id,
+                            actor_id,
+                            by=by,
+                            caller_id=str(args.get("caller_id") or "").strip(),
+                            is_admin=coerce_bool(args.get("is_admin"), default=False),
+                            start_actor_process=start_actor_process,
+                        )
+                    except Exception as exc:
+                        _restore_enabled_after_start_failure()
+                        return _error("actor_update_failed", str(exc))
+                    try:
+                        event = append_event(
+                            group.ledger_path,
+                            kind="actor.update",
+                            group_id=group.group_id,
+                            scope_key="",
+                            by=by,
+                            data={"actor_id": actor_id, "patch": patch},
+                        )
+                    except Exception as exc:
+                        fail_openclaw_actor_start_reservation(reservation, error=str(exc))
+                        _restore_enabled_after_start_failure()
+                        return _error("actor_update_failed", str(exc))
+                    try:
+                        startup = commit_openclaw_actor_start(reservation)
+                    except Exception as exc:
+                        _restore_enabled_after_start_failure()
+                        return _error("actor_update_failed", str(exc))
                     maybe_reset_automation_on_foreman_change(group, before_foreman_id=before_foreman)
-                    event = append_event(
-                        group.ledger_path,
-                        kind="actor.update",
-                        group_id=group.group_id,
-                        scope_key="",
-                        by=by,
-                        data={"actor_id": actor_id, "patch": patch, "start_queued": True},
-                    )
                     return DaemonResponse(
                         ok=True,
                         result={
