@@ -19,7 +19,7 @@ import { Actor, GroupDoc, GroupMeta, GroupRuntimeStatus, TextScale, Theme } from
 import { classNames } from "../../utils/classNames";
 import { getAppBrandName, getAppLogoPath } from "../../utils/displayText";
 import { getActorDisplayWorkingState } from "../../utils/terminalWorkingState";
-import { getRuntimeIndicatorState } from "../../utils/statusIndicators";
+import { getActorAccentDotClass, getRuntimeIndicatorState } from "../../utils/statusIndicators";
 import { getGroupControlState, reportGroupControlStateIssues } from "../../utils/groupControlState";
 import { updateGroup } from "../../services/api";
 import {
@@ -821,7 +821,7 @@ export function GroupSidebar({
                   <span
                     className={classNames(
                       "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-primary)]",
-                      indicator.dotClass
+                      getActorAccentDotClass(actor.id, isDark, indicator.tone)
                     )}
                   />
                 </span>
@@ -1021,7 +1021,7 @@ export function GroupSidebar({
                     <span
                       className={classNames(
                         "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-primary)]",
-                        indicator.dotClass
+                        getActorAccentDotClass(actor.id, isDark, indicator.tone)
                       )}
                     />
                   </span>

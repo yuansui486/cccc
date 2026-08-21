@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { GroupSidebar, type GroupSidebarProps } from "../../src/components/layout/GroupSidebar";
+import { getActorAccentColor } from "../../src/types";
 
 vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: () => undefined },
@@ -75,6 +76,23 @@ describe("GroupSidebar team members navigation", () => {
     expect(html).toContain("成员一");
     expect(html).toContain('aria-label="添加智能体"');
     expect(html).not.toContain("成员管理");
+  });
+
+  it("uses the actor accent dot in expanded and collapsed layouts", () => {
+    const accent = getActorAccentColor("actor-1", false);
+    const stoppedExpandedHtml = renderToStaticMarkup(<GroupSidebar {...baseProps} />);
+    const stoppedCollapsedHtml = renderToStaticMarkup(<GroupSidebar {...baseProps} isCollapsed />);
+    const runningProps: GroupSidebarProps = {
+      ...baseProps,
+      actors: [{ id: "actor-1", title: "成员一", enabled: true, running: true }],
+    };
+    const runningExpandedHtml = renderToStaticMarkup(<GroupSidebar {...runningProps} />);
+    const runningCollapsedHtml = renderToStaticMarkup(<GroupSidebar {...runningProps} isCollapsed />);
+
+    expect(stoppedExpandedHtml).toContain(accent.mutedDot);
+    expect(stoppedCollapsedHtml).toContain(accent.mutedDot);
+    expect(runningExpandedHtml).toContain(accent.dot);
+    expect(runningCollapsedHtml).toContain(accent.dot);
   });
 
   it("hides the add button for read-only sidebars", () => {

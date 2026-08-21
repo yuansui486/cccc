@@ -1,3 +1,5 @@
+import { getActorAccentColor } from "../types";
+
 export type RuntimeIndicatorTone = "stop" | "run" | "working";
 
 export type RuntimeIndicatorState = {
@@ -15,6 +17,25 @@ export const STOPPED_INDICATOR_DOT_CLASS =
 
 export const QUIET_RUN_INDICATOR_DOT_CLASS =
   "bg-transparent ring-[1.5px] ring-inset ring-sky-500/75 dark:ring-sky-400/75";
+
+/**
+ * Uses the same stable actor palette as message bubbles while preserving the
+ * state shape and motion cues used by the sidebar indicators.
+ */
+export function getActorAccentDotClass(
+  actorId: string | undefined,
+  isDark: boolean,
+  tone: RuntimeIndicatorTone,
+): string {
+  const accent = getActorAccentColor(actorId, isDark);
+  if (tone === "working") {
+    return `${accent.dot} ${accent.text} animate-pulse scale-110 ring-2 ring-current/35 shadow-[0_0_12px_currentColor]`;
+  }
+  if (tone === "stop") {
+    return `bg-transparent ring-[1.5px] ring-inset ${accent.mutedDot} opacity-70`;
+  }
+  return accent.dot;
+}
 
 const WORKING_INDICATOR_DOT_CLASS =
   "bg-amber-500 ring-[1.5px] ring-amber-200/90 shadow-[0_0_0_3px_rgba(245,158,11,0.14),0_0_18px_rgba(251,191,36,0.72)] dark:bg-amber-400 dark:ring-amber-400/35 dark:shadow-[0_0_0_3px_rgba(245,158,11,0.12),0_0_18px_rgba(251,191,36,0.72)] scale-110";
