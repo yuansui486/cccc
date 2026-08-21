@@ -397,6 +397,13 @@ export type CapabilityOverviewItem = {
   source_uri?: string;
   source_record_id?: string;
   source_record_version?: string;
+  category_id?: string;
+  category_slug?: string;
+  category_name?: string;
+  category_order?: number;
+  display_order?: number;
+  icon_url?: string;
+  icon_sha256?: string;
   origin_group_id?: string;
   source_tier?: string;
   trust_tier?: string;

@@ -56,7 +56,23 @@ _DIFF_FIELDS = (
     "requirements",
     "capsule_text",
     "requires_capabilities",
+    "category_id",
+    "category_slug",
+    "category_name",
+    "category_order",
+    "display_order",
+    "icon_url",
+    "icon_sha256",
 )
+_METADATA_DIFF_FIELDS = {
+    "category_id",
+    "category_slug",
+    "category_name",
+    "category_order",
+    "display_order",
+    "icon_url",
+    "icon_sha256",
+}
 _VOLATILE_RECORD_FIELDS = {"last_synced_at", "sync_state", "health_status"}
 _HASH_FIELDS = {"content_hash", "checksum"}
 
@@ -323,6 +339,23 @@ def _risk_for_change(previous: Optional[Dict[str, Any]], record: Dict[str, Any],
 def _normalize_platform_record(raw: Dict[str, Any]) -> Dict[str, Any]:
     candidate = dict(raw)
     candidate["source_id"] = ONECOLLEAGUE_SOURCE_ID
+    category = raw.get("category") if isinstance(raw.get("category"), dict) else {}
+    icon = raw.get("icon") if isinstance(raw.get("icon"), dict) else {}
+    candidate["category_id"] = candidate.get("category_id") or category.get("id") or ""
+    candidate["category_slug"] = candidate.get("category_slug") or category.get("slug") or ""
+    candidate["category_name"] = candidate.get("category_name") or category.get("name") or ""
+    candidate["category_order"] = (
+        candidate.get("category_order")
+        if candidate.get("category_order") is not None
+        else category.get("display_order", 0)
+    )
+    candidate["icon_sha256"] = candidate.get("icon_sha256") or icon.get("sha256") or ""
+    candidate["icon_url"] = (
+        candidate.get("icon_url")
+        or icon.get("url")
+        or icon.get("public_url")
+        or ""
+    )
     return _normalize_import_record(candidate)
 
 
@@ -475,7 +508,7 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
         now = utc_now_iso()
         pending_path, pending_doc = _load_pending_doc()
         pending_items = pending_doc.get("items") if isinstance(pending_doc.get("items"), dict) else {}
-        summary = {"new": 0, "updated": 0, "unchanged": 0, "deleted": 0, "deprecated": 0, "invalid": len(invalid), "pending": 0, "auto_imported": 0}
+        summary = {"new": 0, "updated": 0, "unchanged": 0, "deleted": 0, "deprecated": 0, "invalid": len(invalid), "pending": 0, "auto_imported": 0, "auto_updated": 0}
         auto_imported: List[Dict[str, Any]] = []
 
         for cap_id, record in records.items():
@@ -525,13 +558,42 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
                     invalid.append({"capability_id": cap_id, "error": f"auto_import_failed:{str(e)}"})
                     summary["invalid"] = int(summary.get("invalid") or 0) + 1
                 continue
+            diffs = _diff_records(previous, record)
+            changed_fields = {
+                str(diff.get("field") or "")
+                for diff in diffs
+                if isinstance(diff, dict) and str(diff.get("field") or "")
+            }
+            if status == "updated" and changed_fields and changed_fields.issubset(_METADATA_DIFF_FIELDS):
+                with _CATALOG_LOCK:
+                    catalog_path, catalog_doc = _load_catalog_doc()
+                    rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+                    rows[cap_id] = record
+                    catalog_doc["records"] = rows
+                    sources = catalog_doc.get("sources") if isinstance(catalog_doc.get("sources"), dict) else {}
+                    source_state = sources.get(ONECOLLEAGUE_SOURCE_ID) if isinstance(sources.get(ONECOLLEAGUE_SOURCE_ID), dict) else _source_state_template("never")
+                    source_state["sync_state"] = "imported"
+                    source_state["last_synced_at"] = now
+                    source_state["staleness_seconds"] = 0
+                    source_state["error"] = ""
+                    sources[ONECOLLEAGUE_SOURCE_ID] = source_state
+                    catalog_doc["sources"] = sources
+                    _refresh_source_record_counts(catalog_doc)
+                    _save_catalog_doc(catalog_path, catalog_doc)
+                summary["auto_updated"] += 1
+                auto_imported.append({
+                    "capability_id": cap_id,
+                    "kind": str(record.get("kind") or ""),
+                    "metadata_only": True,
+                    "changed_fields": sorted(changed_fields),
+                })
+                continue
             version = _record_version(record, index_item)
             checksum = _record_checksum(record, index_item)
             pid = _pending_id(cap_id, version=version, checksum=checksum, status=status)
             existing = pending_items.get(pid) if isinstance(pending_items.get(pid), dict) else {}
             if str(existing.get("status") or "") == "ignored" and str(existing.get("new_version") or "") == version:
                 continue
-            diffs = _diff_records(previous, record)
             risk_level, risk_reasons = _risk_for_change(previous, record, diffs, index_item)
             pending_items[pid] = {
                 "pending_id": pid,

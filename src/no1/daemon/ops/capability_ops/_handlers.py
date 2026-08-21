@@ -896,6 +896,19 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
     qualification_reasons = _normalize_import_reasons(raw_record.get("qualification_reasons"))
     tags = _normalize_import_tags(raw_record.get("tags"), kind=kind)
     recommendation_fields = _normalize_recommendation_fields(raw_record)
+    category_id = str(raw_record.get("category_id") or "").strip()
+    category_slug = str(raw_record.get("category_slug") or "").strip()
+    category_name = str(raw_record.get("category_name") or "").strip()
+    icon_url = str(raw_record.get("icon_url") or "").strip()
+    icon_sha256 = str(raw_record.get("icon_sha256") or "").strip()
+    try:
+        category_order = int(raw_record.get("category_order") or 0)
+    except (TypeError, ValueError):
+        category_order = 0
+    try:
+        display_order = int(raw_record.get("display_order") or 0)
+    except (TypeError, ValueError):
+        display_order = 0
 
     if kind == "mcp_toolpack":
         install_mode = str(raw_record.get("install_mode") or "").strip().lower()
@@ -1001,6 +1014,13 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
         "enable_supported": qualification != _QUAL_BLOCKED,
         "capsule_text": capsule_text[:2400],
         "requires_capabilities": requires_capabilities,
+        "category_id": category_id,
+        "category_slug": category_slug,
+        "category_name": category_name,
+        "category_order": category_order,
+        "display_order": display_order,
+        "icon_url": icon_url,
+        "icon_sha256": icon_sha256,
         **recommendation_fields,
     }
     return rec

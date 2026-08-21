@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Plus, RefreshCw, Search, Sparkles } from "lucide-react";
 import * as api from "../../../services/api";
 import type { AgentState, CapabilityOverviewItem, CapabilityStateResult } from "../../../types";
 import { classNames } from "../../../utils/classNames";
 import type { ContextTranslator } from "../model";
 import type { ContextModalUi } from "../ui";
+import {
+  filterMarketplaceSkills,
+  marketplaceSkills,
+  skillCategoryKey,
+  UNCATEGORIZED_KEY,
+} from "./skillsModel";
 
 interface SkillsViewProps {
   groupId: string;
@@ -17,19 +24,13 @@ function cleanId(value: unknown): string {
   return String(value || "").trim();
 }
 
-function capabilityLabel(row: CapabilityOverviewItem): string {
-  return cleanId(row.name) || cleanId(row.capability_id);
-}
-
 function enabledSetFromState(state: CapabilityStateResult | null): Set<string> {
   const out = new Set<string>();
-  const enabled = Array.isArray(state?.enabled_capabilities) ? state?.enabled_capabilities : [];
-  for (const capabilityId of enabled || []) {
+  for (const capabilityId of state?.enabled_capabilities || []) {
     const id = cleanId(capabilityId);
     if (id) out.add(id);
   }
-  const activeSkills = Array.isArray(state?.active_capsule_skills) ? state?.active_capsule_skills : [];
-  for (const row of activeSkills || []) {
+  for (const row of state?.active_capsule_skills || []) {
     const id = cleanId(row.capability_id);
     if (id) out.add(id);
   }
@@ -37,14 +38,12 @@ function enabledSetFromState(state: CapabilityStateResult | null): Set<string> {
 }
 
 function groupDefaultSetFromState(state: CapabilityStateResult | null): Set<string> {
-  const out = new Set<string>();
-  const entries = Array.isArray(state?.enabled) ? state?.enabled : [];
-  for (const row of entries) {
-    if (cleanId(row.scope).toLowerCase() !== "group") continue;
-    const id = cleanId(row.capability_id);
-    if (id) out.add(id);
-  }
-  return out;
+  return new Set(
+    (state?.enabled || [])
+      .filter((row) => cleanId(row.scope).toLowerCase() === "group")
+      .map((row) => cleanId(row.capability_id))
+      .filter(Boolean),
+  );
 }
 
 export function SkillsView({ groupId, agents, tr, ui, hideHeaderText = false }: SkillsViewProps) {
@@ -52,13 +51,16 @@ export function SkillsView({ groupId, agents, tr, ui, hideHeaderText = false }: 
   const [busyKey, setBusyKey] = useState("");
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState("");
+  const [activeView, setActiveView] = useState<"market" | "added">("market");
   const [items, setItems] = useState<CapabilityOverviewItem[]>([]);
   const [groupState, setGroupState] = useState<CapabilityStateResult | null>(null);
   const [actorStates, setActorStates] = useState<Record<string, CapabilityStateResult | null>>({});
 
-  const actorIds = useMemo(() => {
-    return agents.map((agent) => cleanId(agent.id)).filter((id) => id && id !== "user");
-  }, [agents]);
+  const actorIds = useMemo(
+    () => agents.map((agent) => cleanId(agent.id)).filter((id) => id && id !== "user"),
+    [agents],
+  );
 
   const load = useCallback(async () => {
     if (!groupId) return;
@@ -66,81 +68,66 @@ export function SkillsView({ groupId, agents, tr, ui, hideHeaderText = false }: 
     setError("");
     try {
       const [overviewResp, groupStateResp, actorStateRows] = await Promise.all([
-        api.fetchCapabilityOverview({ includeIndexed: true, limit: 1200 }),
+        api.fetchCapabilityOverview({
+          includeIndexed: true,
+          includeSourceInstances: false,
+          kind: "skill",
+          sourceId: "onecolleague_skill_library",
+          limit: 1200,
+        }),
         api.fetchGroupCapabilityState(groupId, "user"),
-        Promise.all(
-          actorIds.map(async (actorId) => {
-            const resp = await api.fetchGroupCapabilityState(groupId, actorId);
-            return [actorId, resp.ok ? resp.result || null : null] as const;
-          }),
-        ),
+        Promise.all(actorIds.map(async (actorId) => {
+          const resp = await api.fetchGroupCapabilityState(groupId, actorId);
+          return [actorId, resp.ok ? resp.result || null : null] as const;
+        })),
       ]);
-
-      if (!overviewResp.ok) {
-        setItems([]);
-        setError(overviewResp.error?.message || tr("context.failedToLoadSkills", "加载技能失败。"));
+      if (!overviewResp.ok || !groupStateResp.ok) {
+        setError(
+          overviewResp.error?.message
+          || groupStateResp.error?.message
+          || tr("context.failedToLoadSkills", "加载技能失败。"),
+        );
         return;
       }
-      if (!groupStateResp.ok) {
-        setGroupState(null);
-        setError(groupStateResp.error?.message || tr("context.failedToLoadSkillState", "加载工作组技能状态失败。"));
-        return;
-      }
-
-      setItems(Array.isArray(overviewResp.result?.items) ? overviewResp.result.items : []);
+      setItems(overviewResp.result?.items || []);
       setGroupState(groupStateResp.result || null);
       setActorStates(Object.fromEntries(actorStateRows));
     } catch (err) {
-      setItems([]);
-      setGroupState(null);
-      setActorStates({});
       setError(err instanceof Error ? err.message : tr("context.failedToLoadSkills", "加载技能失败。"));
     } finally {
       setLoading(false);
     }
   }, [actorIds, groupId, tr]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  const groupDefaultSet = useMemo(() => groupDefaultSetFromState(groupState), [groupState]);
-  const actorEnabledSets = useMemo(() => {
-    return Object.fromEntries(
-      Object.entries(actorStates).map(([actorId, state]) => [actorId, enabledSetFromState(state)])
-    ) as Record<string, Set<string>>;
-  }, [actorStates]);
-
-  const skillRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return items
-      .filter((row) => cleanId(row.kind).toLowerCase() === "skill")
-      .filter((row) => {
-        if (!q) return true;
-        const text = [
-          row.capability_id,
-          row.name,
-          row.description_short,
-          row.source_id,
-          row.policy_level,
-          ...(Array.isArray(row.tags) ? row.tags : []),
-        ].map((value) => cleanId(value).toLowerCase()).join(" ");
-        return text.includes(q);
-      })
-      .sort((a, b) => {
-        const aEnabled = groupDefaultSet.has(cleanId(a.capability_id)) ? 0 : 1;
-        const bEnabled = groupDefaultSet.has(cleanId(b.capability_id)) ? 0 : 1;
-        if (aEnabled !== bEnabled) return aEnabled - bEnabled;
-        return capabilityLabel(a).localeCompare(capabilityLabel(b));
+  const enabled = useMemo(() => groupDefaultSetFromState(groupState), [groupState]);
+  const actorEnabled = useMemo(() => Object.fromEntries(
+    Object.entries(actorStates).map(([actorId, state]) => [actorId, enabledSetFromState(state)]),
+  ) as Record<string, Set<string>>, [actorStates]);
+  const allSkills = useMemo(() => marketplaceSkills(items), [items]);
+  const categories = useMemo(() => {
+    const byKey = new Map<string, { key: string; name: string; order: number }>();
+    for (const row of allSkills) {
+      const key = skillCategoryKey(row);
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        key,
+        name: cleanId(row.category_name) || tr("context.skillsUncategorized", "未分组"),
+        order: Number(row.category_order) || 0,
       });
-  }, [groupDefaultSet, items, query]);
+    }
+    return [...byKey.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  }, [allSkills, tr]);
+  const visibleSkills = useMemo(() => filterMarketplaceSkills(
+    items,
+    query,
+    activeCategory,
+    activeView === "added",
+    enabled,
+  ), [activeCategory, activeView, enabled, items, query]);
 
-  const enabledSkillCount = useMemo(
-    () => skillRows.filter((row) => groupDefaultSet.has(cleanId(row.capability_id))).length,
-    [groupDefaultSet, skillRows],
-  );
-
-  const toggleGroupDefault = async (capabilityId: string, nextEnabled: boolean) => {
+  const toggle = async (capabilityId: string, nextEnabled: boolean) => {
     const capId = cleanId(capabilityId);
     if (!capId || !groupId) return;
     setBusyKey(capId);
@@ -151,7 +138,7 @@ export function SkillsView({ groupId, agents, tr, ui, hideHeaderText = false }: 
         scope: "group",
         actorId: "user",
         ttlSeconds: 0,
-        reason: "context_modal_group_skill_default",
+        reason: "context_modal_skill_market",
       });
       if (!resp.ok) {
         setError(resp.error?.message || tr("context.failedToUpdateSkill", "更新技能失败。"));
@@ -166,113 +153,151 @@ export function SkillsView({ groupId, agents, tr, ui, hideHeaderText = false }: 
   };
 
   return (
-    <section className={classNames(ui.surfaceClass, "p-4")}>
-      <div className="flex flex-col gap-3">
-        {hideHeaderText ? null : (
-          <div className="min-w-0">
-            <div className={classNames("text-lg font-semibold", "text-[var(--color-text-primary)]")}>
-              {tr("context.skillsTitle", "技能")}
-            </div>
-            <div className={classNames("mt-1 text-sm", ui.subtleTextClass)}>
-              {tr("context.skillsHint", "设置工作组默认技能。工作组启用的技能会立即对当前智能体生效，并由后续新增智能体继承。")}
-            </div>
+    <section className="min-w-0 px-1 py-2">
+      {!hideHeaderText ? (
+        <div className="mb-5">
+          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+            {tr("context.skillsTitle", "技能")}
+          </h2>
+          <p className={classNames("mt-1 text-sm", ui.subtleTextClass)}>
+            {tr("context.skillsHint", "为工作组选择需要的技能。")}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-3 border-b border-[var(--glass-border-subtle)] pb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="inline-flex w-fit rounded-lg bg-[var(--glass-tab-bg)] p-1">
+            {(["market", "added"] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => setActiveView(view)}
+                className={classNames(
+                  "min-h-9 rounded-md px-4 text-sm font-medium transition-colors",
+                  activeView === view
+                    ? "bg-[var(--glass-panel-bg)] text-[var(--color-text-primary)] shadow-sm"
+                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+                )}
+              >
+                {view === "market"
+                  ? tr("context.skillsMarket", "技能市场")
+                  : tr("context.skillsAdded", "已添加")}
+              </button>
+            ))}
           </div>
-        )}
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="min-w-0 flex-1">
-            <input
-              className={ui.inputClass}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={tr("context.skillsSearchPlaceholder", "搜索技能")}
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <span className="rounded-full bg-[var(--glass-panel-bg)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
-              {tr("context.skillsAvailableCount", "{{count}} 个可用", { count: skillRows.length })}
-            </span>
-            <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-xs text-blue-600 dark:text-blue-300">
-              {tr("context.skillsEnabledCount", "已启用 {{count}} 个", { count: enabledSkillCount })}
-            </span>
-            <button type="button" onClick={() => void load()} disabled={loading} className={ui.buttonSecondaryClass}>
-              {loading ? tr("context.loading", "加载中…") : tr("context.refresh", "刷新")}
+          <div className="flex min-w-0 items-center gap-2">
+            <label className="relative min-w-0 flex-1 md:w-72 md:flex-none">
+              <Search aria-hidden="true" className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={tr("context.skillsSearchPlaceholder", "搜索技能")}
+                className={classNames(ui.inputClass, "pl-9")}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={loading}
+              className="grid size-11 shrink-0 place-items-center rounded-lg border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg)] disabled:opacity-50"
+              title={tr("context.refresh", "刷新")}
+              aria-label={tr("context.refresh", "刷新")}
+            >
+              <RefreshCw className={classNames("size-4", loading && "animate-spin")} />
             </button>
           </div>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => setActiveCategory("")}
+            className={classNames(ui.chipBaseClass, "shrink-0", !activeCategory && "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-300")}
+          >
+            {tr("context.all", "全部")}
+          </button>
+          {categories.map((category) => (
+            <button
+              key={category.key}
+              type="button"
+              onClick={() => setActiveCategory(category.key)}
+              className={classNames(ui.chipBaseClass, "shrink-0", activeCategory === category.key && "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-300")}
+            >
+              {category.name}
+            </button>
+          ))}
         </div>
       </div>
 
       {error ? (
-        <div className={classNames("mt-3 rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>
-          {error}
-        </div>
+        <div className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-300">{error}</div>
       ) : null}
 
-      <div className="mt-4 grid gap-3">
-        {skillRows.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[var(--glass-border-subtle)] px-3 py-4 text-sm text-[var(--color-text-muted)]">
-            {loading ? tr("context.loadingSkills", "正在加载技能…") : tr("context.noSkills", "暂无可用技能。")}
-          </div>
-        ) : (
-          skillRows.map((row) => {
-            const capId = cleanId(row.capability_id);
-            const enabled = groupDefaultSet.has(capId);
-            const syncedActors = actorIds.filter((actorId) => actorEnabledSets[actorId]?.has(capId)).length;
-            const enableBlocked = !enabled && (row.blocked_global || row.enable_supported === false);
-            return (
-              <div key={capId} className="rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{capabilityLabel(row)}</div>
-                    <div className="truncate text-[11px] text-[var(--color-text-tertiary)]">{capId}</div>
-                    {cleanId(row.description_short) ? (
-                      <div className="mt-1 text-xs text-[var(--color-text-secondary)]">{cleanId(row.description_short)}</div>
-                    ) : null}
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {enabled ? (
-                        <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">
-                          {tr("context.skillGroupDefault", "工作组默认")}
-                        </span>
-                      ) : null}
-                      {actorIds.length > 0 ? (
-                        <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">
-                          {tr("context.skillSyncedActors", "{{synced}}/{{total}} 个智能体", { synced: syncedActors, total: actorIds.length })}
-                        </span>
-                      ) : null}
-                      {cleanId(row.source_id) ? (
-                        <span className="rounded bg-[var(--glass-tab-bg)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)]">
-                          {cleanId(row.source_id)}
-                        </span>
-                      ) : null}
-                      {cleanId(row.policy_level) ? (
-                        <span className="rounded bg-[var(--glass-tab-bg)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)]">
-                          {cleanId(row.policy_level)}
-                        </span>
-                      ) : null}
-                      {row.blocked_global ? (
-                        <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] text-rose-600 dark:text-rose-300">
-                          {tr("context.skillBlocked", "已阻止")}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={enabled}
-                    aria-label={enabled ? tr("context.disableSkill", "关闭技能") : tr("context.enableSkill", "启用技能")}
-                    title={enabled ? tr("context.disableSkill", "关闭技能") : tr("context.enableSkill", "启用技能")}
-                    disabled={loading || busyKey === capId || enableBlocked}
-                    onClick={() => void toggleGroupDefault(capId, !enabled)}
-                    className={ui.switchTrackClass(enabled)}
-                  >
-                    <span className={ui.switchThumbClass(enabled)} />
-                  </button>
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {visibleSkills.map((row) => {
+          const capId = cleanId(row.capability_id);
+          const isEnabled = enabled.has(capId);
+          const blocked = !isEnabled && (row.blocked_global || row.enable_supported === false);
+          const syncedActors = actorIds.filter((actorId) => actorEnabled[actorId]?.has(capId)).length;
+          return (
+            <article key={capId} className="flex min-h-52 flex-col rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-4 shadow-sm transition-colors hover:border-[var(--glass-accent-border)]">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)]">
+                  <Sparkles className="size-5 text-[var(--color-accent-primary)]" aria-hidden="true" />
+                  {row.icon_url ? (
+                    <img
+                      src={row.icon_url}
+                      alt=""
+                      className="absolute inset-0 size-full object-cover"
+                      loading="lazy"
+                      onError={(event) => { event.currentTarget.hidden = true; }}
+                    />
+                  ) : null}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="line-clamp-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                    {cleanId(row.name) || capId}
+                  </h3>
+                  <p className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
+                    {cleanId(row.category_name) || (skillCategoryKey(row) === UNCATEGORIZED_KEY ? tr("context.skillsUncategorized", "未分组") : skillCategoryKey(row))}
+                  </p>
                 </div>
               </div>
-            );
-          })
-        )}
+              <p className="mt-3 line-clamp-3 min-h-[3.75rem] text-sm leading-5 text-[var(--color-text-secondary)]">
+                {cleanId(row.description_short) || tr("context.skillsNoDescription", "暂无技能说明")}
+              </p>
+              <div className="mt-auto flex items-end justify-between gap-2 pt-4">
+                <span className="truncate text-xs text-[var(--color-text-muted)]">
+                  {actorIds.length > 0
+                    ? tr("context.skillSyncedActors", "{{synced}}/{{total}} 个智能体", { synced: syncedActors, total: actorIds.length })
+                    : capId}
+                </span>
+                <button
+                  type="button"
+                  disabled={loading || busyKey === capId || blocked}
+                  onClick={() => void toggle(capId, !isEnabled)}
+                  className={classNames(
+                    "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                    isEnabled
+                      ? "border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:bg-rose-500/10 hover:text-rose-600"
+                      : "bg-[var(--color-accent-primary)] text-white hover:brightness-110",
+                  )}
+                >
+                  {isEnabled ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
+                  {isEnabled ? tr("context.skillsAdded", "已添加") : tr("context.skillsAdd", "添加")}
+                </button>
+              </div>
+            </article>
+          );
+        })}
       </div>
+
+      {visibleSkills.length === 0 ? (
+        <div className="mt-5 rounded-lg border border-dashed border-[var(--glass-border-subtle)] px-4 py-10 text-center text-sm text-[var(--color-text-muted)]">
+          {loading ? tr("context.loadingSkills", "正在加载技能…") : tr("context.noSkills", "暂无可用技能。")}
+        </div>
+      ) : null}
     </section>
   );
 }
