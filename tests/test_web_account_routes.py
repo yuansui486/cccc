@@ -58,6 +58,42 @@ def test_api_v1_base_url_accepts_smart_ops_root_for_ocs() -> None:
 
 
 class TestAccountCodexConfig(unittest.TestCase):
+    def test_logout_account_session_revokes_upstream_lease(self) -> None:
+        from no1.ports.web.routes import account
+
+        calls: list[tuple[str, str, str]] = []
+
+        async def fake_json_request(_client, method, url, *, stage, **_kwargs):
+            calls.append((method, url, stage))
+            return {}
+
+        with patch("no1.ports.web.routes.account._json_request", new=AsyncMock(side_effect=fake_json_request)):
+            resp = asyncio.run(account._logout_account_session("ua-token"))
+
+        self.assertTrue(bool(resp.get("ok")), resp)
+        self.assertEqual((calls[0][0], calls[0][2]), ("POST", "ua2_logout"))
+        self.assertTrue(str(calls[0][1]).endswith("/auth/logout"))
+
+    def test_account_logout_clears_matching_local_token(self) -> None:
+        from types import SimpleNamespace
+
+        from no1.ports.web.routes import account
+        from no1.ports.web.schemas import AccountCurrentTokenRequest
+
+        account._set_current_token(access_token="ua-token")
+        router = account.create_routers(SimpleNamespace(read_only=False))[0]
+        endpoint = next(route.endpoint for route in router.routes if route.path == "/api/v1/account/logout")
+        mock_logout = AsyncMock(return_value={"ok": True, "result": {"logged_out": True}})
+        patcher = patch("no1.ports.web.routes.account._logout_account_session", new=mock_logout)
+        patcher.start()
+        try:
+            resp = asyncio.run(endpoint(AccountCurrentTokenRequest(access_token="ua-token")))
+        finally:
+            patcher.stop()
+
+        self.assertTrue(bool(resp.get("result", {}).get("local_cleared")), resp)
+        self.assertFalse(bool(account._current_token_result().get("available")))
+
     def test_fetch_account_session_repairs_codex_custom_provider_config(self) -> None:
         from no1.ports.web.routes import account
 

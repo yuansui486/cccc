@@ -202,6 +202,14 @@ export async function clearCurrentAccountToken(accessToken = ""): Promise<DoneHu
   }
 }
 
+export async function logoutDoneHub(
+  accessToken: string,
+): Promise<DoneHubApiResponse<{ logged_out: boolean; local_cleared?: boolean }>> {
+  return request<{ logged_out: boolean; local_cleared?: boolean }>("/api/v1/account/logout", {
+    access_token: String(accessToken || "").trim(),
+  });
+}
+
 export async function listDoneHubTeamPresets(
   session: DoneHubSession,
 ): Promise<DoneHubApiResponse<DoneHubTeamPresetsResult>> {

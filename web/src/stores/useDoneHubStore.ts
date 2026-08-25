@@ -5,6 +5,7 @@ import {
   DONE_HUB_BASE_URL,
   extractDoneHubSession,
   loginDoneHub,
+  logoutDoneHub,
   normalizeDoneHubBaseUrl,
   refreshDoneHubSession,
   sanitizeDoneHubErrorMessage,
@@ -57,7 +58,7 @@ type DoneHubState = {
     tenantCode?: string,
   ) => Promise<boolean>;
   refresh: (opts?: { force?: boolean }) => Promise<boolean>;
-  disconnect: () => void;
+  disconnect: () => Promise<void>;
   clearError: () => void;
   clearAuthNotice: () => void;
 };
@@ -381,11 +382,24 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
     return refreshPromise;
   },
 
-  disconnect: () => {
+  disconnect: async () => {
     const accessToken = get().session?.access_token || "";
+
+    // Release the server-side concurrent-login lease before allowing a new
+    // login. Local cleanup still runs when the upstream is unavailable.
+    try {
+      if (accessToken) await logoutDoneHub(accessToken);
+    } catch {
+      void 0;
+    }
+    try {
+      await clearCurrentAccountToken(accessToken);
+    } catch {
+      void 0;
+    }
+
     persistSession(null);
     persistSavedLogin(EMPTY_SAVED_LOGIN);
-    void clearCurrentAccountToken(accessToken);
     set({
       status: "idle",
       session: null,

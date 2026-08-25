@@ -211,7 +211,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose, onBeforeDis
                     try {
                       await onBeforeDisconnect?.();
                     } finally {
-                      disconnect();
+                      await disconnect();
                       setDisconnecting(false);
                       handleClose();
                     }
