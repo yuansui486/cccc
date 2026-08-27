@@ -275,6 +275,48 @@ async def _fetch_account_session(
     return {"ok": True, "result": {"session": session}}
 
 
+async def _logout_account_session(access_token: str) -> Dict[str, Any]:
+    """Revoke the UA2 lease before the local client drops its token."""
+
+    token = str(access_token or "").strip()
+    if not token:
+        return {"ok": True, "result": {"logged_out": False}}
+
+    try:
+        async with httpx.AsyncClient(timeout=_ACCOUNT_TIMEOUT, follow_redirects=True) as client:
+            await _json_request(
+                client,
+                "POST",
+                f"{_ua2_base_url()}/auth/logout",
+                stage="ua2_logout",
+                access_token=token,
+            )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        # Logout is idempotent: an already-invalid token has no lease left to
+        # release, so treat 401/403 as a successful logout.
+        if int(exc.status_code or 0) in {401, 403}:
+            return {
+                "ok": True,
+                "result": {"logged_out": True, "already_logged_out": True},
+            }
+        return {
+            "ok": False,
+            "error": {
+                "code": str(detail.get("code") or "account_logout_failed"),
+                "message": str(detail.get("message") or "UA2 logout failed"),
+                "details": {
+                    "stage": str(detail.get("stage") or "ua2_logout"),
+                    "url": str(detail.get("url") or ""),
+                },
+            },
+        }
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": {"code": "account_network_error", "message": str(exc)}}
+
+    return {"ok": True, "result": {"logged_out": True}}
+
+
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     router = APIRouter(prefix="/api/v1/account")
 
@@ -301,6 +343,23 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def account_current_token_delete(req: AccountCurrentTokenRequest) -> Dict[str, Any]:
         cleared = _clear_current_token(req.access_token)
         return {"ok": True, "result": {"cleared": cleared, **_current_token_result()}}
+
+    @router.post("/logout")
+    async def account_logout(req: AccountCurrentTokenRequest) -> Dict[str, Any]:
+        token = str(req.access_token or "").strip()
+        try:
+            result = await _logout_account_session(token)
+        except Exception as exc:  # pragma: no cover - defensive boundary for logout cleanup
+            result = {"ok": False, "error": {"code": "account_logout_failed", "message": str(exc)}}
+        finally:
+            local_cleared = _clear_current_token(token)
+
+        result_payload = result.get("result") if isinstance(result, dict) else None
+        if isinstance(result_payload, dict):
+            result["result"] = {**result_payload, "local_cleared": local_cleared}
+        else:
+            result["result"] = {"local_cleared": local_cleared}
+        return result
 
     @router.post("/login")
     async def account_login(req: AccountLoginRequest) -> Dict[str, Any]:
