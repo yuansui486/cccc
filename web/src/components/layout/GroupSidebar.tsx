@@ -596,8 +596,11 @@ export function GroupSidebar({
       const safeCount = Math.max(0, Math.floor(Number(count) || 0));
       if (safeCount <= 0 && !options?.showZero) return null;
       return (
-        <span className="rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-500 dark:text-indigo-300">
-          {safeCount}
+        <span
+          className="inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 px-1.5 text-[11px] font-semibold leading-none tabular-nums text-slate-500 shadow-[inset_0_0_0_1px_rgba(71,85,105,0.06)] dark:bg-white/[0.10] dark:text-slate-300 dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+          aria-hidden="true"
+        >
+          {safeCount > 99 ? "99+" : safeCount}
         </span>
       );
     },
@@ -770,11 +773,7 @@ export function GroupSidebar({
             )}
           >
             <SendIcon size={18} />
-            {unreadChatCount > 0 && (
-              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-primary)]">
-                {unreadChatCount}
-              </span>
-            )}
+            {unreadChatCount > 0 && <span className="absolute -right-1 -top-1 rounded-full ring-2 ring-[var(--color-bg-primary)]">{renderCountBadge(unreadChatCount)}</span>}
           </button>
 
           <button
@@ -987,11 +986,7 @@ export function GroupSidebar({
                 <SendIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("groupChat")}</span>
-              {unreadChatCount > 0 && (
-                <span className="rounded-full border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-primary)]">
-                  {unreadChatCount}
-                </span>
-              )}
+              {renderCountBadge(unreadChatCount)}
             </button>
 
             {actors.map((actor) => {
