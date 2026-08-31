@@ -12,9 +12,10 @@ import socket
 import subprocess
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlsplit
 
 from ..kernel.actors import find_actor
@@ -2585,10 +2586,48 @@ def _manager_session_running(session: Any) -> bool:
     return bool(callable(is_running) and is_running())
 
 
+@dataclass
+class _ThemeRefreshTask:
+    callback: Callable[[], bool]
+
+
+class _FifoThemeRefreshQueue:
+    """Run theme refresh callbacks one at a time in arrival order."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._pending: deque[_ThemeRefreshTask] = deque()
+        self._active = False
+
+    def run(self, callback: Callable[[], bool]) -> bool:
+        task = _ThemeRefreshTask(callback=callback)
+        with self._condition:
+            self._pending.append(task)
+            try:
+                while self._active or not self._pending or self._pending[0] is not task:
+                    self._condition.wait()
+                self._pending.popleft()
+                self._active = True
+            except BaseException:
+                try:
+                    self._pending.remove(task)
+                finally:
+                    self._condition.notify_all()
+                raise
+
+        try:
+            return bool(callback())
+        finally:
+            with self._condition:
+                self._active = False
+                self._condition.notify_all()
+
+
 class CodexAppSessionManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._sessions: Dict[tuple[str, str], CodexAppSession] = {}
+        self._theme_refresh_queue = _FifoThemeRefreshQueue()
 
     def start_actor(self, *, group_id: str, actor_id: str, cwd: Path, env: Dict[str, str], model: str = "") -> CodexAppSession:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
@@ -2705,11 +2744,26 @@ class CodexAppSessionManager:
 
     def refresh_remote_tui_theme(self, *, group_id: str, actor_id: str, color_scheme: str) -> bool:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
-        with self._lock:
-            session = self._sessions.get(key)
-        if isinstance(session, CodexAppSession):
-            return bool(session.refresh_remote_tui_theme(color_scheme))
-        return False
+        scheme = normalize_terminal_color_scheme(color_scheme)
+
+        def _refresh() -> bool:
+            # Resolve the session only when this task reaches the head of the queue,
+            # so a stopped/replaced actor is never refreshed through a stale object.
+            with self._lock:
+                session = self._sessions.get(key)
+            if not isinstance(session, CodexAppSession):
+                return False
+            try:
+                return bool(session.refresh_remote_tui_theme(scheme))
+            except Exception:
+                logger.exception(
+                    "failed to refresh Codex remote TUI theme for %s/%s",
+                    key[0],
+                    key[1],
+                )
+                return False
+
+        return self._theme_refresh_queue.run(_refresh)
 
     def stop_group(self, *, group_id: str) -> None:
         gid = str(group_id or "").strip()
