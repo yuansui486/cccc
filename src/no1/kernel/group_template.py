@@ -101,12 +101,17 @@ def build_group_template_from_group(group: Group, *, cccc_version: str = "") -> 
 
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
+    messaging = group.doc.get("messaging") if isinstance(group.doc.get("messaging"), dict) else {}
     features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
     tt = get_terminal_transcript_settings(group.doc)
     default_send_to = get_default_send_to(group.doc)
 
     settings: dict[str, Any] = {
         "default_send_to": default_send_to,
+        "role_prompt_every_messages": _as_int(
+            messaging.get("role_prompt_every_messages", 5),
+            5,
+        ),
         "nudge_after_seconds": _as_int(automation.get("nudge_after_seconds", 300), 300),
         "reply_required_nudge_after_seconds": _as_int(automation.get("reply_required_nudge_after_seconds", 300), 300),
         "attention_ack_nudge_after_seconds": _as_int(automation.get("attention_ack_nudge_after_seconds", 600), 600),
@@ -222,11 +227,16 @@ def preview_group_template_replace(group: Group, template: GroupTemplate) -> Gro
     # Settings diff (we only compare keys we export/import).
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
+    messaging = group.doc.get("messaging") if isinstance(group.doc.get("messaging"), dict) else {}
     features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
     tt = get_terminal_transcript_settings(group.doc)
     default_send_to = get_default_send_to(group.doc)
     current_settings: Dict[str, Any] = {
         "default_send_to": default_send_to,
+        "role_prompt_every_messages": _as_int(
+            messaging.get("role_prompt_every_messages", 5),
+            5,
+        ),
         "nudge_after_seconds": _as_int(automation.get("nudge_after_seconds", 300), 300),
         "reply_required_nudge_after_seconds": _as_int(automation.get("reply_required_nudge_after_seconds", 300), 300),
         "attention_ack_nudge_after_seconds": _as_int(automation.get("attention_ack_nudge_after_seconds", 600), 600),

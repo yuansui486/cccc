@@ -60,8 +60,8 @@ def render_install_command_task(command: Dict[str, str]) -> str:
     target = str(command.get("target") or "").strip()
     target_kind = str(command.get("target_kind") or "unspecified").strip() or "unspecified"
     lines = [
-        "[onecolleague] Slash command: /install",
-        f"[onecolleague] Capability: {INSTALL_CAPABILITY_ID}",
+        "[action] Slash command: /install",
+        f"[action] Capability: {INSTALL_CAPABILITY_ID}",
         "",
         "Use the OneColleague install skill to route the request through the OneColleague capability lifecycle.",
         "Default action: call onecolleague_capability_install for the target with scope=group.",

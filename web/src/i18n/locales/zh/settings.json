@@ -751,6 +751,8 @@
     "foremanOnly": "仅发送给负责人",
     "broadcastAll": "广播给所有已启用的智能体",
     "tip": "提示：使用明确的收件人以确保路由准确。",
+    "rolePromptEveryMessages": "角色提示频率",
+    "rolePromptEveryMessagesHint": "每 N 条成功接收的对话消息混入一次角色提示；0 表示关闭。",
     "saveMessaging": "保存消息路由设置"
   },
   "imBridge": {

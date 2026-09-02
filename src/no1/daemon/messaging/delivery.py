@@ -574,10 +574,11 @@ THROTTLE = DeliveryThrottle()
 
 REMINDER_EVERY_N_MESSAGES = 1
 MCP_REMINDER_LINE = (
-    "[onecolleague] Use onecolleague_message_reply for replies; use onecolleague_message_send for new messages. "
+    "[reply] Use onecolleague_message_reply for replies; use onecolleague_message_send for new messages. "
     "Terminal output is not delivered. Verify reply_to/to; avoid routine @all. "
     "Use onecolleague_help if unsure."
 )
+from .message_categories import commit_role_prompt_delivery, plan_role_prompt_delivery
 
 
 def append_mcp_reply_reminder(text: str) -> str:
@@ -610,7 +611,7 @@ def render_single_message(msg: PendingMessage) -> str:
     """Render a single message for PTY delivery."""
     if msg.kind == "system.notify":
         # System notification format
-        return f"[onecolleague] SYSTEM ({msg.notify_kind}): {msg.notify_title}\n{msg.notify_message}".strip()
+        return f"[event] SYSTEM ({msg.notify_kind}): {msg.notify_title}\n{msg.notify_message}".strip()
     rendered = render_actor_inbound_message(
         ActorInboundEnvelope(
             event_id=str(msg.event_id or ""),
@@ -711,19 +712,26 @@ def render_system_notify_delivery_text(*, notify: SystemNotifyData, group: Optio
     )
 
 
-def render_batched_messages(messages: List[PendingMessage], *, reminder_after_index: Optional[int] = None) -> str:
+def render_batched_messages(
+    messages: List[PendingMessage],
+    *,
+    reminder_after_index: Optional[int] = None,
+    role_block: str = "",
+) -> str:
     """Render multiple messages as a batch for PTY delivery."""
     if not messages:
         return ""
 
     blocks: List[str] = []
     if len(messages) > 1:
-        blocks.append(f"[onecolleague] {len(messages)} new messages:")
+        blocks.append(f"[protocol] {len(messages)} new messages:")
 
     for i, msg in enumerate(messages, 1):
         blocks.append(render_single_message(msg))
 
     out = "\n\n".join([b for b in blocks if b]).rstrip()
+    if role_block and out:
+        out = f"{role_block.strip()}\n\n{out}"
     if reminder_after_index is not None:
         out = append_mcp_reply_reminder(out)
 
@@ -734,7 +742,7 @@ def append_turn_completion_receipt(text: str, attempt: Any) -> str:
     receipt = turn_delivery_completion_receipt(attempt)
     if not receipt:
         return str(text or "")
-    receipt_line = "[onecolleague] completion_receipt=" + json.dumps(
+    receipt_line = "[protocol] completion_receipt=" + json.dumps(
         receipt,
         ensure_ascii=True,
         separators=(",", ":"),
@@ -748,7 +756,7 @@ def append_turn_grant_receipt(text: str, attempt: Any) -> str:
     receipt = turn_delivery_grant_receipt(attempt)
     if not receipt:
         return str(text or "")
-    receipt_line = "[onecolleague] turn_grant_receipt=" + json.dumps(
+    receipt_line = "[protocol] turn_grant_receipt=" + json.dumps(
         receipt,
         ensure_ascii=True,
         separators=(",", ":"),
@@ -1162,6 +1170,7 @@ def _finalize_delivery_success(
     requeue: List[PendingMessage],
     delivery_attempt: Optional[dict[str, Any]] = None,
     experience_decision: Optional[ExperienceReminderDecision] = None,
+    role_decision: Any = None,
 ) -> None:
     """Record a successful delivery attempt and preserve blocked messages."""
     gid = str(group.group_id or "").strip()
@@ -1181,6 +1190,7 @@ def _finalize_delivery_success(
         THROTTLE.add_delivered_chat_count(gid, aid, chat_total)
     if experience_decision is not None:
         commit_experience_reminder(group, experience_decision)
+    commit_role_prompt_delivery(group, decision=role_decision, actor_id=aid)
     THROTTLE.mark_delivered(gid, aid)
     if _get_auto_mark_on_delivery(group) and deliverable:
         last_msg = deliverable[-1]
@@ -1403,6 +1413,7 @@ def _start_async_first_delivery(
     chat_total: int,
     actor: Dict[str, Any],
     experience_decision: ExperienceReminderDecision,
+    role_decision: Any = None,
 ) -> None:
     """Run the first PTY delivery chain in the background.
 
@@ -1482,6 +1493,7 @@ def _start_async_first_delivery(
                         requeue=requeue,
                         delivery_attempt=delivery_attempt,
                         experience_decision=experience_decision,
+                        role_decision=role_decision,
                     )
                 except Exception as exc:
                     _record_uncertain_accepted_delivery(
@@ -1544,6 +1556,7 @@ def _start_async_first_delivery(
                     requeue=requeue,
                     delivery_attempt=delivery_attempt,
                     experience_decision=experience_decision,
+                    role_decision=role_decision,
                 )
                 return
 
@@ -1738,6 +1751,11 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
             return False
 
         chat_total = sum(1 for m in deliverable if m.kind == "chat.message")
+        role_decision = plan_role_prompt_delivery(
+            group,
+            actor_id=aid,
+            event_ids=[m.event_id for m in deliverable if m.kind == "chat.message"],
+        )
         reminder_after_index: Optional[int] = None
         if chat_total > 0:
             delivered_before = THROTTLE.get_delivered_chat_count(gid, aid)
@@ -1746,7 +1764,11 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
             if (delivered_after // REMINDER_EVERY_N_MESSAGES) > (delivered_before // REMINDER_EVERY_N_MESSAGES):
                 reminder_after_index = len(deliverable)
 
-        message_text = render_batched_messages(deliverable, reminder_after_index=reminder_after_index)
+        message_text = render_batched_messages(
+            deliverable,
+            reminder_after_index=reminder_after_index,
+            role_block=role_decision.role_block,
+        )
         experience_decision = plan_experience_reminder(group, actor_id=aid, messages=deliverable)
         message_text = append_experience_reminder(message_text, experience_decision)
 
@@ -1764,6 +1786,7 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
                 chat_total=chat_total,
                 actor=actor,
                 experience_decision=experience_decision,
+                role_decision=role_decision,
             )
             return True
 
@@ -1808,6 +1831,7 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
                         requeue=requeue,
                         delivery_attempt=delivery_attempt,
                         experience_decision=experience_decision,
+                        role_decision=role_decision,
                     )
                 except Exception as exc:
                     _record_uncertain_accepted_delivery(

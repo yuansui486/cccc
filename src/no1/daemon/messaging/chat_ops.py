@@ -57,6 +57,7 @@ from .delivery import (
     request_flush_pending_messages,
 )
 from .experience_reminder import append_experience_reminder, commit_experience_reminder, plan_experience_reminder
+from .message_categories import commit_role_prompt_delivery, plan_role_prompt_delivery
 from .actor_delivery_planner import (
     TRANSPORT_CLAUDE_HEADLESS,
     TRANSPORT_CODEX_APP_SERVER,
@@ -1107,6 +1108,9 @@ def handle_send(
             scope_key=scope_key,
         )
         actor_headless_delivery_text = append_experience_reminder(headless_delivery_text, experience_decision)
+        role_decision = plan_role_prompt_delivery(group, actor_id=actor_id, event_ids=[event_id])
+        if role_decision.role_block:
+            actor_headless_delivery_text = f"{role_decision.role_block}\n\n{actor_headless_delivery_text}".strip()
         if decision.transport in {TRANSPORT_CODEX_HEADLESS, TRANSPORT_CODEX_APP_SERVER}:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,
@@ -1121,6 +1125,7 @@ def handle_send(
                     group,
                     experience_decision=experience_decision,
                 )
+                commit_role_prompt_delivery(group, decision=role_decision, actor_id=actor_id)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
@@ -1136,6 +1141,7 @@ def handle_send(
                     group,
                     experience_decision=experience_decision,
                 )
+                commit_role_prompt_delivery(group, decision=role_decision, actor_id=actor_id)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
@@ -1181,6 +1187,7 @@ def handle_send(
                         experience_decision=d,
                     ),
                 ):
+                    commit_role_prompt_delivery(group, decision=role_decision, actor_id=actor_id)
                     skip_headless_notify_actor_ids.add(actor_id)
             logger.debug(f"[SEND] skip actor={actor_id} ({decision.reason})")
 
@@ -1709,6 +1716,9 @@ def handle_reply(
             scope_key=scope_key,
         )
         actor_headless_delivery_text = append_experience_reminder(headless_delivery_text, experience_decision)
+        role_decision = plan_role_prompt_delivery(group, actor_id=actor_id, event_ids=[event_id])
+        if role_decision.role_block:
+            actor_headless_delivery_text = f"{role_decision.role_block}\n\n{actor_headless_delivery_text}".strip()
         if decision.transport in {TRANSPORT_CODEX_HEADLESS, TRANSPORT_CODEX_APP_SERVER}:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,
@@ -1724,6 +1734,7 @@ def handle_reply(
                     group,
                     experience_decision=experience_decision,
                 )
+                commit_role_prompt_delivery(group, decision=role_decision, actor_id=actor_id)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
@@ -1740,6 +1751,7 @@ def handle_reply(
                     group,
                     experience_decision=experience_decision,
                 )
+                commit_role_prompt_delivery(group, decision=role_decision, actor_id=actor_id)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
@@ -1762,8 +1774,9 @@ def handle_reply(
                 actor_id=actor_id,
                 trigger_event_id=event_id,
                 logger=logger,
-            ):
-                skip_headless_notify_actor_ids.add(actor_id)
+                ):
+                    commit_role_prompt_delivery(group, decision=role_decision, actor_id=actor_id)
+                    skip_headless_notify_actor_ids.add(actor_id)
         elif actor_id in woken and decision.reason in {"codex_headless_not_running", "claude_headless_not_running"}:
             if schedule_headless_post_wake_delivery(
                 group_id=group.group_id,

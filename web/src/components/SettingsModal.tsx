@@ -14,6 +14,7 @@ import {
 } from "./modals/settings/types";
 import { ModalFrame } from "./modals/ModalFrame";
 import { SettingsNavigation } from "./modals/settings/SettingsNavigation";
+import { MessagingTab } from "./modals/settings/MessagingTab";
 import { useModalA11y } from "../hooks/useModalA11y";
 import { copyTextToClipboard } from "../utils/copy";
 
@@ -81,15 +82,20 @@ export function SettingsModal({
       if (initialTarget.tab === "groupBridge" && groupId) {
         setScope("group");
         setGroupTab("groupBridge");
-      } else if (initialTarget.tab === "blueprint" || initialTarget.tab === "guidance" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
-        setGlobalTab(initialTarget.tab);
+      } else if (initialTarget.tab === "blueprint" || initialTarget.tab === "guidance" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer" || initialTarget.tab === "messaging") {
+        if (initialTarget.tab === "messaging" && groupId) {
+          setScope("group");
+          setGroupTab("messaging");
+          return;
+        }
+        if (initialTarget.tab !== "messaging") setGlobalTab(initialTarget.tab);
       }
       return;
     }
     if (initialTarget.scope === "group") {
-      if (initialTarget.tab === "groupBridge") {
+      if (initialTarget.tab === "groupBridge" || initialTarget.tab === "messaging") {
         setScope("group");
-        setGroupTab("groupBridge");
+        setGroupTab(initialTarget.tab);
       } else if (initialTarget.tab === "blueprint") {
         setScope("global");
         setGlobalTab("blueprint");
@@ -102,6 +108,7 @@ export function SettingsModal({
 
   // Messaging policy
   const [defaultSendTo, setDefaultSendTo] = useState<"foreman" | "broadcast">("foreman");
+  const [rolePromptEveryMessages, setRolePromptEveryMessages] = useState(5);
 
   // Terminal transcript (group-scoped policy)
   const [terminalVisibility, setTerminalVisibility] = useState<"off" | "foreman" | "all">("foreman");
@@ -157,6 +164,7 @@ export function SettingsModal({
     if (isOpen && settings) {
       setAutoMarkOnDelivery(Boolean(settings.auto_mark_on_delivery));
       setDefaultSendTo(settings.default_send_to || "foreman");
+      setRolePromptEveryMessages(Number(settings.role_prompt_every_messages ?? 5));
       setTerminalVisibility(settings.terminal_transcript_visibility || "foreman");
       setTerminalNotifyTail(Boolean(settings.terminal_transcript_notify_tail));
       setTerminalNotifyLines(Number(settings.terminal_transcript_notify_lines || 20));
@@ -282,6 +290,7 @@ export function SettingsModal({
   const handleSaveMessagingSettings = async () => {
     await onUpdateSettings({
       default_send_to: defaultSendTo,
+      role_prompt_every_messages: Math.max(0, Math.min(1000, Math.trunc(rolePromptEveryMessages || 0))),
     });
   };
 
@@ -558,6 +567,7 @@ export function SettingsModal({
 
   const groupTabs: { id: GroupTabId; label: string }[] = useMemo(() => [
     { id: "groupBridge", label: t("tabs.groupBridge") },
+    { id: "messaging", label: t("tabs.messaging") },
   ], [t]);
 
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
@@ -698,6 +708,17 @@ export function SettingsModal({
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
 
               {activeTab === "groupBridge" && <GroupBridgeTab isDark={isDark} groupId={groupId} />}
+              {activeTab === "messaging" && (
+                <MessagingTab
+                  isDark={isDark}
+                  busy={busy}
+                  defaultSendTo={defaultSendTo}
+                  setDefaultSendTo={setDefaultSendTo}
+                  rolePromptEveryMessages={rolePromptEveryMessages}
+                  setRolePromptEveryMessages={setRolePromptEveryMessages}
+                  onSave={handleSaveMessagingSettings}
+                />
+              )}
 
               {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
 

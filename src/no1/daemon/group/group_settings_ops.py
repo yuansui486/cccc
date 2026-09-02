@@ -58,11 +58,18 @@ def _safe_int_list(value: Any, *, default: List[int], min_value: int = 1) -> Lis
 def _settings_payload(group: Any) -> Dict[str, Any]:
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
+    messaging = group.doc.get("messaging") if isinstance(group.doc.get("messaging"), dict) else {}
     features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
     tt = get_terminal_transcript_settings(group.doc)
     experience = group.doc.get("experience") if isinstance(group.doc.get("experience"), dict) else {}
     return {
         "default_send_to": get_default_send_to(group.doc),
+        "role_prompt_every_messages": _safe_int(
+            messaging.get("role_prompt_every_messages", 5),
+            default=5,
+            min_value=0,
+            max_value=1000,
+        ),
         "nudge_after_seconds": _safe_int(automation.get("nudge_after_seconds", 300), default=300, min_value=0),
         "reply_required_nudge_after_seconds": _safe_int(
             automation.get("reply_required_nudge_after_seconds", 300),
@@ -168,7 +175,7 @@ def handle_group_settings_update(
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
 
-    messaging_keys = {"default_send_to"}
+    messaging_keys = {"default_send_to", "role_prompt_every_messages"}
     delivery_keys = {"min_interval_seconds", "auto_mark_on_delivery"}
     experience_keys = {
         "experience_reminder_enabled",
@@ -216,12 +223,35 @@ def handle_group_settings_update(
                 "default_send_to must be 'foreman' or 'broadcast'",
                 details={"default_send_to": value},
             )
+    if "role_prompt_every_messages" in patch:
+        try:
+            role_prompt_every_messages = int(patch.get("role_prompt_every_messages"))
+        except Exception:
+            return _error(
+                "invalid_patch",
+                "role_prompt_every_messages must be an integer between 0 and 1000",
+                details={"role_prompt_every_messages": patch.get("role_prompt_every_messages")},
+            )
+        if not 0 <= role_prompt_every_messages <= 1000:
+            return _error(
+                "invalid_patch",
+                "role_prompt_every_messages must be between 0 and 1000",
+                details={"role_prompt_every_messages": role_prompt_every_messages},
+            )
     try:
         require_group_permission(group, by=by, action="group.settings_update")
         messaging_patch = {k: v for k, v in patch.items() if k in messaging_keys}
         if messaging_patch:
             messaging = group.doc.get("messaging") if isinstance(group.doc.get("messaging"), dict) else {}
-            messaging["default_send_to"] = str(messaging_patch.get("default_send_to") or "foreman").strip()
+            if "default_send_to" in messaging_patch:
+                messaging["default_send_to"] = str(messaging_patch.get("default_send_to") or "foreman").strip()
+            if "role_prompt_every_messages" in messaging_patch:
+                messaging["role_prompt_every_messages"] = _safe_int(
+                    messaging_patch.get("role_prompt_every_messages"),
+                    default=5,
+                    min_value=0,
+                    max_value=1000,
+                )
             group.doc["messaging"] = messaging
 
         delivery_patch = {k: v for k, v in patch.items() if k in delivery_keys}

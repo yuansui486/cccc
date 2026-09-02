@@ -1260,7 +1260,7 @@ def _submission_echo_needles(prompt: str) -> list[str]:
     if not normalized:
         return []
     needles: list[str] = []
-    batch_match = re.search(r"\[onecolleague\]\s+Browser batch\s+([^\s]+)", normalized)
+    batch_match = re.search(r"\[(?:protocol|onecolleague)\]\s+Browser batch\s+([^\s]+)", normalized)
     if batch_match:
         needles.append(f"Browser batch {batch_match.group(1)}")
     event_match = re.search(r"\bevents=([0-9a-fA-F,]{12,})", normalized)

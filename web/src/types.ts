@@ -854,6 +854,7 @@ export type ExperienceDistillationStatus = {
 
 export type GroupSettings = {
   default_send_to: "foreman" | "broadcast";
+  role_prompt_every_messages: number;
   nudge_after_seconds: number;
   reply_required_nudge_after_seconds: number;
   attention_ack_nudge_after_seconds: number;

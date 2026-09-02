@@ -751,6 +751,8 @@
     "foremanOnly": "Send to foreman only",
     "broadcastAll": "Broadcast to all enabled agents",
     "tip": "Tip: Use explicit recipients for unambiguous routing.",
+    "rolePromptEveryMessages": "Role prompt frequency",
+    "rolePromptEveryMessagesHint": "Mix the role prompt into the next message after every N successfully accepted chat messages; 0 disables it.",
     "saveMessaging": "Save Messaging Settings"
   },
   "imBridge": {

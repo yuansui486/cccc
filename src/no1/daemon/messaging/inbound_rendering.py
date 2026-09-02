@@ -60,7 +60,7 @@ def render_actor_inbound_message(envelope: ActorInboundEnvelope) -> str:
     if source_bits:
         who = f"{who}[{' / '.join(source_bits)}]"
 
-    header = f"[onecolleague] {who} → {targets}"
+    header = f"[message] {who} → {targets}"
     reply_to = _trim(envelope.reply_to)
     if reply_to:
         header += f" (reply:{reply_to[:8]})"

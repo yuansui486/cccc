@@ -233,6 +233,7 @@ class GroupPresentationBrowserSessionRequest(BaseModel):
 
 class GroupSettingsRequest(BaseModel):
     default_send_to: Optional[Literal["foreman", "broadcast"]] = None
+    role_prompt_every_messages: Optional[int] = None
     nudge_after_seconds: Optional[int] = None
     reply_required_nudge_after_seconds: Optional[int] = None
     attention_ack_nudge_after_seconds: Optional[int] = None

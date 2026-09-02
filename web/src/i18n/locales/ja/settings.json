@@ -750,6 +750,8 @@
     "foremanOnly": "Foreman にのみ送信",
     "broadcastAll": "有効なすべてのエージェントにブロードキャストする",
     "tip": "ヒント： 明確なルーティングには、明示的な受信者を使用します。",
+    "rolePromptEveryMessages": "ロールプロンプトの頻度",
+    "rolePromptEveryMessagesHint": "正常に受け付けられたチャットメッセージ N 件ごとに、次のメッセージへロールプロンプトを挿入します。0 で無効化します。",
     "saveMessaging": "メッセージルーティング設定を保存"
   },
   "imBridge": {

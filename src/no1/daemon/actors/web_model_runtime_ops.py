@@ -13,6 +13,7 @@ from ...kernel.inbox import find_event, get_cursor, has_chat_ack, is_message_for
 from ...kernel.ledger import append_event
 from ...util.time import parse_utc_iso, utc_now_iso
 from ..messaging.actor_turn_rendering import render_actor_event_batch_for_delivery
+from ..messaging.message_categories import commit_role_prompt_delivery, plan_role_prompt_delivery
 from ..messaging.turn_provenance import (
     TurnDeliveryBusyError,
     begin_turn_delivery_attempt,
@@ -67,7 +68,7 @@ def _coalesced_text(messages: List[Dict[str, Any]], *, actor_id: str = "") -> st
     out = render_actor_event_batch_for_delivery(messages, actor_id=actor_id)
     if len(out) <= _MAX_COALESCED_TEXT_CHARS:
         return out
-    return out[: _MAX_COALESCED_TEXT_CHARS - 80].rstrip() + "\n\n[onecolleague] coalesced turn text truncated"
+    return out[: _MAX_COALESCED_TEXT_CHARS - 80].rstrip() + "\n\n[event] coalesced turn text truncated"
 
 
 def _turn_id(*, group_id: str, actor_id: str, messages: List[Dict[str, Any]]) -> str:
@@ -203,6 +204,14 @@ def handle_web_model_runtime_wait_next_turn(args: Dict[str, Any]) -> DaemonRespo
 
     compact_messages = [_compact_event(event) for event in messages]
     latest = compact_messages[-1]
+    role_decision = plan_role_prompt_delivery(
+        group,
+        actor_id=actor_id,
+        event_ids=[item.get("id") for item in compact_messages if str(item.get("kind") or "") == "chat.message"],
+    )
+    coalesced_text = _coalesced_text(compact_messages, actor_id=actor_id)
+    if role_decision.role_block and coalesced_text:
+        coalesced_text = f"{role_decision.role_block}\n\n{coalesced_text}"
     turn = {
         "turn_id": _turn_id(group_id=group_id, actor_id=actor_id, messages=compact_messages),
         "group_id": group_id,
@@ -212,7 +221,7 @@ def handle_web_model_runtime_wait_next_turn(args: Dict[str, Any]) -> DaemonRespo
         "latest_event_id": str(latest.get("id") or ""),
         "latest_ts": str(latest.get("ts") or ""),
         "messages": compact_messages,
-        "coalesced_text": _coalesced_text(compact_messages, actor_id=actor_id),
+        "coalesced_text": coalesced_text,
         "delivery": {
             "mode": "cursor_on_complete",
             "cursor_committed": False,
@@ -501,6 +510,11 @@ def handle_web_model_runtime_complete_turn(args: Dict[str, Any]) -> DaemonRespon
 
     followup_delivery_scheduled = False
     if cursor_committed and status in {"done", "partial"}:
+        commit_role_prompt_delivery(
+            group,
+            decision=plan_role_prompt_delivery(group, actor_id=actor_id, event_ids=event_ids),
+            actor_id=actor_id,
+        )
         update_headless_state(group_id, actor_id, status="waiting", active_turn_id="", latest_event_id="")
         try:
             from .web_model_browser_delivery import (

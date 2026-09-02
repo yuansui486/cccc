@@ -1037,8 +1037,8 @@ class ClaudeAppSession:
             return text
 
         lines = [text.rstrip()] if text.strip() else []
-        lines.append("[onecolleague] 图片附件已保存到本地文件。Claude stream-json 当前仅支持文本输入，不能直接内嵌图片。")
-        lines.append("[onecolleague] 请优先基于以下图片文件路径继续处理：")
+        lines.append("[attachment] 图片附件已保存到本地文件。Claude stream-json 当前仅支持文本输入，不能直接内嵌图片。")
+        lines.append("[attachment] 请优先基于以下图片文件路径继续处理：")
         for path in image_paths[:8]:
             lines.append(f"- {path}")
         if len(image_paths) > 8:

@@ -1,6 +1,6 @@
 # OneColleague 通知分类与实际内容
 
-本文档盘点发送到智能体输入端的 `[onecolleague]` / `[OneColleague]` 通知。重点是类别、智能体实际看到的完整文本，以及通知叠加时的显示顺序；不记录触发代码。
+本文档盘点发送到智能体输入端的分类通知。业务消息使用分类前缀；会话启动和内部控制继续使用 `[OneColleague]`。重点是类别、智能体实际看到的完整文本，以及通知叠加时的显示顺序。
 
 ## 三层模型
 
@@ -12,14 +12,19 @@
 
 | 类别 | 作用 | 典型前缀 |
 | --- | --- | --- |
-| `message` | 业务聊天 | `[onecolleague] user → ACTOR_ID:` |
-| `attention` | 重要、要求回复 | `IMPORTANT`、`REPLY REQUIRED` |
-| `coordination` | 协作、电脑控制、转发 | `需协作`、`电脑控制执行契约`、`RELAYED FROM` |
-| `action` | 安装能力、修复动作 | `Slash command`、`REPAIR HINT` |
-| `context` | 引用、附件、同伴洞见 | `References`、`Attachments` |
-| `system` | 系统通知、截断、未知事件 | `SYSTEM`、`delivery text truncated` |
-| `protocol` | 回复规则、批次、回执 | `new messages`、`completion_receipt` |
-| `session` | 身份、启动、传输初始化 | `[OneColleague] You are`、`Session bootstrap` |
+| `message` | 业务聊天和发送者信封 | `[message] user → ACTOR_ID:` |
+| `important` | 重要消息 | `[important] IMPORTANT` |
+| `reply` | 回复要求和回复协议 | `[reply] REPLY REQUIRED` |
+| `coordination` | 协作契约 | `[coordination]` |
+| `control` | 电脑控制契约 | `[control]` |
+| `forward` | 转发 | `[forward] RELAYED FROM` |
+| `action` | 安装能力和动作 | `[action]` |
+| `context` | 引用和同伴上下文 | `[context]` |
+| `attachment` | 文件、图片附件 | `[attachment]` |
+| `event` | 系统事件和截断 | `[event]` |
+| `protocol` | 批次、回执、协议 | `[protocol]` |
+| `notice` | Browser 接收规则 | `[notice]` |
+| `session` | 身份、启动、传输初始化 | `[OneColleague]` |
 
 ## 消息正文
 
@@ -176,6 +181,24 @@ COALESCED_TEXT
 ```
 
 ## 完整组合示例
+
+## 角色提示
+
+当群组设置 `role_prompt_every_messages` 为 `N > 0` 时，按全群成功投递的唯一 `chat.message` 事件计数：
+
+```text
+C' = C + unique_new_event_count
+inject = floor(C' / N) > floor(C / N)
+```
+
+跨过周期的同一批次只在业务内容开头插入一次角色块；角色块不是独立消息事件。角色正文来自 `ONECOLLEAGUE_HELP.md` 的 `## @actor: ACTOR_ID` 段落，没有正文时不插入。`N = 0` 表示关闭。
+
+```text
+[role] You are ACTOR_ID (ROLE) in group GROUP_NAME.
+ROLE_PROMPT_TEXT
+
+[message] user → ACTOR_ID: TASK_TEXT
+```
 
 “重要 + 要求回复 + 协作 + 正文 + 引用 + 附件 + 洞见”的实际排列：
 

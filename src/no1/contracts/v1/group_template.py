@@ -36,6 +36,9 @@ class GroupTemplateSettings(BaseModel):
     """Group-scoped settings that are safe to carry across projects."""
 
     default_send_to: DefaultSendTo = "foreman"
+    # Inject the actor role prompt into every N accepted chat messages.
+    # Zero disables injection; the daemon clamps imported/API values to 0..1000.
+    role_prompt_every_messages: int = 5
     nudge_after_seconds: int = 300
     reply_required_nudge_after_seconds: int = 300
     attention_ack_nudge_after_seconds: int = 600
