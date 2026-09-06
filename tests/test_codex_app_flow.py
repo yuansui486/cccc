@@ -4853,6 +4853,80 @@ class TestCodexAppFlow(unittest.TestCase):
             )
             second.refresh_remote_tui_theme.assert_called_once_with("light")
 
+    def test_codex_remote_tui_theme_refresh_queue_coalesces_latest_actor_request(self) -> None:
+        from no1.daemon.codex_app_sessions import CodexAppSession, CodexAppSessionManager
+
+        manager = CodexAppSessionManager()
+        session = CodexAppSession(group_id="g_test", actor_id="peer1", cwd=Path("."), env={})
+        with manager._lock:
+            manager._sessions[("g_test", "peer1")] = session
+
+        entered = threading.Event()
+        release = threading.Event()
+        calls: list[str] = []
+
+        def refresh(scheme: str) -> bool:
+            calls.append(scheme)
+            entered.set()
+            self.assertTrue(release.wait(timeout=2.0))
+            return True
+
+        with patch.object(session, "refresh_remote_tui_theme", side_effect=refresh):
+            results: list[bool] = []
+            first = threading.Thread(
+                target=lambda: results.append(manager.refresh_remote_tui_theme(group_id="g_test", actor_id="peer1", color_scheme="light")),
+            )
+            second = threading.Thread(
+                target=lambda: results.append(manager.refresh_remote_tui_theme(group_id="g_test", actor_id="peer1", color_scheme="dark")),
+            )
+            first.start()
+            self.assertTrue(entered.wait(timeout=2.0))
+            second.start()
+            time.sleep(0.05)
+            release.set()
+            first.join(timeout=2.0)
+            second.join(timeout=2.0)
+
+        self.assertEqual(calls, ["light", "dark"])
+        self.assertEqual(sorted(results), [False, True])
+
+    def test_codex_remote_tui_theme_refresh_queue_reuses_active_same_scheme(self) -> None:
+        from no1.daemon.codex_app_sessions import CodexAppSession, CodexAppSessionManager
+
+        manager = CodexAppSessionManager()
+        session = CodexAppSession(group_id="g_test", actor_id="peer1", cwd=Path("."), env={})
+        with manager._lock:
+            manager._sessions[("g_test", "peer1")] = session
+
+        entered = threading.Event()
+        release = threading.Event()
+        calls: list[str] = []
+
+        def refresh(scheme: str) -> bool:
+            calls.append(scheme)
+            entered.set()
+            self.assertTrue(release.wait(timeout=2.0))
+            return True
+
+        with patch.object(session, "refresh_remote_tui_theme", side_effect=refresh):
+            results: list[bool] = []
+            first = threading.Thread(
+                target=lambda: results.append(manager.refresh_remote_tui_theme(group_id="g_test", actor_id="peer1", color_scheme="dark")),
+            )
+            second = threading.Thread(
+                target=lambda: results.append(manager.refresh_remote_tui_theme(group_id="g_test", actor_id="peer1", color_scheme="dark")),
+            )
+            first.start()
+            self.assertTrue(entered.wait(timeout=2.0))
+            second.start()
+            time.sleep(0.05)
+            release.set()
+            first.join(timeout=2.0)
+            second.join(timeout=2.0)
+
+        self.assertEqual(calls, ["dark"])
+        self.assertEqual(results, [True, True])
+
     def test_codex_pty_app_remote_tui_start_failure_does_not_mark_resume_failed(self) -> None:
         from no1.daemon.codex_app_sessions import CodexAppSession
         from no1.daemon.runtime_session_ops import read_runtime_session

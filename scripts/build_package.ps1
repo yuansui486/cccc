@@ -41,6 +41,7 @@ function Test-WindowsPtyWheel {
 & (Join-Path $rootDir "scripts\build_web.ps1") -InstallDeps:$InstallDeps
 
 & $Python -m pip install -U pip build twine | Out-Host
+& $Python (Join-Path $rootDir "scripts\build_desensitization_component_bundle.py") | Out-Host
 & $Python -m compileall -q (Join-Path $rootDir "src\no1") | Out-Host
 & $Python -m build $rootDir | Out-Host
 & $Python -m twine check (Join-Path $rootDir "dist\*") | Out-Host
@@ -51,6 +52,7 @@ $latestWheel = Get-ChildItem -Path (Join-Path $rootDir "dist") -Filter "no1-*.wh
 if ($null -eq $latestWheel) {
   throw "No no1 wheel found in dist"
 }
+& $Python (Join-Path $rootDir "scripts\build_desensitization_component_bundle.py") --check --verify-wheel $latestWheel.FullName | Out-Host
 Test-WindowsPtyWheel -WheelPath $latestWheel.FullName
 
 Write-Host "OK: 已构建 dist/*，并打包 bundled Web UI"

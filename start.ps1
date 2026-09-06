@@ -1,5 +1,5 @@
 param(
-  [string]$Python = '3.11',
+  [string]$Python = '3.12',
   [string]$WebHost = '127.0.0.1',
   [int]$WebPort = 8848,
   [ValidateSet('info', 'debug', 'warning', 'error', 'critical')]
@@ -74,4 +74,4 @@ Write-Host "[start] Starting CCCC (daemon + web)..."
 Write-Host ("[start] UI: http://{0}:{1}/ui/" -f $WebHost, $WebPort)
 Write-Host "[start] Press Ctrl+C to stop."
 
-uv run -p $venvPython --no-sync cccc
+uv run -p $venvPython --no-sync onecolleague

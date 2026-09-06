@@ -93,6 +93,7 @@ function Invoke-Robocopy {
     (Join-Path $Source "dist"),
     (Join-Path $Source "node_modules"),
     (Join-Path $Source "web\node_modules"),
+    (Join-Path $Source "components"),
     "__pycache__"
   )
 
@@ -261,6 +262,8 @@ try {
   }
 
   Write-Host "==> Build Python package"
+  $bundlePython = Resolve-Tool -Names @("python.exe", "python", "py.exe", "py") -InstallHint "ERROR: Python 3.12 is required to build the desensitization component bundle."
+  Invoke-CheckedNative -FilePath $bundlePython -ArgumentList @((Join-Path $repoRoot "scripts\build_desensitization_component_bundle.py")) -WorkingDirectory $repoRoot
   $repoDist = Join-Path $repoRoot "dist"
   if (Test-Path -LiteralPath $repoDist) {
     Remove-Item -LiteralPath $repoDist -Recurse -Force
@@ -301,6 +304,7 @@ try {
   }
 
   Test-WheelContainsWebDist -WheelPath $latestWheel.FullName
+  Invoke-CheckedNative -FilePath $bundlePython -ArgumentList @((Join-Path $repoRoot "scripts\build_desensitization_component_bundle.py"), "--check", "--verify-wheel", $latestWheel.FullName) -WorkingDirectory $repoRoot
 
   $whlBasename = $latestWheel.Name
   $bizVersion = Get-ProjectVersion -PyprojectPath (Join-Path $repoRoot "pyproject.toml")

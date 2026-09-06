@@ -31,7 +31,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
 
       - name: Install build deps
         run: |
@@ -41,6 +44,12 @@ jobs:
       - name: Run test suite
         timeout-minutes: 15
         run: |
+          uv lock --check
+          uv lock --check --project components/desensitization
+          python scripts/build_desensitization_component_bundle.py --check
+          cd components/desensitization
+          uv run --locked pytest -q
+          cd ../..
           python -m pytest -q --timeout=120 --timeout-method=thread --durations=20
 
       - name: Build
@@ -48,6 +57,7 @@ jobs:
           python -m compileall -q src/no1
           python -m build
           python -m twine check dist/*
+          python scripts/build_desensitization_component_bundle.py --check --verify-wheel "$(ls -t dist/no1-*.whl | head -n 1)"
 
       - name: Smoke test wheel
         run: |
@@ -58,9 +68,11 @@ jobs:
 
           web_index = ir.files("no1.ports.web").joinpath("dist/index.html")
           help_md = ir.files("no1.resources").joinpath("onecolleague-help.md")
+          component = ir.files("no1.resources").joinpath("desensitization_component.zip")
 
           assert web_index.is_file(), f"missing bundled web UI: {web_index}"
           assert help_md.is_file(), f"missing bundled help playbook: {help_md}"
+          assert component.is_file(), f"missing desensitization component bundle: {component}"
 
           print("OK: bundled web UI + help playbook")
           PY
@@ -74,7 +86,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install deps
         run: |

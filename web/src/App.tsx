@@ -27,7 +27,7 @@ import { computerControlApi, type ComputerControlAvailability } from "./services
 import { buildReplyComposerState } from "./utils/chatReply";
 import { subscribeCapabilityChanged } from "./utils/capabilityEvents";
 import { filterVisibleRuntimeActors } from "./utils/runtimeVisibility";
-import { CHAT_TAB, COMPUTER_CONTROL_TAB, computerControlGroupIdFromPath, isComputerControlPath } from "./utils/appTabs";
+import { CHAT_TAB, COMPUTER_CONTROL_TAB, DATA_DESENSITIZATION_TAB, computerControlGroupIdFromPath, desensitizationGroupIdFromPath, isComputerControlPath, isDesensitizationPath } from "./utils/appTabs";
 import { installGroupControlStateDebugTools } from "./utils/groupControlStateDebug";
 import {
   useGroupStore,
@@ -232,17 +232,21 @@ export default function App() {
   });
 
   React.useEffect(() => {
-    if (!isComputerControlPath(window.location.pathname)) return;
-    const targetGroupId = computerControlGroupIdFromPath(window.location.pathname);
+    const computerPath = isComputerControlPath(window.location.pathname);
+    const desensitizationPath = isDesensitizationPath(window.location.pathname);
+    if (!computerPath && !desensitizationPath) return;
+    const targetGroupId = computerPath
+      ? computerControlGroupIdFromPath(window.location.pathname)
+      : desensitizationGroupIdFromPath(window.location.pathname);
     if (targetGroupId && targetGroupId !== selectedGroupId && groups.some((group) => String(group.group_id || "") === targetGroupId)) {
       setSelectedGroupId(targetGroupId);
       return;
     }
-    if (!targetGroupId || targetGroupId === selectedGroupId) setActiveTab(COMPUTER_CONTROL_TAB);
+    if (!targetGroupId || targetGroupId === selectedGroupId) setActiveTab(computerPath ? COMPUTER_CONTROL_TAB : DATA_DESENSITIZATION_TAB);
   }, [groups, selectedGroupId, setActiveTab, setSelectedGroupId]);
 
   React.useEffect(() => {
-    if (activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB) return;
+    if (activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB || activeTab === DATA_DESENSITIZATION_TAB) return;
     if (visibleRuntimeActors.some((actor) => String(actor.id || "") === activeTab)) return;
     setActiveTab("chat");
   }, [activeTab, setActiveTab, visibleRuntimeActors]);

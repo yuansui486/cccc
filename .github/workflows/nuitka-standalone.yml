@@ -10,6 +10,45 @@ permissions:
   contents: read
 
 jobs:
+  windows-x64:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build Windows standalone distribution
+        run: .\scripts\build_nuitka_standalone.ps1 -InstallDeps -Clean
+
+      - name: Upload Windows x64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: onecolleague-windows-x64
+          path: |
+            dist/onecolleague-*-windows-x64.zip
+            dist/onecolleague-*-windows-x64.SHA256
+          if-no-files-found: error
+
   macos-arm64:
     runs-on: macos-15
     defaults:
@@ -22,7 +61,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Set up Node
         uses: actions/setup-node@v4

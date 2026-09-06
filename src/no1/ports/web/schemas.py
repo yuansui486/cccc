@@ -666,6 +666,7 @@ class RouteContext:
     daemon: Callable[..., Awaitable[Dict[str, Any]]]
     cached_json: Callable[..., Awaitable[Dict[str, Any]]]
     apply_web_logging: Callable[..., None]
+    desensitization_sidecar: Any = None
 
 
 def _anonymous_principal() -> Any:

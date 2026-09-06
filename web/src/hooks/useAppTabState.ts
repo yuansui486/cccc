@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Actor } from "../types";
-import { CHAT_TAB, COMPUTER_CONTROL_TAB, isWorkspaceTab } from "../utils/appTabs";
+import { CHAT_TAB, COMPUTER_CONTROL_TAB, DATA_DESENSITIZATION_TAB, isWorkspaceTab } from "../utils/appTabs";
 
 export function isChatViewportAtBottom(scrollHeight: number, scrollTop: number, clientHeight: number, threshold = 100): boolean {
   return scrollHeight - scrollTop - clientHeight < threshold;
@@ -50,7 +50,7 @@ export function useAppTabState({
   const actorsRef = useRef<Actor[]>([]);
   const [mountedActorIds, setMountedActorIds] = useState<string[]>([]);
 
-  const allTabs = useMemo(() => [CHAT_TAB, COMPUTER_CONTROL_TAB, ...runtimeActors.map((actor) => actor.id)], [runtimeActors]);
+  const allTabs = useMemo(() => [CHAT_TAB, COMPUTER_CONTROL_TAB, DATA_DESENSITIZATION_TAB, ...runtimeActors.map((actor) => actor.id)], [runtimeActors]);
 
   const handleTabChange = React.useCallback(
     (newTab: string) => {

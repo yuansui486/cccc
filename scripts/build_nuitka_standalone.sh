@@ -57,6 +57,7 @@ fi
 
 if [[ "$INSTALL_DEPS" == 1 ]]; then
   uv sync --dev
+  uv lock --check --project "$ROOT_DIR/components/desensitization"
   npm ci --prefix "$WEB_DIR"
 fi
 
@@ -66,6 +67,9 @@ if [[ "$PYTHON_SELECTOR" == "python3" && -x "$ROOT_DIR/.venv/bin/python" ]]; the
 fi
 "$PYTHON_PATH" -c "import sys; from importlib.metadata import version; print(sys.version); print('Nuitka', version('Nuitka'))"
 
+"$PYTHON_PATH" "$ROOT_DIR/scripts/build_desensitization_component_bundle.py"
+[[ -f "$RESOURCES_DIR/desensitization_component.zip" ]] || die "Missing desensitization component bundle"
+
 npm -C "$WEB_DIR" run build
 [[ -f "$WEB_DIST_DIR/index.html" ]] || die "Web build did not produce $WEB_DIST_DIR/index.html"
 [[ -d "$RESOURCES_DIR" ]] || die "Missing $RESOURCES_DIR"
@@ -73,6 +77,7 @@ npm -C "$WEB_DIR" run build
 "$PYTHON_PATH" -m nuitka \
   --standalone \
   --assume-yes-for-downloads \
+  --jobs=8 \
   --output-dir="$OUTPUT_DIR" \
   --output-filename=onecolleague \
   --output-folder-name=no1.frozen_entry.dist \
@@ -89,6 +94,11 @@ npm -C "$WEB_DIR" run build
 [[ -x "$BIN_PATH" ]] || die "Nuitka build did not produce $BIN_PATH"
 [[ -f "$DIST_DIR/no1/ports/web/dist/index.html" ]] || die "Nuitka dist is missing bundled Web UI"
 [[ -f "$DIST_DIR/no1/resources/onecolleague-help.md" ]] || die "Nuitka dist is missing resources"
+[[ -f "$DIST_DIR/no1/resources/desensitization_component.zip" ]] || die "Nuitka dist is missing the desensitization component bundle"
+"$PYTHON_PATH" "$ROOT_DIR/scripts/build_desensitization_component_bundle.py" --check
+if find "$DIST_DIR" -type f | grep -E '/no1/desensitization|/(presidio|paddleocr|paddle|torch|transformers|modelscope)(/|$)' >/dev/null 2>&1; then
+  die "Nuitka output unexpectedly contains desensitization runtime packages"
+fi
 
 EXPECTED_VERSION="$("$PYTHON_PATH" -c 'import pathlib; print(next(line.split("\"")[1] for line in pathlib.Path("pyproject.toml").read_text(encoding="utf-8").splitlines() if line.startswith("version")))')"
 ACTUAL_VERSION="$("$BIN_PATH" version | tr -d '\r' | tail -n 1)"
@@ -122,4 +132,7 @@ mkdir -p "$ROOT_DIR/dist"
 ZIP_PATH="$ROOT_DIR/dist/onecolleague-${EXPECTED_VERSION}-macos-arm64.zip"
 rm -f "$ZIP_PATH"
 ditto -c -k --sequesterRsrc --keepParent "$DIST_DIR" "$ZIP_PATH"
+if ! unzip -Z1 "$ZIP_PATH" | grep -Fxq 'no1.frozen_entry.dist/no1/resources/desensitization_component.zip'; then
+  die "macOS standalone ZIP is missing the desensitization component bundle"
+fi
 echo "OK: macOS arm64 standalone distribution ready: $ZIP_PATH"

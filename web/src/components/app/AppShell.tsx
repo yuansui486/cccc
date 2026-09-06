@@ -6,10 +6,11 @@ import { ActorTab } from "../../pages/ActorTab";
 import { ChatTab } from "../../pages/chat";
 import type { Actor, GroupContext, GroupDoc, GroupMeta, GroupRuntimeStatus, TextScale } from "../../types";
 import { SIDEBAR_COLLAPSED_WIDTH } from "../../stores/useUIStore";
-import { CHAT_TAB, COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+import { CHAT_TAB, COMPUTER_CONTROL_TAB, DATA_DESENSITIZATION_TAB } from "../../utils/appTabs";
 import type { ComputerControlAvailability } from "../../services/api/computerControl";
 import { Laptop } from "lucide-react";
 const ComputerControlWorkspace = lazy(() => import("../../pages/computerControl/ComputerControlStandaloneApp").then((module) => ({ default: module.ComputerControlWorkspace })));
+const DesensitizationWorkspace = lazy(() => import("../../pages/desensitization/DesensitizationWorkspace").then((module) => ({ default: module.DesensitizationWorkspace })));
 
 type AppShellProps = {
   orderedGroups: GroupMeta[];
@@ -369,13 +370,19 @@ export function AppShell({
             )}
           </div>
 
+          <div className={activeTab === DATA_DESENSITIZATION_TAB ? "absolute inset-0 flex min-h-0 flex-col" : "hidden"} aria-hidden={activeTab !== DATA_DESENSITIZATION_TAB}>
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">正在加载数据脱敏</div>}>
+              <DesensitizationWorkspace groupId={selectedGroupId} />
+            </Suspense>
+          </div>
+
           <div
-            className={activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB ? "hidden" : "absolute inset-0 flex min-h-0 flex-col"}
-            aria-hidden={activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB}
+            className={activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB || activeTab === DATA_DESENSITIZATION_TAB ? "hidden" : "absolute inset-0 flex min-h-0 flex-col"}
+            aria-hidden={activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB || activeTab === DATA_DESENSITIZATION_TAB}
           >
             {renderedActorIds.map((actorId) => {
               const actor = runtimeActors.find((item) => item.id === actorId) || null;
-              const isVisible = activeTab === actorId && activeTab !== CHAT_TAB && activeTab !== COMPUTER_CONTROL_TAB;
+              const isVisible = activeTab === actorId && activeTab !== CHAT_TAB && activeTab !== COMPUTER_CONTROL_TAB && activeTab !== DATA_DESENSITIZATION_TAB;
               const agentState =
                 (groupContext?.agent_states || []).find((item) => item.id === (actor?.id || "")) || null;
 

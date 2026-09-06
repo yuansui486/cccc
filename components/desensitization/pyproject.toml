@@ -1,0 +1,32 @@
+[project]
+name = "cccc-desensitization"
+version = "0.1.0"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi>=0.110,<1", "uvicorn[standard]>=0.27,<1", "pydantic>=2,<3",
+  "python-multipart>=0.0.7,<1", "PyYAML>=6,<7", "psutil>=5.9,<8",
+  "Pillow>=10,<12", "python-docx>=1.1,<2", "PyMuPDF>=1.24,<2",
+  "openpyxl>=3.1,<4", "presidio-analyzer>=2.2.364,<3", "presidio-anonymizer>=2.2.364,<3",
+  # The pipeline API imports ModelScope's framework helpers at runtime.  The
+  # base distribution intentionally leaves these optional dependencies out,
+  # so declare the extra here instead of discovering missing modules after
+  # the Sidecar has already started.
+  "modelscope[framework]>=1.18,<2", "torch==2.5.1", "transformers>=4.39,<5",
+  "paddleocr==2.10.0", "paddlepaddle==3.0.0", "numpy<2", "cryptography>=48,<49"
+]
+[project.scripts]
+cccc-desensitization = "cccc_desensitization.sidecar:main"
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools]
+package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]
+[tool.setuptools.package-data]
+cccc_desensitization = ["static/**"]
+[dependency-groups]
+dev = ["pytest>=8,<9", "httpx>=0.24,<1"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

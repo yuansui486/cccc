@@ -2588,38 +2588,90 @@ def _manager_session_running(session: Any) -> bool:
 
 @dataclass
 class _ThemeRefreshTask:
+    key: tuple[str, str]
+    scheme: str
     callback: Callable[[], bool]
+    done: threading.Event = field(default_factory=threading.Event)
+    result: bool = False
+    superseded: bool = False
 
 
 class _FifoThemeRefreshQueue:
-    """Run theme refresh callbacks one at a time in arrival order."""
+    """Run refresh callbacks globally serially while coalescing each actor."""
 
     def __init__(self) -> None:
         self._condition = threading.Condition()
         self._pending: deque[_ThemeRefreshTask] = deque()
-        self._active = False
+        self._pending_by_key: Dict[tuple[str, str], _ThemeRefreshTask] = {}
+        self._active: Optional[_ThemeRefreshTask] = None
 
-    def run(self, callback: Callable[[], bool]) -> bool:
-        task = _ThemeRefreshTask(callback=callback)
+    def run(self, *, key: tuple[str, str], scheme: str, callback: Callable[[], bool]) -> bool:
+        task = _ThemeRefreshTask(key=key, scheme=scheme, callback=callback)
         with self._condition:
-            self._pending.append(task)
-            try:
-                while self._active or not self._pending or self._pending[0] is not task:
-                    self._condition.wait()
-                self._pending.popleft()
-                self._active = True
-            except BaseException:
-                try:
-                    self._pending.remove(task)
-                finally:
+            active = self._active
+            if active is not None and active.key == key and active.scheme == scheme:
+                pending = self._pending_by_key.pop(key, None)
+                if pending is not None:
+                    pending.superseded = True
+                    pending.result = False
+                    pending.done.set()
+                    try:
+                        self._pending.remove(pending)
+                    except ValueError:
+                        pass
                     self._condition.notify_all()
-                raise
+                while not active.done.is_set():
+                    self._condition.wait()
+                return bool(active.result)
+            if active is not None and active.key == key:
+                active.superseded = True
+            prior = self._pending_by_key.get(key)
+            if prior is not None:
+                prior.superseded = True
+                prior.result = False
+                prior.done.set()
+                task = _ThemeRefreshTask(key=key, scheme=scheme, callback=callback)
+                try:
+                    index = self._pending.index(prior)
+                    self._pending[index] = task
+                except ValueError:
+                    self._pending.append(task)
+                self._pending_by_key[key] = task
+                self._condition.notify_all()
+            else:
+                self._pending.append(task)
+                self._pending_by_key[key] = task
 
+            while True:
+                if task.done.is_set():
+                    return bool(task.result)
+                if self._active is None and self._pending and self._pending[0] is task:
+                    self._pending.popleft()
+                    self._pending_by_key.pop(key, None)
+                    self._active = task
+                    break
+                self._condition.wait()
+
+        result = False
         try:
-            return bool(callback())
+            result = bool(callback())
+            with self._condition:
+                retry = not result and not task.superseded
+            if retry:
+                result = bool(callback())
+            with self._condition:
+                task.result = result if not task.superseded else False
+                task.done.set()
+                return bool(task.result)
+        except BaseException:
+            with self._condition:
+                task.result = False
+                task.done.set()
+            raise
         finally:
             with self._condition:
-                self._active = False
+                if self._active is task:
+                    self._active = None
                 self._condition.notify_all()
 
 
@@ -2763,7 +2815,7 @@ class CodexAppSessionManager:
                 )
                 return False
 
-        return self._theme_refresh_queue.run(_refresh)
+        return self._theme_refresh_queue.run(key=key, scheme=scheme, callback=_refresh)
 
     def stop_group(self, *, group_id: str) -> None:
         gid = str(group_id or "").strip()

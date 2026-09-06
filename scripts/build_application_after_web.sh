@@ -47,6 +47,14 @@ bash "$REPO_ROOT/scripts/build_web.sh"
 test -f "$REPO_ROOT/src/no1/ports/web/dist/index.html"
 
 echo "==> Build Python package"
+if command -v uv >/dev/null 2>&1; then
+  uv run --no-sync python "$REPO_ROOT/scripts/build_desensitization_component_bundle.py"
+elif command -v python3 >/dev/null 2>&1; then
+  python3 "$REPO_ROOT/scripts/build_desensitization_component_bundle.py"
+else
+  echo "ERROR: Python is required to build the desensitization component bundle." >&2
+  exit 1
+fi
 rm -rf "$REPO_ROOT/dist"
 BUILD_TMP_ROOT="$(mktemp -d)"
 BUILD_ROOT="$BUILD_TMP_ROOT/OneColleague"
@@ -58,12 +66,21 @@ if command -v rsync >/dev/null 2>&1; then
     --exclude '/node_modules/' \
     --exclude '/web/node_modules/' \
     --exclude '/dist/' \
+    --exclude '/components/' \
     --exclude '*.egg-info/' \
     "$REPO_ROOT/" "$BUILD_ROOT/"
 else
   mkdir -p "$BUILD_ROOT"
-  cp -R "$REPO_ROOT/." "$BUILD_ROOT/"
-  rm -rf "$BUILD_ROOT/.git" "$BUILD_ROOT/.venv" "$BUILD_ROOT/dist" "$BUILD_ROOT/web/node_modules"
+  (cd "$REPO_ROOT" && tar \
+    --exclude='./.git' \
+    --exclude='./.venv' \
+    --exclude='./dist' \
+    --exclude='./node_modules' \
+    --exclude='./web/node_modules' \
+    --exclude='./components' \
+    --exclude='__pycache__' \
+    --exclude='*.egg-info' \
+    -cf - .) | (cd "$BUILD_ROOT" && tar -xf -)
 fi
 rm -rf "$BUILD_ROOT"/src/*.egg-info
 if ! command -v uv >/dev/null 2>&1; then
@@ -85,6 +102,11 @@ unzip -Z1 "$LATEST_WHL" > "$WHEEL_LIST"
 if ! grep -Fxq 'no1/ports/web/dist/index.html' "$WHEEL_LIST"; then
   echo "ERROR: built wheel is missing bundled Web UI: no1/ports/web/dist/index.html" >&2
   exit 1
+fi
+if command -v uv >/dev/null 2>&1; then
+  uv run --no-sync python "$REPO_ROOT/scripts/build_desensitization_component_bundle.py" --check --verify-wheel "$LATEST_WHL"
+else
+  python3 "$REPO_ROOT/scripts/build_desensitization_component_bundle.py" --check --verify-wheel "$LATEST_WHL"
 fi
 
 WHL_BASENAME="$(basename "$LATEST_WHL")"

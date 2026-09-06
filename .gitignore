@@ -12,9 +12,9 @@
 # Local virtualenv
 /.venv/
 /.venv-qa/
-
-# uv lock file
-uv.lock
+/components/*/.venv/
+/components/*/.pytest_cache/
+/components/*/src/*.egg-info/
 
 # Build artifacts
 /dist/
@@ -69,3 +69,10 @@ AGENTS.md
 !.github/workflows/
 !.github/workflows/**
 infinitetalk/tmp/
+.venv-build/
+tmp_nuitka_*/
+.sconsign-*.dblite
+*-crash-report.xml
+scons-*.pickle
+scons-*.txt
+*.vite-*.log

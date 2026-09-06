@@ -147,6 +147,7 @@ _DAEMON_CLIENT_WARN_SEEN: Dict[tuple[str, str, str], float] = {}
 _SPACE_SYNC_RUN_QUEUE: Optional[GroupSpaceSyncRunQueue] = None
 _REQUEST_EXECUTION_SHUTDOWN_TIMEOUT_S = 20.0
 _SHUTDOWN_DRAIN_RETRY_SECONDS = 0.1
+_THEME_REFRESH_REQUEST_WORKERS = 4
 _REQUEST_FAST_QUEUE_OPS = {"send", "reply", "chat_ack"}
 _REQUEST_READ_QUEUE_OPS = {
     "branding_get",
@@ -274,9 +275,12 @@ def _request_queue_for(
     read_queue: DaemonRequestExecutionQueue,
     fast_queue: DaemonRequestExecutionQueue,
     slow_queue: DaemonRequestExecutionQueue,
+    theme_queue: Optional[DaemonRequestExecutionQueue] = None,
 ) -> DaemonRequestExecutionQueue:
     op = str(getattr(req, "op", "") or "").strip()
     args = getattr(req, "args", None)
+    if op == "actor_terminal_theme_refresh" and theme_queue is not None:
+        return theme_queue
     if op in _REQUEST_READ_QUEUE_OPS:
         return read_queue
     if op == "group_space_provider_auth":
@@ -1310,6 +1314,14 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             logger=logger,
             on_should_exit=stop_event.set,
         )
+        theme_request_queue = DaemonRequestExecutionQueue(
+            stop_event=stop_event,
+            handle_request=handle_request,
+            send_json=_send_json,
+            dump_response=_dump_response,
+            logger=logger,
+            on_should_exit=stop_event.set,
+        )
         request_workers = [
             start_request_execution_thread(
                 request_queue=request_queue,
@@ -1331,6 +1343,13 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
                 request_queue=read_request_queue,
                 name="onecolleague-request-worker-read-2",
             ),
+        ]
+        theme_request_workers = [
+            start_request_execution_thread(
+                request_queue=theme_request_queue,
+                name=f"onecolleague-request-worker-theme-{index + 1}",
+            )
+            for index in range(_THEME_REFRESH_REQUEST_WORKERS)
         ]
 
         should_exit = False
@@ -1388,6 +1407,7 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
                     read_queue=read_request_queue,
                     fast_queue=fast_request_queue,
                     slow_queue=request_queue,
+                    theme_queue=theme_request_queue,
                 ).submit(conn=conn, req=req),
                 logger=logger,
             )
@@ -1402,6 +1422,7 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
                 (request_queue, request_workers),
                 (fast_request_queue, fast_request_workers),
                 (read_request_queue, read_request_workers),
+                (theme_request_queue, theme_request_workers),
             ],
             stop_event=stop_event,
         ),

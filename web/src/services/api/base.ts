@@ -816,3 +816,46 @@ export async function apiForm<T>(path: string, form: FormData, init?: RequestIni
     return makeErrorResponse("PARSE_ERROR", `Invalid JSON response: ${text.slice(0, 100)}`);
   }
 }
+
+export async function apiBlob(
+  path: string,
+  fallbackFilename = "download.bin",
+  init?: RequestInit,
+): Promise<ApiResponse<{ blob: Blob; filename: string }>> {
+  let resp: Response;
+  try {
+    resp = await fetch(path, {
+      ...(init || {}),
+      headers: {
+        ...getAuthHeaders(),
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (error) {
+    return makeErrorResponse(
+      "NETWORK_ERROR",
+      error instanceof Error ? error.message : "Network request failed",
+    );
+  }
+
+  if (resp.status === 401) authRequiredHandler?.();
+  if (!resp.ok) {
+    const text = await resp.text();
+    try {
+      return normalizeApiResponse(JSON.parse(text));
+    } catch {
+      return makeErrorResponse("DOWNLOAD_ERROR", text || `Server returned ${resp.status}`);
+    }
+  }
+
+  const disposition = resp.headers.get("content-disposition") || "";
+  const utf8Name = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  let filename = fallbackFilename;
+  try {
+    filename = decodeURIComponent(utf8Name || plainName || fallbackFilename);
+  } catch {
+    filename = plainName || fallbackFilename;
+  }
+  return { ok: true, result: { blob: await resp.blob(), filename } };
+}

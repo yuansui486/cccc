@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "lint:fix": "eslint src --ext .ts,.tsx --fix"
   },
   "dependencies": {

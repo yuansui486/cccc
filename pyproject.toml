@@ -7,14 +7,14 @@ name = "no1"
 version = "0.4.22"
 description = "Global multi-agent delivery kernel with working groups, scopes, and an append-only collaboration ledger"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.14"
 authors = [
   { name = "ChesterRa", email = "ra@ike.ba" }
 ]
 license = "Apache-2.0"
 keywords = ["orchestrator","ai","rfd","pair","collaboration"]
 dependencies = [
-  "cryptography>=41.0.0,<47.0",
+  "cryptography>=48.0.1,<49",
   "PyYAML>=6.0,<7.0",
   "dingtalk-stream>=0.24.3",
   "fastapi>=0.110,<1.0",
@@ -38,10 +38,8 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
   "Environment :: Console",
   "Operating System :: POSIX :: Linux",
   "Operating System :: MacOS",
@@ -64,11 +62,14 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "no1.ports.web" = ["dist/**"]
-"no1.resources" = ["*.md", "*.yaml", "*.json", "*.py", "im/*"]
+"no1.resources" = ["*.md", "*.yaml", "*.json", "*.py", "im/*", "desensitization_component.zip"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["no1*"]
+
+[tool.uv]
+index-url = "https://mirrors.aliyun.com/pypi/simple"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -78,7 +79,7 @@ markers = [
 ]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 exclude = [
   "src/no1/providers/notebooklm/_vendor",
   "src/no1/vendor",
@@ -91,5 +92,7 @@ select = ["E9", "F63", "F7", "F82"]
 dev = [
     "nuitka>=4.1.2",
     "ordered-set>=4.1.0",
+    "pytest>=8.0,<10",
+    "pytest-timeout>=2.2,<3",
     "zstandard>=0.25.0",
 ]

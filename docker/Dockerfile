@@ -10,7 +10,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: Final image
-FROM python:3.11-slim-bookworm
+FROM python:3.12-slim-bookworm
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ENV http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY}
@@ -52,10 +52,10 @@ WORKDIR /app
 COPY pyproject.toml MANIFEST.in LICENSE README.md README.zh-CN.md README.ja.md ./
 COPY src/ ./src/
 
-# Copy built WebUI (vite outputs to ../src/cccc/ports/web/dist)
-COPY --from=web-builder /src/cccc/ports/web/dist ./src/cccc/ports/web/dist
+# Copy built WebUI (vite outputs to ../src/no1/ports/web/dist)
+COPY --from=web-builder /src/no1/ports/web/dist ./src/no1/ports/web/dist
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir uv && pip install --no-cache-dir .
 
 # Workspace for project files (mount volumes here)
 WORKDIR /workspace
@@ -67,6 +67,7 @@ ENV http_proxy="" https_proxy=""
 # Create non-root user (Claude CLI refuses --dangerously-skip-permissions as root)
 RUN useradd -m -s /bin/bash cccc \
     && mkdir -p /data /workspace \
+    && chown -R cccc:cccc /opt/cccc \
     && chown -R cccc:cccc /data /workspace
 
 USER cccc
@@ -95,5 +96,5 @@ ENV CCCC_WEB_PORT=8848
 EXPOSE 8848 9765
 VOLUME ["/data", "/workspace"]
 
-# cccc (without args) starts both daemon and web server
-CMD ["cccc"]
+# onecolleague (without args) starts both daemon and web server
+CMD ["onecolleague"]

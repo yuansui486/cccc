@@ -327,6 +327,12 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
+            sidecar = getattr(_app.state, "desensitization_sidecar", None)
+            if sidecar is not None:
+                try:
+                    sidecar.close()
+                except Exception:
+                    logger.exception("failed to close desensitization sidecar")
             supervisor_watchdog_stop.set()
             if supervisor_watchdog_thread is not None:
                 try:
@@ -434,6 +440,12 @@ def create_app() -> FastAPI:
             del group_id
             return FileResponse(str(dist_dir / "index.html"))
 
+        @app.get("/data-desensitization/{group_id}", include_in_schema=False)
+        @app.get("/data-desensitization", include_in_schema=False)
+        async def _desensitization_page(group_id: str = "") -> FileResponse:
+            del group_id
+            return FileResponse(str(dist_dir / "index.html"))
+
         app.router.routes.append(
             HttpOnlyMount("/ui", app=StaticFiles(directory=str(dist_dir), html=True), name="ui")
         )
@@ -520,8 +532,12 @@ def create_app() -> FastAPI:
     from .routes.nomcp import create_routers as create_nomcp_routers
     from .routes.studio import create_routers as create_studio_routers
     from .routes.computer_control import create_routers as create_computer_control_routers
+    from .routes.desensitization import create_routers as create_desensitization_routers
     from .routes.group_bridge import create_routers as create_group_bridge_routers
 
+    from .desensitization_sidecar import DesensitizationSidecarManager
+    sidecar_manager = DesensitizationSidecarManager(home)
+    app.state.desensitization_sidecar = sidecar_manager
     route_ctx = RouteContext(
         home=home,
         version=__version__,
@@ -533,6 +549,7 @@ def create_app() -> FastAPI:
         daemon=_daemon,
         cached_json=_cached_json,
         apply_web_logging=_apply_web_logging,
+        desensitization_sidecar=sidecar_manager,
     )
 
     register_base_routes(app, ctx=route_ctx)
@@ -551,6 +568,9 @@ def create_app() -> FastAPI:
         app.include_router(router)
     for router in create_computer_control_routers(route_ctx):
         app.include_router(router)
+    for router in create_desensitization_routers(route_ctx):
+        app.include_router(router)
+
     for router in create_group_bridge_routers(route_ctx):
         app.include_router(router)
     register_im_routes(app, ctx=route_ctx)

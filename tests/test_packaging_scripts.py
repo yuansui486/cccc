@@ -100,7 +100,7 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "--output-folder-name=no1.frozen_entry.dist" in script
     assert '"uv"' in script
     assert "Resolve-ProjectPython" in script
-    assert ".venv\\Scripts\\python.exe" in script
+    assert '[string]$BuildVenv = ".venv-build"' in script
     assert "Invoke-CheckedNative -FilePath $pythonPath -ArgumentList $nuitkaArgs" in script
     assert "--output-filename=onecolleague.exe" in script
     assert "--include-package=no1" in script
@@ -111,10 +111,15 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "--include-module=comtypes.gen._944DE083_8FB8_45CF_BCB7_C477ACB2F897_0_1_0" in script
     assert "--include-module=comtypes.gen.stdole" in script
     assert "--include-module=comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0" in script
-    assert "--include-package-data=no1" in script
     assert "--include-distribution-metadata=no1" in script
+    assert "--nofollow-import-to=pymupdf.mupdf" not in script
+    assert "--include-module=pymupdf._mupdf" not in script
+    assert "mupdf.py=pymupdf/mupdf.py" not in script
+    assert "--nofollow-import-to=paddleocr.ppocr.postprocess.pse_postprocess.pse.setup" not in script
     assert "src\\no1\\ports\\web\\dist=no1\\ports\\web\\dist" in script
     assert "src\\no1\\resources=no1\\resources" in script
+    assert "desensitization_legacy" not in script
+    assert "components\\desensitization" in script
     assert "--nofollow-import-to=lark_oapi.*" in script
     assert "Get-ProjectVersion" in script
     assert "Test-OneColleagueVersion" in script
@@ -156,6 +161,7 @@ def test_build_nuitka_macos_script_uses_native_standalone_and_smoke_checks() -> 
     assert "--main=\"$ROOT_DIR/src/no1/frozen_entry.py\"" in script
     assert '--include-data-dir="$WEB_DIST_DIR=no1/ports/web/dist"' in script
     assert '--include-data-dir="$RESOURCES_DIR=no1/resources"' in script
+    assert 'components/desensitization' in script
     assert "onecolleague-nuitka-smoke" in script
     assert 'export ONECOLLEAGUE_HOME="$SMOKE_HOME"' in script
     assert 'export CCCC_HOME="$SMOKE_HOME"' in script

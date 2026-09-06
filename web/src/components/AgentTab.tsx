@@ -164,6 +164,7 @@ export function AgentTab({
   const previousThemeRef = useRef<boolean | null>(null);
   const themeRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const pendingThemeSchemeRef = useRef<"light" | "dark" | null>(null);
+  const themeRefreshSessionEpochRef = useRef(0);
 
   const pasteStateRef = useRef<{ inFlight: boolean; lastAt: number }>({ inFlight: false, lastAt: 0 });
 
@@ -523,6 +524,19 @@ export function AgentTab({
   });
 
   useEffect(() => {
+    themeRefreshSessionEpochRef.current += 1;
+    pendingThemeSchemeRef.current = null;
+    previousThemeRef.current = isDark;
+    return () => {
+      themeRefreshSessionEpochRef.current += 1;
+      pendingThemeSchemeRef.current = null;
+    };
+    // Session changes invalidate late refresh responses without reacting to
+    // ordinary page theme changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actor.id, codexAppServerRuntime, groupId, isHeadless, isRunning, termEpoch]);
+
+  useEffect(() => {
     if (previousThemeRef.current === null) {
       previousThemeRef.current = isDark;
       return;
@@ -538,11 +552,17 @@ export function AgentTab({
       while (pendingThemeSchemeRef.current) {
         const scheme = pendingThemeSchemeRef.current;
         pendingThemeSchemeRef.current = null;
+        const sessionEpoch = themeRefreshSessionEpochRef.current;
         try {
           const response = await refreshActorTerminalTheme(groupId, actor.id, scheme);
-          if (response.ok && response.result?.refreshed) {
+          const desired = pendingThemeSchemeRef.current;
+          const isFinal = desired === null || desired === scheme;
+          if (response.ok && response.result?.refreshed && isFinal && sessionEpoch === themeRefreshSessionEpochRef.current) {
+            pendingThemeSchemeRef.current = null;
             setCodexTerminalIsDark(scheme === "dark");
             requestReconnect();
+          } else if (!response.ok && isFinal) {
+            pendingThemeSchemeRef.current = null;
           }
         } catch {
           // Theme changes must never interrupt the running Codex session.
@@ -552,6 +572,12 @@ export function AgentTab({
 
     const refreshPromise = drainThemeRefresh().finally(() => {
       themeRefreshInFlightRef.current = null;
+      if (pendingThemeSchemeRef.current && codexAppServerRuntime && isRunning && !isHeadless) {
+        const retryPromise = drainThemeRefresh().finally(() => {
+          themeRefreshInFlightRef.current = null;
+        });
+        themeRefreshInFlightRef.current = retryPromise;
+      }
     });
     themeRefreshInFlightRef.current = refreshPromise;
   }, [actor.id, codexAppServerRuntime, groupId, isDark, isHeadless, isRunning, requestReconnect]);

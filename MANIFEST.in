@@ -6,5 +6,12 @@ include README.ja.md
 recursive-include src/no1/ports/web/dist *
 recursive-include src/no1/resources *.md *.yaml *.json *.py
 recursive-include src/no1/resources/im *.mjs *.json
+include src/no1/resources/desensitization_component.zip
+
+# The component is distributed through the lightweight resource archive above;
+# never duplicate the checkout (or any local runtime artifacts) in the main
+# source distribution.
+prune components
+recursive-exclude components *
 
 global-exclude *.pyc __pycache__/* .DS_Store

@@ -20,3 +20,10 @@ screenshots/
 .codex
 .windsurf
 uv.lock
+# The Sidecar source/lock are needed by the image build; never send local
+# environments, model weights, temporary state, or test caches to Docker.
+components/desensitization/.venv/
+components/desensitization/tmp-sidecar-home/
+components/desensitization/.pytest_cache/
+components/desensitization/**/__pycache__/
+components/desensitization/**/*.pyc

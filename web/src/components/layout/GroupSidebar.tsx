@@ -52,8 +52,8 @@ import { ThemeToggleCompact } from "../ThemeToggle";
 import { ActorAvatar } from "../ActorAvatar";
 import { SortableGroupItem } from "./SortableGroupItem";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../stores/useUIStore";
-import { Laptop } from "lucide-react";
-import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+import { Laptop, ShieldCheck } from "lucide-react";
+import { COMPUTER_CONTROL_TAB, DATA_DESENSITIZATION_TAB } from "../../utils/appTabs";
 import type { ComputerControlAvailability } from "../../services/api/computerControl";
 
 export interface GroupSidebarProps {
@@ -787,6 +787,17 @@ export function GroupSidebar({
             <Laptop size={18} />
           </button>
 
+          <button
+            type="button"
+            onClick={() => selectedGroupId && handleTabSelect(DATA_DESENSITIZATION_TAB)}
+            disabled={!selectedGroupId}
+            title="数据脱敏"
+            aria-label="数据脱敏"
+            className={classNames("relative flex h-11 w-11 items-center justify-center rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-40", activeTab === DATA_DESENSITIZATION_TAB ? "glass-group-item-active glow-pulse" : "glass-group-item hover:scale-105")}
+          >
+            <ShieldCheck size={18} />
+          </button>
+
           {actors.map((actor) => {
             const indicator = getActorIndicator(actor);
             const isActive = activeTab === actor.id;
@@ -952,6 +963,19 @@ export function GroupSidebar({
               {renderInlineGroupSwitcherContent()}
             </div>
           )}
+        </section>
+
+        <section className="space-y-1">
+          <button
+            type="button"
+            onClick={() => selectedGroupId && handleTabSelect(DATA_DESENSITIZATION_TAB)}
+            disabled={!selectedGroupId}
+            className={classNames(navButtonClass(activeTab === DATA_DESENSITIZATION_TAB), "disabled:cursor-not-allowed disabled:opacity-40")}
+            title="数据脱敏"
+          >
+            <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><ShieldCheck size={22} strokeWidth={1.8} /></span>
+            <span className="min-w-0 flex-1 truncate">数据脱敏</span>
+          </button>
         </section>
 
         <section className="space-y-1">
