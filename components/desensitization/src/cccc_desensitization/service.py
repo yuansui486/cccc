@@ -288,7 +288,7 @@ def analyze_path(group_id: str, path: Path, filename: str, relative_path: str = 
          json.dumps(result.get("warnings") or [], ensure_ascii=False)))
     conn.commit(); conn.close()
     result["task_id"] = task_id
-    return _rewrite_urls(result, group_id, task_id)
+    return _image_preview_urls(_rewrite_urls(result, group_id, task_id), group_id, task_id)
 
 
 def analyze_file(group_id: str, data: bytes, filename: str, relative_path: str = "") -> dict[str, Any]:
@@ -311,7 +311,33 @@ def _task_row(group_id: str, task_id: str) -> sqlite3.Row:
 
 def get_analysis(group_id: str, task_id: str) -> dict[str, Any]:
     _task_row(group_id, task_id)
-    return _rewrite_urls(dict(engine_call(group_id, "task_analysis", task_id)), group_id, task_id)
+    return _image_preview_urls(_rewrite_urls(dict(engine_call(group_id, "task_analysis", task_id)), group_id, task_id), group_id, task_id)
+
+
+def _image_preview_urls(result: dict, group_id: str, task_id: str) -> dict:
+    for item in result.get("embedded_images", []):
+        item["source_preview"] = f"/api/v1/groups/{group_id}/desensitization/tasks/{task_id}/embedded-images/{item['image_id']}"
+    return result
+
+
+def embedded_image(group_id: str, task_id: str, image_id: str, preview_id: str = "") -> bytes:
+    import io
+    from docx import Document
+    from .embedded_images import resources
+    _task_row(group_id, task_id)
+    analysis = get_analysis(group_id, task_id)
+    if image_id not in {item["image_id"] for item in analysis.get("embedded_images", [])}:
+        raise ValueError("image not found")
+    with engine_context(group_id) as engine:
+        if preview_id:
+            _, path, record = engine._preview_record(task_id, preview_id)
+            data = engine._preview_bytes(path, record)
+        else:
+            data = (engine._task_folder(task_id) / "source.bin").read_bytes()
+        for key, part, _locations in resources(Document(io.BytesIO(data))):
+            if key == image_id and part is not None:
+                return engine._image_preview_png(part.blob)
+    raise ValueError("image not found")
 
 
 def analyze_text(group_id: str, text: str) -> list[dict[str, Any]]:
@@ -368,12 +394,13 @@ def _copy_engine_artifact(group_id: str, task_id: str, engine_name: str, target:
 def mask_file(group_id: str, task_id: str, entities: list[dict[str, Any]] | None = None,
               filename: str = "", policies: dict[str, dict[str, Any]] | None = None,
               reversible: bool = False, password: str | None = None,
-              boxes: list[dict[str, Any]] | None = None, image_override: bool = False) -> dict[str, Any]:
+              boxes: list[dict[str, Any]] | None = None, image_override: bool = False,
+              embedded_images: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     row = _task_row(group_id, task_id)
     payload = {
         "analysis_id": task_id, "filename": filename or row["original_name"], "entities": entities,
         "policies": policies or {}, "reviewed": True, "reversible": reversible,
-        "password": password, "boxes": boxes, "image_override": image_override,
+        "password": password, "boxes": boxes, "image_override": image_override, "embedded_images": embedded_images,
     }
     with engine_context(group_id) as engine:
         result = dict(engine.files_mask(engine.FileMaskIn(**payload)))
@@ -394,9 +421,9 @@ def mask_file(group_id: str, task_id: str, entities: list[dict[str, Any]] | None
     report_target = target.with_name(f"{target.stem}.report.json")
     _copy_engine_artifact(group_id, task_id, "report.json", report_target)
     conn = _connection(group_id)
-    conn.execute("""UPDATE tasks SET status='completed',artifact_path=?,report_path=?,artifact_sha256=?,updated=?,
+    conn.execute("""UPDATE tasks SET status=?,warnings_json=?,artifact_path=?,report_path=?,artifact_sha256=?,updated=?,
         selected_count=?,reversible=?,error_code='',error_message='' WHERE id=? AND group_id=?""",
-        (str(artifact), str(report_target), _hash_file(artifact), time.time(),
+        (result.get("status", "completed"), json.dumps(result.get("warnings", [])), str(artifact), str(report_target), _hash_file(artifact), time.time(),
          int(result.get("selected_entity_count", 0)), int(reversible), task_id, group_id))
     conn.commit(); conn.close()
     return {
@@ -514,6 +541,10 @@ def source_page(group_id: str, task_id: str, variant: str, page: int = 0) -> tup
 def _legacy_crud(group_id: str, method: str, payload: dict[str, Any] | None = None,
                  *args: Any) -> dict[str, Any]:
     with engine_context(group_id) as engine:
+        if method == "add_custom_sensitive":
+            return dict(engine.add_custom_sensitive(engine.CustomSensitiveIn(**(payload or {}))))
+        if method == "update_custom_sensitive":
+            return dict(engine.update_custom_sensitive(str(args[0]), engine.CustomSensitiveIn(**(payload or {}))))
         if method == "add_rule":
             return dict(engine.add_rule(engine.RuleIn(**(payload or {}))))
         if method == "update_rule":
@@ -627,8 +658,28 @@ def create_batch_from_paths(group_id: str, files: Iterable[tuple[str, Path]], ro
             conn.close()
             return get_batch(group_id, str(existing[0]))
     batch_id = uuid.uuid4().hex
-    batch_output = _unique(output / f"批次-{time.strftime('%Y%m%d-%H%M%S')}-{batch_id[:8]}")
-    batch_output.mkdir(parents=True, exist_ok=False)
+    relative_output = public_options.get("output_relative_path")
+    if relative_output is not None:
+        try:
+            if public_options.get("scope_key") != scope_key or public_options.get("scope_root") != str(scope_root):
+                raise ValueError("working directory changed; confirm output again")
+            parts = str(relative_output).replace("\\", "/").split("/")
+            if any(not part or part in {".", ".."} or _safe_name(part) != part
+                   or part.endswith((".", " ")) or Path(part).is_reserved() for part in parts):
+                raise ValueError("invalid output relative path")
+            batch_output = _contained(scope_root.joinpath(*parts), scope_root)
+            if batch_output.exists():
+                raise ValueError("output directory already exists")
+        except Exception:
+            conn.close()
+            raise
+    else:
+        batch_output = output / f"批次-{time.strftime('%Y%m%d-%H%M%S')}-{batch_id[:8]}"
+    try:
+        batch_output.mkdir(parents=True, exist_ok=False)
+    except OSError:
+        conn.close()
+        raise
     input_root = state / "batches" / batch_id / "inputs"
     input_root.mkdir(parents=True, exist_ok=False)
     now = time.time()
@@ -739,7 +790,7 @@ def _run_batch(group_id: str, batch_id: str) -> None:
     for item in items:
         if conn.execute("SELECT cancel_requested FROM batches WHERE id=?", (batch_id,)).fetchone()[0]:
             break
-        if item["status"] == "completed":
+        if item["status"] in {"completed", "partial"}:
             continue
         try:
             task_id = str(item["task_id"] or "")
@@ -761,14 +812,14 @@ def _run_batch(group_id: str, batch_id: str) -> None:
             analysis = get_analysis(group_id, task_id)
             conn.execute("UPDATE batches SET status='running',updated=? WHERE id=?", (time.time(), batch_id))
             conn.commit()
-            mask_file(
+            result = mask_file(
                 group_id, task_id, review.get("entities", analysis.get("entities")),
                 Path(item["relative_path"]).name, review.get("policies", options.get("policies", {})),
                 bool(options.get("reversible")), options.get("password"),
-                review.get("boxes", analysis.get("boxes")), bool(review.get("image_override", False)))
-            conn.execute("""UPDATE batch_items SET status='completed',input_path='',updated=?,
+                review.get("boxes", analysis.get("boxes")), bool(review.get("image_override", False)), review.get("embedded_images"))
+            conn.execute("""UPDATE batch_items SET status=?,input_path='',updated=?,
                 error_code='',error_message='' WHERE batch_id=? AND sequence=?""",
-                (time.time(), batch_id, item["sequence"]))
+                (result.get("status", "completed"), time.time(), batch_id, item["sequence"]))
             conn.commit()
             Path(item["input_path"]).unlink(missing_ok=True)
         except Exception as exc:
@@ -778,7 +829,7 @@ def _run_batch(group_id: str, batch_id: str) -> None:
             conn.commit()
     counts = {str(row[0]): int(row[1]) for row in conn.execute(
         "SELECT status,COUNT(*) FROM batch_items WHERE batch_id=? GROUP BY status", (batch_id,)).fetchall()}
-    completed = counts.get("completed", 0)
+    completed = counts.get("completed", 0) + counts.get("partial", 0)
     failed = counts.get("failed", 0)
     cancelled = bool(conn.execute("SELECT cancel_requested FROM batches WHERE id=?", (batch_id,)).fetchone()[0])
     if cancelled:
@@ -786,7 +837,7 @@ def _run_batch(group_id: str, batch_id: str) -> None:
     elif batch["mode"] == "review" and counts.get("awaiting_review", 0):
         status = "awaiting_review"
     else:
-        status = "completed" if failed == 0 else ("partial" if completed else "failed")
+        status = "completed" if failed == 0 and not counts.get("partial", 0) else ("partial" if completed else "failed")
     report = archive = ""
     if status in TERMINAL_BATCH_STATUSES:
         report_path, archive_path = _build_batch_artifacts(group_id, batch_id, Path(batch["output_path"]), status)
@@ -802,7 +853,13 @@ def _build_batch_artifacts(group_id: str, batch_id: str, output: Path,
                            status: str) -> tuple[Path, Path]:
     batch = get_batch(group_id, batch_id, include_items=True)
     report = output / "report.json"
-    report.write_text(json.dumps({"batch_id": batch_id, "status": status, "items": batch["items"]},
+    items = []
+    for item in batch["items"]:
+        public = {key: value for key, value in item.items() if key != "analysis"}
+        if item.get("task_id"):
+            public["warnings"] = json.loads(_task_row(group_id, item["task_id"])["warnings_json"] or "[]")
+        items.append(public)
+    report.write_text(json.dumps({"batch_id": batch_id, "status": status, "items": items},
                                  ensure_ascii=False, indent=2), encoding="utf-8")
     archive = output / "results.zip"
     temp = output / f".{uuid.uuid4().hex}.zip.tmp"

@@ -58,7 +58,7 @@ DATA = Path(os.getenv('LOCAL_DESENSITIZATION_DATA_DIR', str(ROOT / 'data'))).exp
 TASKS = DATA / 'tasks'
 MODELS = Path(os.getenv('LOCAL_DESENSITIZATION_MODEL_DIR', str(ROOT / 'models'))).expanduser().resolve()
 for p in (DATA,TASKS,MODELS): p.mkdir(parents=True, exist_ok=True)
-DB=DATA/'tasks.db'; MAX_UPLOAD=max(0, int(os.getenv('ONECOLLEAGUE_DESENSITIZATION_MAX_FILE_BYTES', os.getenv('MAX_UPLOAD','0')) or 0)); MAX_BATCH_FILES=int(os.getenv('MAX_BATCH_FILES','20')); MAX_BATCH_BYTES=max(0, int(os.getenv('ONECOLLEAGUE_DESENSITIZATION_MAX_BATCH_BYTES', os.getenv('MAX_BATCH_BYTES','0')) or 0)); TASK_TTL_HOURS=int(os.getenv('TASK_TTL_HOURS','24')); CLEANUP_INTERVAL_SECONDS=max(10, int(os.getenv('CLEANUP_INTERVAL_SECONDS', '300'))); MAX_ENTITIES=10000; MAX_IMAGE_BOXES=10000; MAX_IMAGE_PIXELS=int(os.getenv('MAX_IMAGE_PIXELS',str(40_000_000))); MAX_PDF_OCR_PAGES=int(os.getenv('MAX_PDF_OCR_PAGES','200')); MAX_PDF_OCR_PIXELS=int(os.getenv('MAX_PDF_OCR_PIXELS',str(12_000_000))); jobs={}; batches={}; policy_store=dict(DEFAULT_POLICIES); _POLICY_STORE_LOADED=False; ner_service=RaanerService(MODELS/'raner'); ocr_service=OCRService(MODELS/'paddleocr')
+DB=DATA/'tasks.db'; MAX_UPLOAD=max(0, int(os.getenv('ONECOLLEAGUE_DESENSITIZATION_MAX_FILE_BYTES', os.getenv('MAX_UPLOAD','0')) or 0)); MAX_BATCH_FILES=int(os.getenv('MAX_BATCH_FILES','20')); MAX_BATCH_BYTES=max(0, int(os.getenv('ONECOLLEAGUE_DESENSITIZATION_MAX_BATCH_BYTES', os.getenv('MAX_BATCH_BYTES','0')) or 0)); TASK_TTL_HOURS=int(os.getenv('TASK_TTL_HOURS','24')); CLEANUP_INTERVAL_SECONDS=max(10, int(os.getenv('CLEANUP_INTERVAL_SECONDS', '300'))); MAX_ENTITIES=10000; NER_SELECTION_THRESHOLD=0.05; MAX_IMAGE_BOXES=10000; MAX_IMAGE_PIXELS=int(os.getenv('MAX_IMAGE_PIXELS',str(40_000_000))); MAX_PDF_OCR_PAGES=int(os.getenv('MAX_PDF_OCR_PAGES','200')); MAX_PDF_OCR_PIXELS=int(os.getenv('MAX_PDF_OCR_PIXELS',str(12_000_000))); jobs={}; batches={}; policy_store=dict(DEFAULT_POLICIES); _POLICY_STORE_LOADED=False; ner_service=RaanerService(MODELS/'raner'); ocr_service=OCRService(MODELS/'paddleocr')
 
 UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 
@@ -631,9 +631,9 @@ def analyze(text):
                 continue
             found.append({'id':uuid.uuid4().hex,'type':typ,'text':m.group(),'start':m.start(),'end':m.end(),'score':1.0,'recognizer':name or 'custom','source':'custom','replacement':replacement,'selected':True,'box_ids':[]})
     if settings.get('ner_enabled', True):
-        # NER candidates at or above 0.35 are selected by default. Users can
+        # NER candidates at or above 0.05 are selected by default. Users can
         # still review and deselect individual candidates in the workbench.
-        found.extend([{**e,'id':uuid.uuid4().hex,'selected':float(e.get('score',0)) >= 0.35,'box_ids':[]} for e in ner_service.analyze(text)])
+        found.extend([{**e,'id':uuid.uuid4().hex,'selected':float(e.get('score',0)) >= NER_SELECTION_THRESHOLD,'box_ids':[]} for e in ner_service.analyze(text)])
     # Prefer higher confidence and longer spans when recognizers overlap.
     found.sort(key=lambda x:(-float(x.get('score',0)), -(x['end']-x['start']), x['start']))
     accepted=[]
@@ -1283,7 +1283,7 @@ def remove_rule(rule_id):
 def list_custom_sensitive():
     rows = _rule_rows()
     return {'items':[{**row, 'mode':('category' if row['kind']=='category' else 'literal'), 'value':row['pattern']}
-                     for row in rows if row['kind'] in {'word','literal','category'}]}
+                     for row in rows if row['kind'] in {'literal','category'}]}
 
 @app.post('/api/custom-sensitive')
 def add_custom_sensitive(v: CustomSensitiveIn):
@@ -1441,6 +1441,7 @@ def document_mask(v:DocumentMaskIn):
 
 # Unified final-version file and batch APIs. The legacy routes above remain available.
 class FileMaskIn(BaseModel):
+    embedded_images: list[dict[str, Any]] | None = Field(default=None, max_length=10000)
     analysis_id: str
     filename: str = Field(min_length=1, max_length=240)
     text: str = Field(default='', max_length=2_000_000)
@@ -1454,6 +1455,7 @@ class FileMaskIn(BaseModel):
 
 
 class FilePreviewIn(BaseModel):
+    embedded_images: list[dict[str, Any]] | None = Field(default=None, max_length=10000)
     analysis_id: str
     filename: str | None = Field(default=None, max_length=240)
     text: str = Field(default='', max_length=2_000_000)
@@ -2384,7 +2386,13 @@ def files_analyze(file: UploadFile = File(...)):
             data, filename, url=source_view_url,
             page_url_template=f'/api/tasks/{task_id}/source-pages/{{page}}',
         )
+        embedded_images = []
+        if ext == 'docx':
+            from .embedded_images import analyze_images
+            embedded_images, image_warnings = analyze_images(data, folder, _analyze_image_content)
+            warnings.extend(image_warnings)
         manifest = content_manifest(filename, text, entities) | {
+            'embedded_images': embedded_images,
             'text': text, 'sha256': _sha256(data), 'kind': ext, 'warnings': warnings,
             'boxes': boxes,
         }
@@ -2416,6 +2424,7 @@ def files_analyze(file: UploadFile = File(...)):
               'artifacts': []}
     result['source_preview'] = f'/api/tasks/{task_id}/source-preview'
     result['source_view'] = source_view
+    result['embedded_images'] = manifest.get('embedded_images', [])
     if image_width is not None and image_height is not None:
         result.update({'image_width': image_width, 'image_height': image_height, 'boxes': boxes})
     if pdf_page_count is not None:
@@ -2463,6 +2472,7 @@ def files_mask(value: FileMaskIn):
         request_policies = {}
     try:
         masked = mask_file(data, server_filename, server_text, entities, request_policies or policy_store, boxes)
+        masked, image_warnings = _mask_embedded_review(masked, manifest, value.embedded_images, request_policies or policy_store)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
@@ -2475,6 +2485,18 @@ def files_mask(value: FileMaskIn):
                           reversible=value.reversible,
                           source_sha256=expected_hash,
                           boxes=boxes)
+    report['warnings'] = manifest.get('warnings', []) + image_warnings
+    from .embedded_images import review_images
+    reviewed_images = review_images(manifest.get('embedded_images', []), value.embedded_images,
+                                   _review_entities, _validate_boxes, _synchronize_review_selection)
+    report['embedded_images'] = [{
+        'image_id': item['image_id'], 'status': item['status'],
+        'selected_entity_count': sum(entity.get('selected', True) for entity in item['entities']),
+        'selected_box_count': sum(box.get('selected', True) for box in item['boxes']),
+    } for item in reviewed_images]
+    report['selected_entity_count'] += sum(item['selected_entity_count'] for item in report['embedded_images'])
+    report['selected_box_count'] += sum(item['selected_box_count'] for item in report['embedded_images'])
+    report['status'] = 'partial' if report['warnings'] else 'completed'
     (folder / 'report.json').write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
     if value.reversible:
         try:
@@ -2496,11 +2518,13 @@ def files_mask(value: FileMaskIn):
     # without ever placing source content in SQLite or the public report.
     _remove_private_analysis(folder, keep_analysis=True)
     update_task(value.analysis_id, output_name, artifact_name=output_name,
+                status=report['status'],
                 source_path='source.bin', reversible=value.reversible,
                 restored_name='')
     response: dict[str, Any] = {
         'task_id': value.analysis_id,
-        'status': 'completed',
+        'status': report['status'],
+        'warnings': report['warnings'],
         'artifact': f'/api/tasks/{value.analysis_id}/artifacts/{output_name}',
         'report': f'/api/tasks/{value.analysis_id}/artifacts/report.json',
         'reversible': value.reversible,
@@ -2512,6 +2536,13 @@ def files_mask(value: FileMaskIn):
     if ext in {'txt', 'md'}:
         response['masked_text'] = masked.decode('utf-8', 'replace')
     return response
+
+
+def _mask_embedded_review(data: bytes, manifest: dict, submitted: list[dict] | None, policies: dict) -> tuple[bytes, list[dict]]:
+    from .embedded_images import mask_images, review_images
+    server = manifest.get('embedded_images', [])
+    images = review_images(server, submitted, _review_entities, _validate_boxes, _synchronize_review_selection)
+    return mask_images(data, images, policies, mask_file) if images else (data, [])
 
 
 def _validated_file_review(value: FilePreviewIn | FileMaskIn) -> tuple[Path, str, bytes, dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -2555,6 +2586,7 @@ def files_preview(value: FilePreviewIn):
     try:
         masked = mask_file(data, server_filename, str(manifest.get('text', '')),
                            entities, request_policies or policy_store, boxes)
+        masked, image_warnings = _mask_embedded_review(masked, manifest, value.embedded_images, request_policies or policy_store)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
@@ -2592,6 +2624,7 @@ def files_preview(value: FilePreviewIn):
     }
     response['source_view'] = source_view
     response['masked_view'] = masked_view
+    response['warnings'] = manifest.get('warnings', []) + image_warnings
     if extension(server_filename) in {'txt', 'md'}:
         response['masked_text'] = masked.decode('utf-8', 'replace')
     return response

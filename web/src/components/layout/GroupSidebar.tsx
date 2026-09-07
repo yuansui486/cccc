@@ -966,19 +966,6 @@ export function GroupSidebar({
         </section>
 
         <section className="space-y-1">
-          <button
-            type="button"
-            onClick={() => selectedGroupId && handleTabSelect(DATA_DESENSITIZATION_TAB)}
-            disabled={!selectedGroupId}
-            className={classNames(navButtonClass(activeTab === DATA_DESENSITIZATION_TAB), "disabled:cursor-not-allowed disabled:opacity-40")}
-            title="数据脱敏"
-          >
-            <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><ShieldCheck size={22} strokeWidth={1.8} /></span>
-            <span className="min-w-0 flex-1 truncate">数据脱敏</span>
-          </button>
-        </section>
-
-        <section className="space-y-1">
           <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
             <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
               {t("teamMembersSection")}
@@ -1137,6 +1124,10 @@ export function GroupSidebar({
             >
               <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><Laptop size={22} strokeWidth={1.8} /></span>
               <span className="min-w-0 flex-1 truncate">控制电脑</span>
+            </button>
+            <button type="button" onClick={() => selectedGroupId && handleTabSelect(DATA_DESENSITIZATION_TAB)} disabled={!selectedGroupId} className={classNames(navButtonClass(activeTab === DATA_DESENSITIZATION_TAB), "disabled:cursor-not-allowed disabled:opacity-40")} title="数据脱敏">
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><ShieldCheck size={22} strokeWidth={1.8} /></span>
+              <span className="min-w-0 flex-1 truncate">数据脱敏</span>
             </button>
           </div>
         </section>

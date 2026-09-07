@@ -23,6 +23,7 @@ async def require_internal(authorization: str | None = Header(default=None)) -> 
 
 
 class FileMaskRequest(BaseModel):
+    embedded_images: list[dict[str, Any]] | None = Field(default=None, max_length=10000)
     model_config = ConfigDict(extra="forbid")
     analysis_id: str = Field(min_length=32, max_length=32)
     filename: str = Field(default="", max_length=240)
@@ -35,6 +36,7 @@ class FileMaskRequest(BaseModel):
 
 
 class PreviewRequest(BaseModel):
+    embedded_images: list[dict[str, Any]] | None = Field(default=None, max_length=10000)
     model_config = ConfigDict(extra="forbid")
     analysis_id: str | None = Field(default=None, min_length=32, max_length=32)
     filename: str = Field(default="", max_length=240)
@@ -191,7 +193,7 @@ def create_routers() -> list[APIRouter]:
         _require_ready()
         result = await _call(service.mask_file, group_id, payload.analysis_id, payload.entities,
                              payload.filename, payload.policies, payload.reversible, payload.password,
-                             payload.boxes, payload.image_override)
+                             payload.boxes, payload.image_override, payload.embedded_images)
         return {"ok": True, "result": result}
 
     @group_router.post("/tasks/{task_id}/preview")
@@ -269,6 +271,11 @@ def create_routers() -> list[APIRouter]:
     async def task_source_image(group_id: str, task_id: str) -> Response:
         data, media = await _call(service.source_page, group_id, task_id, "image", status=404)
         return Response(data, media_type=media, headers={"Cache-Control": "private, no-store"})
+
+    @group_router.get("/tasks/{task_id}/embedded-images/{image_id}")
+    async def embedded_image(group_id: str, task_id: str, image_id: str, preview_id: str = "") -> Response:
+        data = await _call(service.embedded_image, group_id, task_id, image_id, preview_id, status=404)
+        return Response(data, media_type="image/png", headers={"Cache-Control": "private, no-store"})
 
     @group_router.get("/tasks/{task_id}/source-pages/{page_number}")
     async def task_source_page(group_id: str, task_id: str, page_number: int) -> Response:
@@ -351,7 +358,7 @@ def create_routers() -> list[APIRouter]:
         _require_ready()
         result = await _call(service.mask_file, group_id, payload.analysis_id, payload.entities,
                              payload.filename, payload.policies, payload.reversible, payload.password,
-                             payload.boxes, payload.image_override, status=404)
+                             payload.boxes, payload.image_override, payload.embedded_images, status=404)
         return {"ok": True, "result": result}
 
     @group_router.get("/rules")

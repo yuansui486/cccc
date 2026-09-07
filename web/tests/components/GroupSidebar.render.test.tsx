@@ -100,4 +100,10 @@ describe("GroupSidebar team members navigation", () => {
 
     expect(html).not.toContain('aria-label="添加智能体"');
   });
+
+  it.each([false, true])("places desensitization after computer control (collapsed=%s)", (isCollapsed) => {
+    const html = renderToStaticMarkup(<GroupSidebar {...baseProps} isCollapsed={isCollapsed} computerControlAvailability={{ supported: true, platform: "win32" }} />);
+    expect(html.indexOf('title="数据脱敏"')).toBeGreaterThan(html.indexOf('title="控制电脑"'));
+    expect(html.match(/title="数据脱敏"/g)).toHaveLength(1);
+  });
 });

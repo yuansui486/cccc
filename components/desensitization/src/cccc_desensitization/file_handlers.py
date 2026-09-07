@@ -303,10 +303,29 @@ def _replace_docx_paragraph(
     # field constructs keep their runs nested in another element, so inspect
     # every ``w:r`` in document order and mutate those runs in place.
     from docx.oxml.ns import qn
-    from docx.text.run import Run
+    class TextNode:
+        def __init__(self, element: Any):
+            self.element = element
 
-    run_xmls = list(paragraph._p.iter(qn("w:r")))
-    runs = [Run(run_xml, paragraph) for run_xml in run_xmls]
+        @property
+        def text(self) -> str:
+            if self.element.tag == qn("w:tab"):
+                return "\t"
+            if self.element.tag in {qn("w:br"), qn("w:cr")}:
+                return "\n"
+            return self.element.text or ""
+
+        @text.setter
+        def text(self, value: str) -> None:
+            self.element.tag = qn("w:t")
+            self.element.attrib.clear()
+            self.element.set(qn("xml:space"), "preserve")
+            self.element.text = value
+
+    # Mutate only text-bearing children; Run.text clears drawings and objects.
+    tags = {qn("w:t"), qn("w:tab"), qn("w:br"), qn("w:cr")}
+    runs = [TextNode(child) for run in paragraph._p.iter(qn("w:r"))
+            for child in run if child.tag in tags]
     if not runs:
         return
     original = "".join(run.text or "" for run in runs)

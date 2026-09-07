@@ -246,6 +246,13 @@ export default function App() {
   }, [groups, selectedGroupId, setActiveTab, setSelectedGroupId]);
 
   React.useEffect(() => {
+    if (activeTab === DATA_DESENSITIZATION_TAB) {
+      useUIStore.getState().setSidebarCollapsed(true);
+      useUIStore.getState().setSidebarOpen(false);
+    }
+  }, [activeTab]);
+
+  React.useEffect(() => {
     if (activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB || activeTab === DATA_DESENSITIZATION_TAB) return;
     if (visibleRuntimeActors.some((actor) => String(actor.id || "") === activeTab)) return;
     setActiveTab("chat");

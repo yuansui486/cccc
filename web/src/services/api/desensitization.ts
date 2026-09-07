@@ -15,6 +15,10 @@ export type Entity = {
 };
 
 export type OcrBox = {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
   id?: string;
   text?: string;
   selected?: boolean;
@@ -26,6 +30,7 @@ export type OcrBox = {
 };
 
 export type Analysis = {
+  embedded_images?: EmbeddedImage[];
   analysis_id: string;
   task_id?: string;
   filename: string;
@@ -39,6 +44,17 @@ export type Analysis = {
   image_height?: number;
   source_preview?: string;
   source_view?: PreviewView;
+};
+
+export type EmbeddedImage = {
+  image_id: string;
+  status: string;
+  locations?: string[];
+  image_width?: number;
+  image_height?: number;
+  entities: Entity[];
+  boxes: OcrBox[];
+  source_preview?: string;
 };
 
 export type PreviewView = {
