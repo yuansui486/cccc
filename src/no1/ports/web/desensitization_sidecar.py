@@ -324,6 +324,9 @@ class DesensitizationSidecarManager:
         env["UV_PROJECT_ENVIRONMENT"] = str(venv)
         env["UV_NO_PROGRESS"] = "1"
         env["UV_COLOR"] = "never"
+        env["UV_LINK_MODE"] = "copy"
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         def run_sync(locked: bool) -> tuple[int, str]:
             args = [uv, "sync", "--project", str(component)]
             if locked:
