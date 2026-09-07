@@ -1526,12 +1526,103 @@ def _docx_preview(data: bytes) -> dict[str, Any]:
     """Return a bounded, presentation-only view of a DOCX package."""
     from docx import Document
     from docx.table import Table
+    from docx.text.run import Run
+
+    from docx.oxml.ns import qn
+    from .embedded_images import resources
 
     document = Document(io.BytesIO(data))
+    image_ids = {
+        str(part.partname): image_id
+        for image_id, part, _locations in resources(document)
+        if part is not None
+    }
     blocks: list[dict[str, Any]] = []
     total_characters = 0
     table_cell_count = 0
     truncated = False
+
+    def run_style(run: Any) -> dict[str, Any]:
+        font = run.font
+        style: dict[str, Any] = {}
+        for key in ('bold', 'italic', 'underline'):
+            value = getattr(run, key, None)
+            if value is not None:
+                style[key] = bool(value)
+        if font.size is not None:
+            style['font_size_pt'] = round(float(font.size.pt), 2)
+        if font.name:
+            style['font_name'] = str(font.name)
+        if font.color is not None and font.color.rgb is not None:
+            style['color'] = f'#{font.color.rgb}'
+        return style
+
+    def image_nodes(drawing: Any, paragraph: Any) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        extent = next(iter(drawing.iter(qn('wp:extent'))), None)
+        layout = 'anchor' if any(True for _ in drawing.iter(qn('wp:anchor'))) else 'inline'
+        for blip in drawing.iter(qn('a:blip')):
+            relationship_id = blip.get(qn('r:embed'))
+            relationship = paragraph.part.rels.get(relationship_id) if relationship_id else None
+            if relationship is None or relationship.is_external:
+                continue
+            image_id = image_ids.get(str(relationship.target_part.partname))
+            if not image_id:
+                continue
+            node: dict[str, Any] = {'type': 'image', 'image_id': image_id, 'layout': layout}
+            if extent is not None:
+                try:
+                    # OOXML uses EMUs; 9,525 EMUs equal one CSS pixel at 96 DPI.
+                    node['width_px'] = round(int(extent.get('cx')) / 9525, 2)
+                    node['height_px'] = round(int(extent.get('cy')) / 9525, 2)
+                except (TypeError, ValueError):
+                    pass
+            result.append(node)
+        return result
+
+    def paragraph_content(paragraph: Any, text_limit: int | None = None) -> list[dict[str, Any]]:
+        content: list[dict[str, Any]] = []
+        remaining_text = text_limit
+        run_elements = []
+        for child in paragraph._p:
+            if child.tag == qn('w:r'):
+                run_elements.append(child)
+            elif child.tag == qn('w:hyperlink'):
+                run_elements.extend(child.iterchildren(qn('w:r')))
+        for run_element in run_elements:
+            run = Run(run_element, paragraph)
+            style = run_style(run)
+            for child in run_element:
+                if child.tag in {qn('w:t'), qn('w:instrText')} and child.text:
+                    value = child.text if remaining_text is None else child.text[:max(0, remaining_text)]
+                    if value:
+                        content.append({'type': 'text', 'text': value, **style})
+                    if remaining_text is not None:
+                        remaining_text -= len(value)
+                elif child.tag == qn('w:tab'):
+                    if remaining_text is None or remaining_text > 0:
+                        content.append({'type': 'text', 'text': '\t', **style})
+                        if remaining_text is not None:
+                            remaining_text -= 1
+                elif child.tag in {qn('w:br'), qn('w:cr')}:
+                    if remaining_text is None or remaining_text > 0:
+                        content.append({'type': 'text', 'text': '\n', **style})
+                        if remaining_text is not None:
+                            remaining_text -= 1
+                elif child.tag == qn('w:drawing'):
+                    content.extend(image_nodes(child, paragraph))
+        return content
+
+    def paragraph_format(paragraph: Any) -> dict[str, Any]:
+        alignment = getattr(paragraph, 'alignment', None)
+        result: dict[str, Any] = {}
+        if alignment is not None:
+            value = str(alignment).split()[0].lower()
+            result['alignment'] = {
+                'left': 'left', 'center': 'center', 'right': 'right',
+                'justify': 'justify', 'distribute': 'justify',
+            }.get(value, 'left')
+        return result
 
     def append_paragraph(paragraph: Any, location: str) -> None:
         nonlocal total_characters, truncated
@@ -1541,7 +1632,9 @@ def _docx_preview(data: bytes) -> dict[str, Any]:
         remaining = _PREVIEW_TEXT_LIMIT - total_characters
         text, clipped = _preview_text(paragraph.text, limit=max(1, remaining))
         style = str(getattr(getattr(paragraph, 'style', None), 'name', '') or '')
-        blocks.append({'type': 'paragraph', 'location': location, 'text': text, 'style': style})
+        blocks.append({'type': 'paragraph', 'location': location, 'text': text,
+                       'style': style, 'content': paragraph_content(paragraph, len(text)),
+                       **paragraph_format(paragraph)})
         total_characters += len(text)
         truncated = truncated or clipped
 
@@ -1551,8 +1644,10 @@ def _docx_preview(data: bytes) -> dict[str, Any]:
             truncated = True
             return
         rows: list[list[str]] = []
+        content_rows: list[list[list[dict[str, Any]]]] = []
         for row in table.rows:
             values: list[str] = []
+            row_content: list[list[dict[str, Any]]] = []
             for cell in row.cells:
                 if table_cell_count >= _PREVIEW_CELL_LIMIT:
                     truncated = True
@@ -1562,14 +1657,24 @@ def _docx_preview(data: bytes) -> dict[str, Any]:
                     truncated = True
                     break
                 value, clipped = _preview_text(cell.text, limit=max(1, remaining))
+                content: list[dict[str, Any]] = []
+                for paragraph_index, paragraph in enumerate(cell.paragraphs):
+                    if paragraph_index:
+                        content.append({'type': 'text', 'text': '\n'})
+                    content.extend(paragraph_content(paragraph, max(0, len(value) - sum(
+                        len(str(node.get('text', ''))) for node in content
+                    ))))
                 values.append(value)
+                row_content.append(content)
                 table_cell_count += 1
                 total_characters += len(value)
                 truncated = truncated or clipped
             rows.append(values)
+            content_rows.append(row_content)
             if table_cell_count >= _PREVIEW_CELL_LIMIT or (truncated and total_characters >= _PREVIEW_TEXT_LIMIT):
                 break
-        blocks.append({'type': 'table', 'location': location, 'rows': rows})
+        blocks.append({'type': 'table', 'location': location, 'rows': rows,
+                       'content_rows': content_rows})
 
     for block in document.iter_inner_content():
         if isinstance(block, Table):
@@ -1581,19 +1686,23 @@ def _docx_preview(data: bytes) -> dict[str, Any]:
 
     # Linked headers and footers can be repeated by several sections. Expose
     # each XML part once so the view matches what the sanitizer actually scans.
-    seen_parts: set[int] = set()
+    seen_parts: dict[int, dict[str, Any]] = {}
     for location, accessor in (('header', 'header'), ('footer', 'footer')):
-        for section in document.sections:
+        for section_index, section in enumerate(document.sections):
             part = getattr(section, accessor)
             identity = id(part._element)
             if identity in seen_parts:
+                seen_parts[identity].setdefault('section_indices', []).append(section_index)
                 continue
-            seen_parts.add(identity)
+            marker = {'type': 'region', 'location': location,
+                      'section_indices': [section_index]}
+            seen_parts[identity] = marker
+            blocks.append(marker)
             for block in part.iter_inner_content():
                 if isinstance(block, Table):
-                    append_table(block, location)
+                    append_table(block, f'{location}:{section_index}')
                 else:
-                    append_paragraph(block, location)
+                    append_paragraph(block, f'{location}:{section_index}')
                 if len(blocks) >= _PREVIEW_BLOCK_LIMIT or total_characters >= _PREVIEW_TEXT_LIMIT:
                     truncated = True
                     break

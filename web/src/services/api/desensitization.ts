@@ -27,6 +27,11 @@ export type OcrBox = {
   y1?: number;
   x2?: number;
   y2?: number;
+  bbox?: { x?: number; y?: number; width?: number; height?: number };
+  entity_ids?: string[];
+  source?: string;
+  type?: string;
+  score?: number;
 };
 
 export type Analysis = {
@@ -63,10 +68,56 @@ export type PreviewView = {
   url?: string;
   page_url_template?: string;
   text?: string;
-  blocks?: Array<Record<string, unknown>>;
+  blocks?: PreviewBlock[];
   sheets?: Array<Record<string, unknown>>;
   page_count?: number;
   truncated?: boolean;
+};
+
+export type PreviewTextNode = {
+  type: "text";
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  font_size_pt?: number;
+  font_name?: string;
+  color?: string;
+};
+
+export type PreviewImageNode = {
+  type: "image";
+  image_id: string;
+  layout?: "inline" | "anchor";
+  width_px?: number;
+  height_px?: number;
+};
+
+export type PreviewNode = PreviewTextNode | PreviewImageNode;
+
+export type PreviewBlock = {
+  type: "paragraph" | "table" | "region" | string;
+  location?: string;
+  text?: string;
+  style?: string;
+  alignment?: "left" | "center" | "right" | "justify";
+  content?: PreviewNode[];
+  rows?: unknown[][];
+  content_rows?: PreviewNode[][][];
+  section_indices?: number[];
+};
+
+export type EntityDirectoryItem = {
+  code: string;
+  type?: string;
+  name?: string;
+  label?: string;
+  builtin?: boolean;
+};
+
+export type EntityDirectory = {
+  entities?: EntityDirectoryItem[];
+  entity_catalog?: Record<string, string>;
 };
 
 export type Task = {
@@ -220,7 +271,7 @@ export const desensitizationApi = {
   initializeModels: () => json<{ job_id: string }>("/api/v1/desensitization/models/initialize", { method: "POST" }),
   modelJob: (jobId: string) => json<ModelStatus>(`/api/v1/desensitization/models/jobs/${encodeURIComponent(jobId)}`),
   metadata: (groupId: string) => json<WorkspaceMetadata>(`${root(groupId)}/metadata`),
-  entities: (groupId: string) => json<Record<string, unknown>>(`${root(groupId)}/entities`),
+  entities: (groupId: string) => json<EntityDirectory>(`${root(groupId)}/entities`),
   tasks: (groupId: string, offset = 0) => json<{ items: Task[]; total: number }>(`${root(groupId)}/tasks?limit=100&offset=${offset}`),
   taskAnalysis: (groupId: string, taskId: string) => json<Analysis>(`${root(groupId)}/tasks/${encodeURIComponent(taskId)}/analysis`),
   deleteTask: (groupId: string, taskId: string) => json(`${root(groupId)}/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" }),

@@ -46,6 +46,31 @@ def test_shared_images_and_text_nodes_survive(tmp_path):
     assert not warnings
 
 
+def test_docx_preview_keeps_images_in_document_flow():
+    data, _original = sample()
+    view = main._docx_preview(data)
+    paragraphs = [block for block in view["blocks"] if block["type"] == "paragraph"]
+    body = next(block for block in paragraphs if block["location"] == "body")
+    assert [node["type"] for node in body["content"]] == ["text", "image"]
+    assert body["content"][0]["text"] == "secret"
+    assert body["content"][0]["bold"] is True
+    image_id = body["content"][1]["image_id"]
+    table = next(block for block in view["blocks"] if block["type"] == "table")
+    assert table["rows"][0][0] == ""
+    table_image = table["content_rows"][0][0][0]
+    assert table_image["type"] == "image"
+    assert table_image["image_id"] == image_id
+    assert table_image["layout"] == "inline"
+    assert table_image["width_px"] > 0
+    assert table_image["height_px"] > 0
+    regions = [block for block in view["blocks"] if block["type"] == "region"]
+    assert [(block["location"], block["section_indices"]) for block in regions] == [
+        ("header", [0]), ("footer", [0])]
+    footer = next(block for block in paragraphs if block["location"] == "footer:0")
+    assert footer["content"][0]["layout"] == "anchor"
+    assert any(node.get("image_id") == image_id for block in paragraphs for node in block["content"])
+
+
 def test_image_failure_keeps_original_without_sensitive_warning(tmp_path):
     data, original = sample()
     def failing(*args):

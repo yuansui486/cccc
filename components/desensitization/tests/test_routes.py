@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,6 +68,42 @@ def test_model_gate_and_batch_traversal_are_rejected(
         data={"manifest": '{"entries":[{"relative_path":"../a.txt"}]}'},
     )
     assert traversal.status_code == 422
+
+
+def test_batch_manifest_preserves_mixed_folder_paths(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service, "model_status", lambda: {"enabled": True, "status": "ready"})
+    observed: list[tuple[str, bytes]] = []
+
+    def create(group_id, staged, root_name, mode, options, idempotency_key):
+        assert group_id == "group-a"
+        assert root_name == "资料"
+        assert mode == "review"
+        for relative, path in staged:
+            observed.append((relative, path.read_bytes()))
+            path.unlink()
+        return {"id": "batch", "status": "queued", "mode": mode, "total": len(observed)}
+
+    monkeypatch.setattr(service, "create_batch_from_paths", create)
+    manifest = {
+        "root_name": "资料",
+        "mode": "review",
+        "entries": [
+            {"relative_path": "资料/文字/a.txt"},
+            {"relative_path": "资料/图片/a.png"},
+        ],
+    }
+    response = client.post(
+        "/api/v1/groups/group-a/desensitization/batches",
+        files=[
+            ("files", ("a.txt", b"text", "text/plain")),
+            ("files", ("a.png", b"image", "image/png")),
+        ],
+        data={"manifest": json.dumps(manifest, ensure_ascii=False)},
+    )
+    assert response.status_code == 200
+    assert observed == [("资料/文字/a.txt", b"text"), ("资料/图片/a.png", b"image")]
 
 
 def test_task_lookup_and_binary_download_remain_group_scoped(
