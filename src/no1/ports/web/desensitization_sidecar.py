@@ -324,14 +324,28 @@ class DesensitizationSidecarManager:
         env["UV_PROJECT_ENVIRONMENT"] = str(venv)
         env["UV_NO_PROGRESS"] = "1"
         env["UV_COLOR"] = "never"
-        try:
+        def run_sync(locked: bool) -> tuple[int, str]:
+            args = [uv, "sync", "--project", str(component)]
+            if locked:
+                args.append("--locked")
+            args.extend(["--no-dev", "--python", python])
             self.install_process = subprocess.Popen(
-                [uv, "sync", "--project", str(component), "--locked", "--no-dev", "--python", python],
-                cwd=component, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                args, cwd=component, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", bufsize=1, **self._hidden_kwargs(),
             )
             self._read_output(self.install_process, "uv")
-            returncode = self.install_process.wait()
+            return self.install_process.wait(), ""
+
+        try:
+            returncode, _ = run_sync(locked=True)
+            # uv resolves platform-specific wheels differently on Windows.
+            # A lock produced on Linux can therefore require a harmless
+            # metadata refresh at first launch. Retry without --locked so the
+            # bundled component remains usable, while still preferring the
+            # committed lock for reproducible installs.
+            if returncode:
+                self._append_log("uv locked sync failed; retrying platform resolution")
+                returncode, _ = run_sync(locked=False)
         except (OSError, subprocess.SubprocessError) as exc:
             self.mark_failed("desensitization_install_failed", str(exc))
             return None
@@ -369,6 +383,8 @@ class DesensitizationSidecarManager:
                 CCCC_HOME=str(self.home),
                 ONECOLLEAGUE_HOME=str(self.home),
                 CCCC_DESENSITIZATION_PARENT_PID=str(os.getpid()),
+                PYTHONUTF8="1",
+                PYTHONIOENCODING="utf-8",
             )
             try:
                 import psutil

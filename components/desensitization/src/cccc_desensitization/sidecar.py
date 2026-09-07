@@ -40,7 +40,7 @@ def _watch_parent() -> None:
             try:
                 if abs(parent_process.create_time() - expected_create_time) > 2.0:
                     os._exit(0)
-            except (psutil.Error, OSError):
+            except (psutil.Error, OSError, MemoryError):
                 os._exit(0)
         while True:
             try:
@@ -48,10 +48,10 @@ def _watch_parent() -> None:
                     break
                 if expected_create_time and abs(parent_process.create_time() - expected_create_time) > 2.0:
                     break
-            except (psutil.Error, OSError):
+            except (psutil.Error, OSError, MemoryError):
                 break
             time.sleep(1)
-    except (ImportError, psutil.Error, OSError, ValueError):
+    except (ImportError, psutil.Error, OSError, ValueError, MemoryError):
         # A configured parent cannot be verified. Exit rather than leaving an
         # orphaned service behind after a failed host startup.
         os._exit(0)
