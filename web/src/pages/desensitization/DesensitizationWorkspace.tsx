@@ -705,8 +705,18 @@ export function DesensitizationWorkspace({ groupId }: { groupId: string }) {
       previewObjectRef.current = "";
     }
     setPreviewUrl("");
+    const viewType = String(
+      analysis?.source_view?.type || analysis?.source_view?.kind || "",
+    ).toLowerCase();
+    const extension =
+      String(analysis?.filename || "").split(".").pop()?.toLowerCase() || "";
     const url = analysis?.source_view?.url || analysis?.source_preview;
-    if (!url || analysis?.source_view?.kind === "text") return;
+    // Structured documents and PDFs render through their own in-app views.
+    // Never fetch the office/PDF file itself for the review surface.
+    if (
+      !url ||
+      !(viewType === "image" || ["png", "jpg", "jpeg", "bmp", "tif", "tiff"].includes(extension))
+    ) return;
     void desensitizationApi
       .blob(url, analysis?.filename || "preview")
       .then(({ blob }) => {
@@ -1412,13 +1422,11 @@ export function DesensitizationWorkspace({ groupId }: { groupId: string }) {
                   const view = result.masked_view as Analysis["source_view"];
                   const remoteUrl =
                     view?.url || String(result.preview_url || "");
+                  const viewType = String(
+                    view?.type || view?.kind || analysis.kind || "",
+                  ).toLowerCase();
                   let url: string | undefined;
-                  if (
-                    remoteUrl &&
-                    !["document", "spreadsheet", "text"].includes(
-                      view?.type || view?.kind || "",
-                    )
-                  ) {
+                  if (remoteUrl && viewType === "image") {
                     const loaded = await desensitizationApi.blob(
                       remoteUrl,
                       `preview-${analysis.filename}`,
@@ -2428,6 +2436,76 @@ function StructuredPreview({
   );
 }
 
+function PdfPreview({
+  view,
+  analysis,
+  previewId,
+  onChange,
+}: {
+  view?: Analysis["source_view"];
+  analysis: Analysis;
+  previewId?: string;
+  onChange: (value: Analysis) => void;
+}) {
+  const pageCount = Math.max(0, Number(view?.page_count || analysis.page_count || 0));
+  const template = String(view?.page_url_template || "");
+  const [page, setPage] = useState(1);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [loaded, setLoaded] = useState({ key: "", src: "", error: "" });
+  const currentPage = pageCount ? Math.min(page, pageCount) : 1;
+  const pageKey = `${template}:${previewId || "source"}:${currentPage}`;
+  const pageUrl = template ? template.replace("{page}", String(currentPage)) : "";
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    if (!pageUrl) return;
+    void desensitizationApi
+      .blob(pageUrl, `${analysis.filename}-page-${currentPage}.png`)
+      .then(({ blob }) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setLoaded({ key: pageKey, src: objectUrl, error: "" });
+      })
+      .catch(() => {
+        if (active) setLoaded({ key: pageKey, src: "", error: "PDF 页面预览读取失败" });
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [analysis.filename, currentPage, pageKey, pageUrl, reloadNonce]);
+
+  const pageBoxes = (analysis.boxes || []).filter((box) => Number(box.page || 1) === currentPage);
+  const pageAnalysis: Analysis = { ...analysis, filename: `${analysis.filename} 第 ${currentPage} 页`, kind: "image", boxes: pageBoxes };
+  const updatePage = (value: Analysis) => {
+    const currentPageBoxes = new Set(pageBoxes);
+    const untouched = (analysis.boxes || []).filter((box) => !currentPageBoxes.has(box));
+    onChange({ ...analysis, entities: value.entities, boxes: [...untouched, ...(value.boxes || [])] });
+  };
+  if (!template || !pageCount)
+    return <p className="py-10 text-center text-xs text-[var(--color-text-muted)]">PDF 页面预览地址暂不可用</p>;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-center gap-2 text-xs">
+        <Button icon={ChevronRight} className="rotate-180" disabled={currentPage <= 1} onClick={() => setPage((value) => value - 1)} aria-label="上一页" title="上一页" />
+        <input className="h-8 w-16 rounded border border-[var(--color-border-primary)] bg-transparent px-2 text-center text-xs" type="number" min={1} max={pageCount} value={currentPage} onChange={(event) => setPage(Math.max(1, Math.min(pageCount, Number(event.target.value) || 1)))} aria-label="PDF 页码" />
+        <span>/ {pageCount}</span>
+        <Button icon={ChevronRight} disabled={currentPage >= pageCount} onClick={() => setPage((value) => value + 1)} aria-label="下一页" title="下一页" />
+      </div>
+      {loaded.key === pageKey && loaded.error ? (
+        <div role="alert" className="flex flex-col items-center gap-3 py-10 text-xs text-amber-600">
+          <p>{loaded.error}</p>
+          <Button icon={RefreshCw} onClick={() => setReloadNonce((value) => value + 1)}>重试</Button>
+        </div>
+      ) : loaded.key !== pageKey || !loaded.src ? (
+        <p className="py-10 text-center text-xs text-[var(--color-text-muted)]">正在加载 PDF 第 {currentPage} 页…</p>
+      ) : (
+        <ImageReview analysis={pageAnalysis} src={loaded.src} page={currentPage} onChange={updatePage} />
+      )}
+    </div>
+  );
+}
+
 function ReviewView({
   entityNames: names,
   maskedPreview,
@@ -2484,12 +2562,21 @@ function ReviewView({
     type === "spreadsheet" ||
     new Set(["docx", "xlsx", "xlsm"]).has(extension);
   const sourceView = maskedPreview?.view || analysis.source_view;
-  const preview = previewUrl ? (
-    pdf ? (
-      <iframe
-        title="PDF 预览"
-        src={previewUrl}
-        className="h-full min-h-[500px] w-full border-0 bg-white"
+  const preview = pdf ? (
+    <PdfPreview
+      key={analysis.analysis_id}
+      view={sourceView}
+      analysis={analysis}
+      previewId={maskedPreview?.previewId}
+      onChange={onChange}
+    />
+  ) : previewUrl ? (
+    structured ? (
+      <StructuredPreview
+        view={sourceView}
+        analysis={analysis}
+        previewId={maskedPreview?.previewId}
+        onChange={onChange}
       />
     ) : image ? (
       maskedPreview ? (
@@ -2497,13 +2584,6 @@ function ReviewView({
       ) : (
         <ImageReview analysis={analysis} src={previewUrl} onChange={onChange} />
       )
-    ) : structured ? (
-      <StructuredPreview
-        view={sourceView}
-        analysis={analysis}
-        previewId={maskedPreview?.previewId}
-        onChange={onChange}
-      />
     ) : (
       <img
         alt={analysis.filename}
@@ -2511,10 +2591,6 @@ function ReviewView({
         className="mx-auto max-h-full max-w-full object-contain"
       />
     )
-  ) : image ? (
-    <div className="flex min-h-64 items-center justify-center text-xs text-[var(--color-text-muted)]">
-      正在加载图片预览…
-    </div>
   ) : structured ? (
     <StructuredPreview
       view={sourceView}
@@ -2522,6 +2598,10 @@ function ReviewView({
       previewId={maskedPreview?.previewId}
       onChange={onChange}
     />
+  ) : image ? (
+    <div className="flex min-h-64 items-center justify-center text-xs text-[var(--color-text-muted)]">
+      正在加载图片预览…
+    </div>
   ) : (
     <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6">
       {sourceView?.text || analysis.text || "正在准备文档预览"}
@@ -2728,11 +2808,13 @@ function ImageReview({
   src,
   onChange,
   imageStyle,
+  page = 1,
 }: {
   analysis: Analysis;
   src: string;
   onChange: (value: Analysis) => void;
   imageStyle?: React.CSSProperties;
+  page?: number;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
@@ -2781,7 +2863,7 @@ function ImageReview({
       ...(analysis.boxes || []),
       {
         id: `manual-${Date.now()}`,
-        page: 1,
+        page,
         x,
         y,
         width,

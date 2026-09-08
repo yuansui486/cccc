@@ -130,3 +130,34 @@ def test_task_lookup_and_binary_download_remain_group_scoped(
     assert response.status_code == 200
     assert response.content == b"masked"
     assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_source_preview_is_inline_and_pdf_pages_are_images(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF fixture")
+    monkeypatch.setattr(
+        service,
+        "task_file",
+        lambda group_id, task_id, kind: (source, "sample.pdf", "inline"),
+    )
+    monkeypatch.setattr(
+        service,
+        "source_page",
+        lambda group_id, task_id, variant, page=0: (b"\x89PNG\r\n", "image/png"),
+    )
+
+    preview = client.get(
+        "/api/v1/groups/group-a/desensitization/tasks/task/source-preview"
+    )
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("application/pdf")
+    assert preview.headers["content-disposition"].startswith("inline")
+
+    page = client.get(
+        "/api/v1/groups/group-a/desensitization/tasks/task/source-pages/1"
+    )
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("image/png")
+    assert "content-disposition" not in page.headers

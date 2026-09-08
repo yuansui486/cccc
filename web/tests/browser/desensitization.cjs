@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
       const { desensitizationApi: api } = await import('/ui/src/services/api/desensitization.ts');
       const { DesensitizationWorkspace } = await import('/ui/src/pages/desensitization/DesensitizationWorkspace.tsx');
       window.batchCalls = [];
+      window.previewBlobCalls = [];
       let items = [];
       api.modelStatus = async () => ({ status: 'ready', service_phase: 'ready', ner_available: true, ocr_available: true });
       api.metadata = async () => ({ scope_root: 'E:/workspace', scope_key: 'scope', output_dir: 'E:/workspace/脱敏后' });
@@ -30,7 +31,7 @@ const assert = require('node:assert/strict');
       const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 180;
       const ctx = canvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 400, 180); ctx.fillStyle = 'black'; ctx.font = '24px sans-serif'; ctx.fillText('Phone: 13800138000', 20, 80);
       const blob = await new Promise(resolve => canvas.toBlob(resolve));
-      api.blob = async () => ({ blob });
+      api.blob = async (url) => { window.previewBlobCalls.push(url); return { blob }; };
       api.analyzeFile = async () => { await new Promise(resolve => setTimeout(resolve, 500)); return { analysis_id: 'a'.repeat(32), filename: 'sample.docx', kind: 'docx', text: 'original', source_view: { kind: 'document', blocks: [{ type: 'paragraph', text: 'original', content: [{ type: 'text', text: 'original' }, { type: 'image', image_id: 'i', layout: 'inline', width_px: 160, height_px: 72 }] }] }, entities: [], embedded_images: [{ image_id: 'i', status: 'ready', source_preview: '/image', entities: [], boxes: [], locations: ['word/document.xml:rId1'] }] }; };
       api.previewFile = async () => ({ preview_id: 'p', masked_view: { kind: 'document', blocks: [{ type: 'paragraph', text: 'masked result' }] } });
       document.getElementById('root').style.display = 'none';
@@ -70,11 +71,38 @@ const assert = require('node:assert/strict');
     await page.screenshot({ path: 'build/browser-check/desktop-review.png', fullPage: true });
     await page.getByRole('button', { name: '生成预览' }).click();
     await page.getByText('masked result', { exact: true }).waitFor();
+    assert.equal((await page.locator('iframe').count()), 0, 'Word preview must not use an iframe');
+    assert.equal((await page.evaluate(() => window.previewBlobCalls.some(url => String(url).includes('source-preview')))), false, 'Word preview must not request the DOCX body');
+    await page.getByRole('button', { name: '文件中心', exact: true }).click();
+    await page.evaluate(async () => {
+      const { desensitizationApi: api } = await import('/ui/src/services/api/desensitization.ts');
+      api.analyzeFile = async () => ({
+        analysis_id: 'b'.repeat(32), filename: 'sample.pdf', kind: 'pdf',
+        source_preview: '/source-preview.pdf',
+        source_view: { type: 'pdf', page_count: 2, page_url_template: '/source-pages/{page}', fallback_url: '/source-preview.pdf' },
+        entities: [], boxes: [{ id: 'page-2', page: 2, x: 0.1, y: 0.1, width: 0.2, height: 0.1, selected: true }],
+      });
+      api.previewFile = async () => ({
+        preview_id: 'c'.repeat(32),
+        preview_url: '/masked-preview.pdf',
+        masked_view: { type: 'pdf', page_count: 2, page_url_template: '/masked-pages/{page}', fallback_url: '/masked-preview.pdf' },
+      });
+    });
+    await page.getByTestId('desensitization-file-input').setInputFiles({ name: 'sample.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF fixture') });
+    await page.getByLabel('PDF 页码').waitFor();
+    await page.waitForFunction(() => window.previewBlobCalls.includes('/source-pages/1'));
+    assert.equal(await page.locator('iframe').count(), 0, 'PDF preview must not use the browser PDF viewer');
+    assert.equal(await page.evaluate(() => window.previewBlobCalls.includes('/source-preview.pdf')), false, 'PDF preview must not request the PDF body');
+    await page.getByRole('button', { name: '下一页' }).click();
+    await page.waitForFunction(() => window.previewBlobCalls.includes('/source-pages/2'));
+    await page.getByRole('button', { name: '生成预览' }).click();
+    await page.waitForFunction(() => window.previewBlobCalls.includes('/masked-pages/2'));
+    assert.equal(await page.evaluate(() => window.previewBlobCalls.includes('/masked-preview.pdf')), false, 'masked PDF preview must stay page-based');
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: 'build/browser-check/mobile-preview.png', fullPage: true });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     assert.equal(overflow, false, 'mobile overflow');
-    console.log(JSON.stringify({ errors, checks: 'rules CRUD, cancellation without upload, Word image and masked preview, desktop/mobile' }));
+    console.log(JSON.stringify({ errors, checks: 'rules CRUD, cancellation without upload, Word structured preview, PDF page preview, desktop/mobile' }));
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

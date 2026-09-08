@@ -66,6 +66,7 @@ export type PreviewView = {
   type?: "text" | "document" | "spreadsheet" | "pdf" | "image" | string;
   kind?: "text" | "document" | "spreadsheet" | "pdf" | "image" | string;
   url?: string;
+  fallback_url?: string;
   page_url_template?: string;
   text?: string;
   blocks?: PreviewBlock[];
