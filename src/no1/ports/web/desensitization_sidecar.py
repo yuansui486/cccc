@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 import zipfile
+import platform
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ class DesensitizationSidecarManager:
         self._log_tail: deque[str] = deque(maxlen=120)
         self.started_at: float | None = None
         self.updated_at = time.time()
+        self.service_runtime: dict[str, Any] = self._detect_runtime()
         self._load_state()
 
     _ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
@@ -84,7 +86,35 @@ class DesensitizationSidecarManager:
             "service_updated_at": updated_at,
             "port": port,
             "pid": process.pid if process else None,
+            "service_runtime": dict(self.service_runtime),
         }
+
+    @staticmethod
+    def _detect_runtime() -> dict[str, Any]:
+        return {
+            "os": platform.system(),
+            "os_version": platform.mac_ver()[0] if platform.system() == "Darwin" else platform.release(),
+            "host_arch": platform.machine(),
+            "python_version": platform.python_version(),
+            "python_arch": platform.machine(),
+            "python_executable": os.path.abspath(os.sys.executable),
+            "uv_executable": shutil.which(os.environ.get("CCCC_UV", "uv")) or "",
+        }
+
+    def _runtime_preflight(self) -> bool:
+        rt = self.service_runtime
+        if rt["os"] == "Darwin":
+            try:
+                major = int((rt["os_version"] or "0").split(".")[0])
+            except ValueError:
+                major = 0
+            if major < 13 or rt["host_arch"] != "arm64":
+                self.mark_failed("desensitization_platform_unsupported", "macOS 13+ arm64 is required")
+                return False
+            if not rt["python_version"].startswith("3.12") or rt["python_arch"] != "arm64":
+                self.mark_failed("desensitization_python_incompatible", "native arm64 CPython 3.12 is required")
+                return False
+        return True
 
     def url(self, path: str, query: str = "") -> str:
         if self.port is None:
@@ -370,6 +400,8 @@ class DesensitizationSidecarManager:
 
     def _start_blocking(self) -> None:
         try:
+            if not self._runtime_preflight():
+                return
             component = self._component()
             entry = component / "src" / "cccc_desensitization" / "sidecar.py"
             if not (component / "pyproject.toml").is_file() or not (component / "uv.lock").is_file() or not entry.is_file():

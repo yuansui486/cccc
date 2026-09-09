@@ -21,20 +21,40 @@ class TestAssistantOps(unittest.TestCase):
         os.environ["CCCC_HOME"] = td
 
         def cleanup() -> None:
-            if old_home is None:
-                os.environ.pop("CCCC_HOME", None)
-            else:
-                os.environ["CCCC_HOME"] = old_home
-            for attempt in range(5):
-                try:
-                    shutil.rmtree(td)
-                    break
-                except FileNotFoundError:
-                    break
-                except OSError:
-                    if attempt >= 4:
-                        raise
-                    time.sleep(0.05)
+            try:
+                from no1.daemon.assistants.voice_service_runtime import stop_voice_service
+                from no1.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
+                from no1.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
+                from no1.kernel.group import load_group
+                from no1.runners import headless as headless_runner
+                from no1.runners import pty as pty_runner
+
+                for state_path in Path(td).glob("groups/*/state/voice_secretary_service.json"):
+                    group = load_group(state_path.parent.parent.name)
+                    if group is not None:
+                        stop_voice_service(group)
+                codex_app_supervisor.stop_all()
+                claude_app_supervisor.stop_all()
+                headless_runner.SUPERVISOR.stop_all()
+                pty_runner.SUPERVISOR.stop_all()
+            except Exception:
+                pass
+            try:
+                for attempt in range(5):
+                    try:
+                        shutil.rmtree(td)
+                        break
+                    except FileNotFoundError:
+                        break
+                    except OSError:
+                        if attempt >= 4:
+                            raise
+                        time.sleep(0.05)
+            finally:
+                if old_home is None:
+                    os.environ.pop("CCCC_HOME", None)
+                else:
+                    os.environ["CCCC_HOME"] = old_home
 
         return td, cleanup
 

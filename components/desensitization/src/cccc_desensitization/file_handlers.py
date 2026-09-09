@@ -1113,9 +1113,19 @@ def _image_box(entity: dict) -> tuple[float, float, float, float]:
 
 def _system_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     windows_fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+    # macOS ships CJK-capable fonts in system and supplemental directories;
+    # prefer these before generic fallback fonts so replacement text remains
+    # legible for Chinese/Japanese/Korean content.
+    user_font_dir = Path.home() / "Library" / "Fonts"
     candidates = [
         os.environ.get("DESENSITIZATION_CJK_FONT", ""),
         windows_fonts / "msyh.ttc", windows_fonts / "simhei.ttf", windows_fonts / "simsun.ttc",
+        user_font_dir / "PingFang.ttc", user_font_dir / "NotoSansCJK-Regular.ttc",
+        Path("/System/Library/Fonts/PingFang.ttc"),
+        Path("/System/Library/Fonts/Hiragino Sans GB.ttc"),
+        Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Songti.ttc"),
+        Path("/Library/Fonts/Arial Unicode.ttf"),
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]

@@ -15,6 +15,23 @@
 
 支持 TXT、Markdown、DOCX、XLSX、XLSM、PDF、PNG、JPG/JPEG、BMP 和 TIFF。文件夹上传会跳过隐藏文件和不支持的格式。
 
+## macOS 支持矩阵
+
+macOS 发布包仅支持原生 Apple Silicon（`arm64`）、macOS 13 及以上、CPython 3.12 和 `uv`。Intel、Rosetta、Python 3.13 及 macOS 12 不在支持范围内。
+
+使用 Homebrew 和 uv 安装运行环境：
+
+```bash
+brew install python@3.12 uv
+uv python install 3.12
+```
+
+从 Finder、Dock 或 LaunchAgent 启动时不会继承 shell 的 PATH。请配置绝对路径环境变量 `CCCC_UV`、`CCCC_DESENSITIZATION_PYTHON`，或确保 `/opt/homebrew/bin`、`~/.local/bin` 在 PATH 中。
+
+首次访问桌面、文稿、下载、iCloud Drive 或外置磁盘时，若出现权限错误，请在“系统设置 -> 隐私与安全性 -> 文件与文件夹”授予应用访问权限后重试。输出目录始终使用确认的 scope，不会静默改写。
+
+macOS 中文字体按用户字体目录和系统字体目录自动回退；可用 `DESENSITIZATION_CJK_FONT` 指定字体文件。模型缓存位于 `<ONECOLLEAGUE_HOME>/state/desensitization/models`。未签名 ZIP 首次启动可能需要在 Finder 中选择“打开”并确认。
+
 ## 使用流程
 
 单文件会先进入复核页。用户可以逐项勾选文本实体或 OCR 区域、生成预览，再执行脱敏。

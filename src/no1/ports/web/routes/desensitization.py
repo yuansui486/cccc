@@ -29,18 +29,38 @@ def _unavailable(manager) -> Response:
     message = state.get("service_error_message") or code
     return Response(json.dumps({"ok": False, "error": {"code": code, "message": message, "details": state}}, ensure_ascii=False), status_code=503, media_type="application/json")
 
+def _permission_denied(exc: PermissionError, path: str) -> Response:
+    """Return a stable, actionable response for macOS TCC/file permissions."""
+    details = {
+        "path": path,
+        "stage": "desensitization",
+        "authorization": "系统设置 -> 隐私与安全性 -> 文件与文件夹",
+    }
+    return Response(json.dumps({"ok": False, "error": {
+        "code": "desensitization_permission_denied",
+        "message": str(exc) or "permission denied",
+        "details": details,
+    }}, ensure_ascii=False), status_code=403, media_type="application/json")
+
 async def _proxy(request: Request, ctx: RouteContext, relative_path: str, *, admin: bool = False) -> Response:
     if admin:
         require_admin(request)
     manager = ctx.desensitization_sidecar
     if manager is not None and request.method == "POST" and relative_path == "/api/v1/desensitization/service/retry":
-        started = manager.retry()
+        try:
+            started = manager.retry()
+        except PermissionError as exc:
+            return _permission_denied(exc, relative_path)
         return Response(json.dumps({"ok": True, "result": {**manager.status(), "started": started}}, ensure_ascii=False), status_code=202, media_type="application/json")
-    if manager is not None and relative_path == "/api/v1/desensitization/models/status" and not manager.ensure_started():
+    try:
+        started_ok = manager.ensure_started() if manager is not None else False
+    except PermissionError as exc:
+        return _permission_denied(exc, relative_path)
+    if manager is not None and relative_path == "/api/v1/desensitization/models/status" and not started_ok:
         state = manager.status()
         state["status"] = "starting" if state["service_phase"] in {"installing", "starting"} else "error"
         return Response(json.dumps({"ok": True, "result": state}, ensure_ascii=False), media_type="application/json")
-    if manager is None or not manager.ensure_started():
+    if manager is None or not started_ok:
         return _unavailable(manager) if manager is not None else Response(
             json.dumps({"ok": False, "error": {"code": "desensitization_service_unavailable", "message": "sidecar unavailable", "details": {}}}),
             status_code=503, media_type="application/json",
@@ -60,6 +80,9 @@ async def _proxy(request: Request, ctx: RouteContext, relative_path: str, *, adm
     try:
         upstream_request = client.build_request(request.method, target, headers=headers, content=body())
         upstream = await client.send(upstream_request, stream=True)
+    except PermissionError as exc:
+        await client.aclose()
+        return _permission_denied(exc, relative_path)
     except Exception as exc:
         await client.aclose()
         # A transient connection error should not poison an otherwise healthy

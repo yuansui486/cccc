@@ -45,6 +45,9 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "$2"; }
 
 [[ "$(uname -s)" == "Darwin" ]] || die "macOS Nuitka packaging must run on macOS"
+[[ "$(uname -m)" == "arm64" ]] || die "macOS build requires native arm64"
+MACOS_MAJOR="$(sw_vers -productVersion | awk -F. '{print $1}')"
+[[ "$MACOS_MAJOR" -ge 13 ]] || die "macOS 13 or newer is required"
 require_command uv "uv is required; install it from https://docs.astral.sh/uv/"
 require_command npm "Node.js/npm is required"
 
@@ -66,9 +69,11 @@ if [[ "$PYTHON_SELECTOR" == "python3" && -x "$ROOT_DIR/.venv/bin/python" ]]; the
   PYTHON_PATH="$ROOT_DIR/.venv/bin/python"
 fi
 "$PYTHON_PATH" -c "import sys; from importlib.metadata import version; print(sys.version); print('Nuitka', version('Nuitka'))"
+"$PYTHON_PATH" -c "import platform,sys; v=sys.version_info; assert (v.major,v.minor)==(3,12), 'Python 3.12 is required'; assert platform.machine()=='arm64', 'native arm64 Python is required'"
 
 "$PYTHON_PATH" "$ROOT_DIR/scripts/build_desensitization_component_bundle.py"
 [[ -f "$RESOURCES_DIR/desensitization_component.zip" ]] || die "Missing desensitization component bundle"
+uv run --project "$ROOT_DIR/components/desensitization" --locked python -c "import torch,cv2,fitz,paddle,paddleocr; print('component imports ok')"
 
 npm -C "$WEB_DIR" run build
 [[ -f "$WEB_DIST_DIR/index.html" ]] || die "Web build did not produce $WEB_DIST_DIR/index.html"
