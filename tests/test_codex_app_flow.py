@@ -4765,7 +4765,9 @@ class TestCodexAppFlow(unittest.TestCase):
 
         with patch.object(session, "_start_remote_tui", side_effect=_start_remote_tui) as start_tui, patch(
             "no1.daemon.codex_app_sessions.pty_runner.SUPERVISOR.stop_actor"
-        ) as stop_tui, patch("no1.daemon.codex_app_sessions.write_pty_state") as write_state:
+        ) as stop_tui, patch("no1.daemon.codex_app_sessions.write_pty_state") as write_state, patch.object(
+            session, "_request", return_value={"thread": {"id": "thr-refresh", "status": {"type": "idle"}}}
+        ):
             refreshed = session.refresh_remote_tui_theme("light")
 
         self.assertTrue(refreshed)

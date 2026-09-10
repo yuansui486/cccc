@@ -412,6 +412,7 @@ def record_codex_app_thread_runtime_session(
     status: str = "usable",
     captured_from: str = "app_server_thread_start",
     resume_eligible: bool = True,
+    materialized: bool = True,
     last_resume_error: str = "",
 ) -> Dict[str, Any]:
     now = utc_now_iso()
@@ -434,6 +435,7 @@ def record_codex_app_thread_runtime_session(
         "captured_from": str(captured_from or "app_server_thread_start"),
         "status": str(status or "usable").strip() or "usable",
         "resume_eligible": bool(resume_eligible),
+        "materialized": bool(materialized),
         "last_seen_at": now,
         "last_resume_attempt_at": "",
         "last_resume_error": str(last_resume_error or "").strip(),
@@ -639,6 +641,8 @@ def prepare_headless_runtime_resume(
     if str(doc.get("status") or "").strip().lower() != "usable":
         return {}
     if not bool(doc.get("resume_eligible")):
+        return {}
+    if doc.get("materialized") is False:
         return {}
     if str(doc.get("workspace_path") or "") != _workspace_path(cwd):
         return {}

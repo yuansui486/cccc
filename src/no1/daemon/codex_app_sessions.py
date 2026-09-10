@@ -1226,6 +1226,35 @@ class CodexAppSession:
                 return False
             thread_id = str(self._session_state.thread_id or "").strip()
             old_env = dict(self.env)
+        # A newly opened legacy thread has an ID before its first rollout is
+        # written. Never close its TUI and blindly resume that ID. Probe while
+        # the old client is still attached; unknown failures preserve it.
+        try:
+            if not thread_id:
+                return False
+            metadata = self._request("thread/read", {"threadId": thread_id, "includeTurns": False}, timeout=5.0)
+            thread = metadata.get("thread") or {}
+            if thread.get("id") != thread_id:
+                return False
+            try:
+                if thread.get("historyMode", "legacy") == "paginated":
+                    self._request("thread/turns/list", {"threadId": thread_id, "limit": 1}, timeout=5.0)
+                else:
+                    self._request("thread/read", {"threadId": thread_id, "includeTurns": True}, timeout=5.0)
+            except CodexRequestRejectedError as exc:
+                if exc.code != -32600 or "not materialized yet" not in str(exc) or "before first user message" not in str(exc):
+                    raise
+                if (thread.get("status") or {}).get("type") != "idle":
+                    return False
+                thread_id = ""
+        except Exception:
+            logger.exception("Codex theme preflight failed for %s/%s", self.group_id, self.actor_id)
+            return False
+        with self._lock:
+            if self._stop_requested or self._remote_tui_refreshing or self._pty_session is not old_session:
+                return False
+            if not thread_id:
+                self._session_state.thread_id = None
             self.env = with_terminal_color_scheme(self.env, scheme)
             self._remote_tui_refreshing = True
             # The normal PTY exit callback treats a remote TUI exit as an
@@ -1962,7 +1991,6 @@ class CodexAppSession:
                     return
                 self._session_state.updated_at = now
             self._persist_state()
-            self._record_remote_tui_thread_runtime_session(thread_id, captured_from="app_server_remote_tui_status")
             return
         if method == "thread/started":
             thread = params.get("thread") if isinstance(params.get("thread"), dict) else {}
@@ -1977,7 +2005,6 @@ class CodexAppSession:
                 self._session_state.status = self._session_state.status or "idle"
                 self._session_state.updated_at = now
             self._persist_state()
-            self._record_remote_tui_thread_runtime_session(thread_id, captured_from="app_server_remote_tui_thread_started")
             return
         if method == "turn/completed":
             turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}

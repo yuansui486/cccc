@@ -99,7 +99,8 @@ def start_codex_app_thread(
                 runner=runner,
                 status="usable",
                 captured_from="app_server_thread_resume" if resumed else "app_server_thread_start",
-                resume_eligible=True,
+                resume_eligible=bool(resumed),
+                materialized=bool(resumed),
             )
         except Exception:
             pass
