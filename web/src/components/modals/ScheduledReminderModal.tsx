@@ -7,6 +7,7 @@ import type { Actor, GroupSettings } from "../../types";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { createContextModalUi } from "../ContextModal/ui";
 import { AutomationTab } from "./settings/AutomationTab";
+import { inputClass, labelClass } from "./settings/types";
 import { settingsDialogBodyClass, settingsDialogPanelClass } from "./settings/types";
 import { useAutomationPolicyDraft } from "./settings/useAutomationPolicyDraft";
 
@@ -33,11 +34,22 @@ export function ScheduledReminderModal({
   const { modalRef } = useModalA11y(isOpen, onClose);
   const ui = createContextModalUi(isDark);
   const [devActors, setDevActors] = useState<Actor[]>([]);
+  const [rolePromptEveryMessages, setRolePromptEveryMessages] = useState(5);
   const automationPolicyDraft = useAutomationPolicyDraft({
     active: isOpen,
     settings,
     onUpdateSettings,
   });
+
+  useEffect(() => {
+    setRolePromptEveryMessages(Math.max(0, Math.min(1000, Number(settings?.role_prompt_every_messages ?? 5))));
+  }, [settings]);
+
+  const saveRolePromptFrequency = async (value: number) => {
+    const next = Math.max(0, Math.min(1000, Math.trunc(value || 0)));
+    setRolePromptEveryMessages(next);
+    await onUpdateSettings({ role_prompt_every_messages: next });
+  };
 
   useEffect(() => {
     if (!isOpen || !groupId) return;
@@ -84,6 +96,13 @@ export function ScheduledReminderModal({
           </button>
         </div>
         <div className={settingsDialogBodyClass}>
+          <div className="mb-4 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-bg-soft)] p-4">
+            <label className={labelClass(isDark)}>{t("settings:messaging.rolePromptEveryMessages", { defaultValue: "角色提示频率" })}</label>
+            <input type="number" min={0} max={1000} step={1} value={rolePromptEveryMessages}
+              onChange={(e) => void saveRolePromptFrequency(Number(e.target.value))}
+              className={inputClass(isDark)} />
+            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">{t("settings:messaging.rolePromptEveryMessagesHint", { defaultValue: "每 N 条成功消息混入一次角色提示；0 表示关闭。" })}</div>
+          </div>
           <AutomationTab
             isDark={isDark}
             groupId={groupId}

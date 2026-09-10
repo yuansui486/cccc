@@ -574,8 +574,8 @@ THROTTLE = DeliveryThrottle()
 
 REMINDER_EVERY_N_MESSAGES = 1
 MCP_REMINDER_LINE = (
-    "[reply] Use onecolleague_message_reply for replies; use onecolleague_message_send for new messages. "
-    "Terminal output is not delivered. Verify reply_to/to; avoid routine @all. "
+    "[notice] Use onecolleague_message_reply for replies; use onecolleague_message_send for new messages.\n"
+    "[notice] Terminal output is not delivered. Verify reply_to/to; avoid routine @all. "
     "Use onecolleague_help if unsure."
 )
 from .message_categories import commit_role_prompt_delivery, plan_role_prompt_delivery
