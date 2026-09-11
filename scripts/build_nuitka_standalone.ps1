@@ -271,6 +271,15 @@ Test-PathExists -Path (Join-Path $distDir "no1\ports\web\dist\index.html") -Mess
 Test-PathExists -Path (Join-Path $distDir "no1\resources\onecolleague-help.md") -Message "Nuitka dist is missing no1 resources"
 Test-PathExists -Path (Join-Path $distDir "no1\resources\desensitization_component.zip") -Message "Nuitka dist is missing the desensitization component bundle"
 Invoke-CheckedNative -FilePath $pythonPath -ArgumentList @($componentBundleScript, "--check") -WorkingDirectory $rootDir
+foreach ($winptyRuntime in @(
+    "winpty\winpty.pyd",
+    "winpty\conpty.dll",
+    "winpty\winpty.dll",
+    "winpty\winpty-agent.exe",
+    "winpty\OpenConsole.exe"
+  )) {
+  Test-PathExists -Path (Join-Path $distDir $winptyRuntime) -Message "Nuitka dist is missing Windows PTY runtime file: $winptyRuntime"
+}
 Test-OneColleagueVersion -ExePath $exePath
 
 if (-not $SkipSmokeTests) {

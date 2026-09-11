@@ -118,6 +118,11 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "--nofollow-import-to=paddleocr.ppocr.postprocess.pse_postprocess.pse.setup" not in script
     assert "src\\no1\\ports\\web\\dist=no1\\ports\\web\\dist" in script
     assert "src\\no1\\resources=no1\\resources" in script
+    assert '"winpty\\winpty.pyd"' in script
+    assert '"winpty\\conpty.dll"' in script
+    assert '"winpty\\winpty.dll"' in script
+    assert '"winpty\\winpty-agent.exe"' in script
+    assert '"winpty\\OpenConsole.exe"' in script
     assert "desensitization_legacy" not in script
     assert "components\\desensitization" in script
     assert "--nofollow-import-to=lark_oapi.*" in script
