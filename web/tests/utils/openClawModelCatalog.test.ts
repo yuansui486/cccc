@@ -10,8 +10,8 @@ import settingsJa from "../../src/i18n/locales/ja/settings.json";
 import settingsZh from "../../src/i18n/locales/zh/settings.json";
 import { buildRuntimeSelectorOptions } from "../../src/utils/runtimeChoiceGroups";
 
-describe("OpenClaw model catalog wiring", () => {
-  it("uses the same DoneHub model catalog as OpenCode in every actor editor", () => {
+describe("fixed peer model catalog wiring", () => {
+  it("does not fetch or pass a remote model catalog in any actor editor", () => {
     const sources = [
       "../../src/components/modals/AddActorModal.tsx",
       "../../src/components/modals/EditActorModal.tsx",
@@ -19,10 +19,9 @@ describe("OpenClaw model catalog wiring", () => {
     ].map((path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8"));
 
     for (const source of sources) {
-      expect(source).toContain("const modelCatalog = opencodeModels;");
-      expect(source).toContain("modelCatalog={modelCatalog}");
-      expect(source).not.toContain("useOpenClawModels");
-      expect(source).not.toContain("unavailableModels={openclawCatalog");
+      expect(source).not.toContain("fetchDoneHubModels");
+      expect(source).not.toContain("modelCatalog=");
+      expect(source).not.toContain("opencodeModels");
     }
   });
 
@@ -36,21 +35,14 @@ describe("OpenClaw model catalog wiring", () => {
     expect(options[0]?.description).toBe("Localized Gateway description");
   });
 
-  it("provides loading, error, retry, and description copy in every locale", () => {
+  it("provides the OpenClaw runtime description in every locale", () => {
     const actorLocales = [actorsEn, actorsZh, actorsJa];
     const settingsLocales = [settingsEn, settingsZh, settingsJa];
-    const keys = [
-      "openClawRuntimeDescription",
-      "loadingOpenClawModels",
-      "openClawModelsLoadFailed",
-      "retryOpenClawModels",
-    ] as const;
-
     for (const locale of actorLocales) {
-      for (const key of keys) expect(locale[key].trim()).not.toBe("");
+      expect(locale.openClawRuntimeDescription.trim()).not.toBe("");
     }
     for (const locale of settingsLocales) {
-      for (const key of keys) expect(locale.actorProfiles[key].trim()).not.toBe("");
+      expect(locale.actorProfiles.openClawRuntimeDescription.trim()).not.toBe("");
     }
   });
 });

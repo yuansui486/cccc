@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, LoaderCircle, RefreshCw } from "lucide-react";
-
 import type { RuntimeInfo, SupportedRuntime } from "../types";
 import {
   ACTOR_RUNTIME_CHOICES,
@@ -21,10 +19,14 @@ export interface RuntimeModelSelectorProps {
   runtimes: RuntimeInfo[];
   onRuntimeChange: (runtime: SupportedRuntime) => void;
   onModelChange: (model: string) => void;
+  /** @deprecated Fixed peer models no longer use a remote catalog. */
   modelCatalog?: string[];
   unavailableModels?: ReadonlySet<string>;
+  /** @deprecated Loading state is no longer used for model options. */
   modelCatalogLoading?: boolean;
+  /** @deprecated Model options no longer have a remote error state. */
   modelCatalogError?: string;
+  /** @deprecated Model options no longer have a remote retry action. */
   onRetryModelCatalog?: () => void;
   runtimeDescriptions?: Partial<Record<SupportedRuntime, string>>;
   allowedRuntimes?: readonly SupportedRuntime[];
@@ -42,9 +44,9 @@ export interface RuntimeModelSelectorProps {
     notInstalled: string;
     modelRequired: string;
     modelInvalid: string;
-    loadingModels: string;
-    modelCatalogError: string;
-    retryModelCatalog: string;
+    loadingModels?: string;
+    modelCatalogError?: string;
+    retryModelCatalog?: string;
   };
 }
 
@@ -54,11 +56,7 @@ export function RuntimeModelSelector({
   runtimes,
   onRuntimeChange,
   onModelChange,
-  modelCatalog = [],
   unavailableModels = new Set<string>(),
-  modelCatalogLoading = false,
-  modelCatalogError = "",
-  onRetryModelCatalog,
   runtimeDescriptions = {},
   allowedRuntimes = ACTOR_RUNTIME_CHOICES,
   disabled = false,
@@ -75,8 +73,8 @@ export function RuntimeModelSelector({
     [allowedRuntimes, labels.notInstalled, runtimeDescriptions, runtimes],
   );
   const modelOptions = useMemo(
-    () => buildRuntimeModelOptions(runtime, modelCatalog),
-    [runtime, modelCatalog],
+    () => buildRuntimeModelOptions(runtime),
+    [runtime],
   );
   const presetModels = useMemo(() => new Set(modelOptions.map((item) => item.value)), [modelOptions]);
   const supportsModels = runtimeSupportsModelSelection(runtime);
@@ -109,7 +107,7 @@ export function RuntimeModelSelector({
   ];
   const showCustomInput = customOpen || manualModel;
   const selectedValue = showCustomInput ? CUSTOM_MODEL : model || DEFAULT_MODEL;
-  const modelControlsDisabled = disabled || modelCatalogLoading;
+  const modelControlsDisabled = disabled;
   const applyCustom = () => {
     const normalized = (customOpen ? customValue : model).trim();
     const validationError = validateRuntimeModelId(normalized);
@@ -171,43 +169,6 @@ export function RuntimeModelSelector({
               disabled={modelControlsDisabled}
               className="min-h-[44px] w-full border px-4 py-2.5 text-sm glass-input text-[var(--color-text-primary)]"
             />
-            {modelCatalogLoading ? (
-              <div
-                role="status"
-                aria-live="polite"
-                className="flex min-h-9 items-center gap-2 rounded-md border border-[var(--glass-border-subtle)] px-2.5 py-2 text-xs text-[var(--color-text-muted)]"
-              >
-                <LoaderCircle size={14} className="shrink-0 animate-spin" aria-hidden="true" />
-                <span>{labels.loadingModels}</span>
-              </div>
-            ) : modelCatalogError ? (
-              <div
-                role="alert"
-                className="flex min-h-9 items-start gap-2 rounded-md border border-rose-500/25 bg-rose-500/8 px-2.5 py-2 text-xs text-rose-700 dark:text-rose-300"
-              >
-                <CircleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-                <div className="min-w-0 flex-1">
-                  <div>{labels.modelCatalogError}</div>
-                  {modelCatalogError !== labels.modelCatalogError ? (
-                    <div className="mt-0.5 break-words opacity-80">{modelCatalogError}</div>
-                  ) : null}
-                </div>
-                {onRetryModelCatalog ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="-my-1 h-8 w-8 shrink-0 text-current"
-                    onClick={onRetryModelCatalog}
-                    aria-label={labels.retryModelCatalog}
-                    title={labels.retryModelCatalog}
-                    disabled={disabled}
-                  >
-                    <RefreshCw size={14} aria-hidden="true" />
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
             {showCustomInput ? (
               <div className="flex gap-2">
                 <div className="min-w-0 flex-1">

@@ -48,9 +48,9 @@ export function buildRuntimeSelectorOptions(
 
 export function buildRuntimeModelOptions(
   runtime: SupportedRuntime | string,
-  modelCatalog?: string[],
+  _modelCatalog?: readonly string[],
 ): RuntimeModelOption[] {
-  return runtimePresetsForRuntime(runtime, modelCatalog || [])
+  return runtimePresetsForRuntime(runtime)
     .filter((preset) => preset.runtime === runtime && Boolean(preset.model))
     .map((preset) => ({
       value: String(preset.model || ""),
@@ -70,19 +70,12 @@ const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }
 
 export function buildRuntimeChoiceGroups(
   runtimes: RuntimeInfo[],
-  modelCatalog?: string[],
+  _modelCatalog?: readonly string[],
 ): RuntimeChoiceGroup[] {
   const groups = new Map<GroupKey, RuntimeChoiceOption[]>();
   for (const key of GROUP_ORDER) groups.set(key, []);
 
-  const includeOpenCodeModels = Array.isArray(modelCatalog) && modelCatalog.length > 0;
-  const openclawModels = runtimes.find((item) => item.name === "openclaw")?.models || [];
-  const presets = [
-    ...runtimePresetsForModels(modelCatalog || []),
-    ...runtimePresetsForRuntime("openclaw", openclawModels).filter((preset) => preset.runtime === "openclaw"),
-  ].filter(
-    (preset) => preset.runtime !== "opencode" || includeOpenCodeModels,
-  );
+  const presets = runtimePresetsForModels().filter((preset) => preset.runtime !== "hermes");
   for (const preset of presets) {
     const runtimeAvailable = Boolean(runtimes.find((item) => item.name === preset.runtime)?.available);
     groups.get(groupKeyForRuntime(preset.runtime))?.push({

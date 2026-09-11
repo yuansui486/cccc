@@ -16,9 +16,6 @@ const labels = {
   notInstalled: "(not installed)",
   modelRequired: "Model required",
   modelInvalid: "Model invalid",
-  loadingModels: "Loading model catalog",
-  modelCatalogError: "Model catalog unavailable",
-  retryModelCatalog: "Retry model catalog",
 };
 
 const runtimes = [
@@ -30,8 +27,8 @@ const runtimes = [
   },
 ];
 
-describe("RuntimeModelSelector model catalog state", () => {
-  it("announces loading and disables the model chooser", () => {
+describe("RuntimeModelSelector fixed model catalog", () => {
+  it("keeps the model chooser enabled without a remote catalog", () => {
     const html = renderToStaticMarkup(
       <RuntimeModelSelector
         runtime="openclaw"
@@ -39,33 +36,27 @@ describe("RuntimeModelSelector model catalog state", () => {
         runtimes={runtimes}
         onRuntimeChange={() => undefined}
         onModelChange={() => undefined}
-        modelCatalogLoading
         labels={labels}
       />,
     );
 
-    expect(html).toContain('role="status"');
-    expect(html).toContain("Loading model catalog");
-    expect(html).toMatch(/aria-label="Model"[^>]*disabled/);
+    expect(html).toMatch(/aria-label="Model"/);
+    expect(html).not.toMatch(/aria-label="Model"[^>]*\sdisabled=""/);
   });
 
-  it("shows a localized error, diagnostic detail, and retry command", () => {
+  it("shows a persisted model outside the fixed catalog as a custom model", () => {
     const html = renderToStaticMarkup(
       <RuntimeModelSelector
         runtime="openclaw"
-        model=""
+        model="provider/legacy-model"
         runtimes={runtimes}
         onRuntimeChange={() => undefined}
         onModelChange={() => undefined}
-        modelCatalogError="Gateway unavailable"
-        onRetryModelCatalog={() => undefined}
         labels={labels}
       />,
     );
 
-    expect(html).toContain('role="alert"');
-    expect(html).toContain("Model catalog unavailable");
-    expect(html).toContain("Gateway unavailable");
-    expect(html).toContain('aria-label="Retry model catalog"');
+    expect(html).toContain('value="provider/legacy-model"');
+    expect(html).toContain('placeholder="Model ID"');
   });
 });

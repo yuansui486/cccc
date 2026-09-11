@@ -33,12 +33,10 @@ import {
   mergeAllPresetUnsetKeys,
   mergePresetUnsetKeys,
   modelFromRuntimeConfiguration,
-  OPENCODE_FALLBACK_MODELS,
   opencodeDeepSeekModelFromCommand,
   runtimePresetForModel,
   withRuntimeModel,
 } from "../../../utils/runtimePresets";
-import { fetchDoneHubModels } from "../../../services/doneHub";
 
 interface ActorProfilesTabProps {
   isDark: boolean;
@@ -125,7 +123,6 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
   const [duplicateSourceProfileId, setDuplicateSourceProfileId] = useState("");
   const [sessionUserId, setSessionUserId] = useState("");
   const [runtimeCatalog, setRuntimeCatalog] = useState<RuntimeInfo[]>([]);
-  const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
 
   const isMyScope = scope === "my";
   const profileScope: api.ProfileScope = isMyScope ? "user" : "global";
@@ -165,23 +162,17 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
     [editor.runtime]
   );
   const effectiveRuntimes = runtimeCatalog.length ? runtimeCatalog : discoveredRuntimes;
-  const modelCatalog = opencodeModels;
-
   useEffect(() => {
-    if (!isActive || opencodeModels.length) return;
+    if (!isActive) return;
     let cancelled = false;
-    void Promise.all([api.fetchRuntimes(), fetchDoneHubModels()]).then(([runtimeResp, modelResp]) => {
+    void api.fetchRuntimes().then((runtimeResp) => {
       if (cancelled) return;
       setRuntimeCatalog(runtimeResp.ok ? runtimeResp.result?.runtimes || [] : []);
-      const models = modelResp.ok
-        ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
-        : [];
-      setOpencodeModels(models.length ? models : [...OPENCODE_FALLBACK_MODELS]);
     });
     return () => {
       cancelled = true;
     };
-  }, [isActive, opencodeModels.length]);
+  }, [isActive]);
 
   const ensureSessionContext = async () => {
     try {
@@ -222,7 +213,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
 
   const changeEditorRuntime = (next: SupportedRuntime) => {
     const info = effectiveRuntimes.find((item) => item.name === next);
-    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next, opencodeModels);
+    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next);
     const command = preset
       ? commandForRuntimePreset(preset, info)
       : String(info?.recommended_command || defaultCommandForRuntime(next)).trim();
@@ -243,7 +234,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
 
   const changeEditorModel = (model: string) => {
     const normalized = model.trim();
-    const preset = runtimePresetForModel(editor.runtime, normalized, modelCatalog);
+    const preset = runtimePresetForModel(editor.runtime, normalized);
     const nextCommand = withRuntimeModel(
       editor.runtime,
       editor.command.trim() || editorDefaultCommand,
@@ -308,7 +299,6 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                 allowedRuntimes={SUPPORTED_RUNTIMES}
                 onRuntimeChange={changeEditorRuntime}
                 onModelChange={changeEditorModel}
-                modelCatalog={modelCatalog}
                 runtimeDescriptions={{ openclaw: t("actorProfiles.openClawRuntimeDescription") }}
                 disabled={editorBusy}
                 labels={{
@@ -324,9 +314,6 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                   notInstalled: t("actorProfiles.notInstalled"),
                   modelRequired: t("actorProfiles.modelRequired"),
                   modelInvalid: t("actorProfiles.modelInvalid"),
-                  loadingModels: t("actorProfiles.loadingOpenClawModels"),
-                  modelCatalogError: t("actorProfiles.openClawModelsLoadFailed"),
-                  retryModelCatalog: t("actorProfiles.retryOpenClawModels"),
                 }}
               />
             </div>

@@ -27,7 +27,6 @@ import {
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
   modelFromRuntimeConfiguration,
-  OPENCODE_FALLBACK_MODELS,
   opencodeDeepSeekModelFromCommand,
   runtimePresetById,
   runtimePresetForModel,
@@ -40,7 +39,6 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
-import { fetchDoneHubModels } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -222,7 +220,6 @@ export function EditActorModal({
   const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
   const secretFetchSeqRef = useRef(0);
   const selectedModelInitRef = useRef("");
@@ -408,28 +405,12 @@ export function EditActorModal({
   }, [editMode, effectiveLinked, secretsPrimed]);
 
   useEffect(() => {
-    if (!isOpen || opencodeModels.length) return;
-    let cancelled = false;
-    void fetchDoneHubModels().then((modelResp) => {
-      if (cancelled) return;
-      const models = modelResp.ok
-        ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
-        : [];
-      setOpencodeModels(models.length ? models : [...OPENCODE_FALLBACK_MODELS]);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, opencodeModels.length]);
-
-  useEffect(() => {
     if (!isOpen) return;
     setSecretsPrimed(false);
     setCapabilitiesPrimed(false);
   }, [isOpen, groupId, actorId]);
 
   const rtInfo = runtimes.find((r) => r.name === runtime);
-  const modelCatalog = opencodeModels;
   const available = rtInfo?.available ?? false;
   const defaultCommand = rtInfo?.recommended_command || "";
   const derivedRuntimePresetId = runtimePresetIdFor(runtime, command);
@@ -473,13 +454,13 @@ export function EditActorModal({
   useEffect(() => {
     if (!isOpen) return;
     if (editMode !== "custom" || effectiveLinked || commandHasModelFlag(command)) return;
-    const defaultPreset = defaultRuntimePresetFor(runtime, modelCatalog);
+    const defaultPreset = defaultRuntimePresetFor(runtime);
     if (!defaultPreset) return;
     const normalizedCommand = commandForRuntimePreset(defaultPreset, rtInfo);
     if (!normalizedCommand.trim() || normalizedCommand.trim() === command.trim()) return;
     setSelectedRuntimePresetId(defaultPreset.id);
     onChangeCommand(normalizedCommand);
-  }, [isOpen, editMode, effectiveLinked, runtime, command, rtInfo, modelCatalog, onChangeCommand]);
+  }, [isOpen, editMode, effectiveLinked, runtime, command, rtInfo, onChangeCommand]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -596,7 +577,7 @@ export function EditActorModal({
 
   const changeRuntime = (next: SupportedRuntime) => {
     const nextInfo = runtimes.find((item) => item.name === next);
-    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next, opencodeModels);
+    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next);
     const nextCommand = preset
       ? commandForRuntimePreset(preset, nextInfo)
       : String(nextInfo?.recommended_command || "").trim();
@@ -617,7 +598,7 @@ export function EditActorModal({
 
   const changeModel = (model: string) => {
     const normalized = model.trim();
-    const preset = runtimePresetForModel(runtime, normalized, modelCatalog);
+    const preset = runtimePresetForModel(runtime, normalized);
     const baseCommand = command.trim() || defaultCommand.trim();
     const nextCommand = withRuntimeModel(runtime, baseCommand, normalized);
     onChangeCommand(nextCommand);
@@ -940,7 +921,6 @@ export function EditActorModal({
                       runtimes={runtimes}
                       onRuntimeChange={changeRuntime}
                       onModelChange={changeModel}
-                      modelCatalog={modelCatalog}
                       runtimeDescriptions={{ openclaw: t("openClawRuntimeDescription") }}
                       disabled={busy === "actor-update"}
                       labels={{
@@ -956,9 +936,6 @@ export function EditActorModal({
                         notInstalled: t("notInstalled"),
                         modelRequired: t("modelRequired"),
                         modelInvalid: t("modelInvalid"),
-                        loadingModels: t("loadingOpenClawModels"),
-                        modelCatalogError: t("openClawModelsLoadFailed"),
-                        retryModelCatalog: t("retryOpenClawModels"),
                       }}
                     />
 

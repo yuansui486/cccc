@@ -19,17 +19,16 @@ const CODEX_REASONING_EFFORT_KEY = "model_reasoning_effort";
 const CLAUDE_LEGACY_EFFORT_ENV_KEY = "CLAUDE_CODE_EFFORT_LEVEL";
 export const OPENCODE_PROVIDER_ID = "onecolleague";
 
-export const OPENCODE_FALLBACK_MODELS = [
-  "gpt-5.4",
-  "gpt-5.5",
-  "deepseek-v4-pro",
-  "deepseek-v4-flash",
-  "qwen3.6-plus",
-  "qwen3.6-flash",
+export const PEER_RUNTIME_MODELS = [
   "GLM-4.7",
-  "doubao-seed-2-0-pro-260215",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
   "kimi-k2.6",
+  "qwen3.6-flash",
+  "qwen3.6-plus",
 ] as const;
+// Kept as an alias for integrations that still import the former name.
+export const OPENCODE_FALLBACK_MODELS = PEER_RUNTIME_MODELS;
 
 function envTextHasAssignment(text: string, key: string): boolean {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -195,19 +194,29 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
       KIMI_MODEL_NAME: "kimi-k2.6",
     },
   },
-  ...[
-    ["gpt-5.4", "gpt5.4"],
-    ["gpt-5.5", "gpt5.5"],
-    ["deepseek-v4-pro", "deepseek-v4-pro"],
-    ["deepseek-v4-flash", "deepseek-v4-flash"],
-    ["qwen3.6-plus", "qwen3.6-plus"],
-    ["qwen3.6-flash", "qwen3.6-flash"],
-  ].map(([model, label]) => ({
-    id: `model:opencode:${encodeURIComponent(model)}`,
-    label,
-    runtime: "opencode" as SupportedRuntime,
-    model,
-  })),
+  ...PEER_RUNTIME_MODELS.flatMap((model) => [
+    {
+      id: `model:opencode:${encodeURIComponent(model)}`,
+      label: model,
+      runtime: "opencode" as SupportedRuntime,
+      model,
+    },
+    {
+      id: `model:hermes:${encodeURIComponent(model)}`,
+      label: model,
+      runtime: "hermes" as SupportedRuntime,
+      model,
+      envPrivate: {
+        ONECOLLEAGUE_OPENCODE_BASE_URL: "https://peer.shierkeji.com/v1",
+      },
+    },
+    {
+      id: `model:openclaw:${encodeURIComponent(model)}`,
+      label: model,
+      runtime: "openclaw" as SupportedRuntime,
+      model,
+    },
+  ]),
 ];
 
 export function opencodeRuntimePresetId(model: string): RuntimePresetId {
@@ -258,40 +267,13 @@ export function openclawRuntimePreset(model: string, label?: string): RuntimePre
   };
 }
 
-export function runtimePresetsForModels(models: string[]): RuntimePreset[] {
-  const normalizedModels = models
-    .map((model) => String(model || "").trim())
-    .filter(Boolean);
-  if (!normalizedModels.length) return [...RUNTIME_PRESETS];
-
-  const seen = new Set<string>();
-  const dynamic = normalizedModels
-    .filter((model) => {
-      const key = model.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .flatMap((model) => [opencodeRuntimePreset(model), hermesRuntimePreset(model)])
-    .filter((preset): preset is RuntimePreset => Boolean(preset));
-  return [...RUNTIME_PRESETS.filter((preset) => preset.runtime !== "opencode" && preset.runtime !== "hermes"), ...dynamic];
+export function runtimePresetsForModels(_models?: readonly string[]): RuntimePreset[] {
+  return [...RUNTIME_PRESETS];
 }
 
-export function runtimePresetsForRuntime(runtime: string, models: string[]): RuntimePreset[] {
-  if (String(runtime || "").trim() !== "openclaw") return runtimePresetsForModels(models);
-  const seen = new Set<string>();
-  const dynamic = models
-    .map((model) => String(model || "").trim())
-    .filter((model) => {
-      if (!model) return false;
-      const key = model.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .map((model) => openclawRuntimePreset(model))
-    .filter((preset): preset is RuntimePreset => Boolean(preset));
-  return [...RUNTIME_PRESETS.filter((preset) => preset.runtime !== "openclaw"), ...dynamic];
+export function runtimePresetsForRuntime(runtime: string, _models?: readonly string[]): RuntimePreset[] {
+  const normalizedRuntime = String(runtime || "").trim();
+  return RUNTIME_PRESETS.filter((preset) => preset.runtime === normalizedRuntime);
 }
 
 export function runtimePresetById(id: string): RuntimePreset | null {
@@ -315,11 +297,10 @@ export function runtimePresetById(id: string): RuntimePreset | null {
   }
 }
 
-export function defaultRuntimePresetFor(runtime: string, modelCatalog: string[] = []): RuntimePreset | null {
+export function defaultRuntimePresetFor(runtime: string, _modelCatalog?: readonly string[]): RuntimePreset | null {
   const normalizedRuntime = String(runtime || "").trim();
   if (!normalizedRuntime) return null;
-  return runtimePresetsForRuntime(normalizedRuntime, modelCatalog)
-    .find((preset) => preset.runtime === normalizedRuntime) || null;
+  return runtimePresetsForRuntime(normalizedRuntime)[0] || null;
 }
 
 export function runtimePresetIdFor(runtime: string, command: string | string[] | undefined): RuntimePresetId | "" {
@@ -421,10 +402,10 @@ export function withRuntimeModel(
   return [...cleaned, flag, commandModel].join(" ");
 }
 
-export function runtimePresetForModel(runtime: string, model: string, modelCatalog: string[] = []): RuntimePreset | null {
+export function runtimePresetForModel(runtime: string, model: string, _modelCatalog?: readonly string[]): RuntimePreset | null {
   const normalizedModel = String(model || "").trim().toLowerCase();
   if (!normalizedModel) return null;
-  return runtimePresetsForRuntime(runtime, modelCatalog).find(
+  return runtimePresetsForRuntime(runtime).find(
     (preset) => preset.runtime === runtime && String(preset.model || "").trim().toLowerCase() === normalizedModel,
   ) || null;
 }

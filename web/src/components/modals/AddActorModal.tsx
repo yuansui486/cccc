@@ -29,7 +29,6 @@ import {
   mergeRuntimeAuthSecret,
   modelFromRuntimeConfiguration,
   needsDedicatedOneColleagueKey,
-  OPENCODE_FALLBACK_MODELS,
   opencodeDeepSeekModelFromCommand,
   runtimePresetById,
   runtimePresetForModel,
@@ -42,7 +41,6 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
-import { fetchDoneHubModels } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -190,7 +188,6 @@ export function AddActorModal({
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [opencodeModels, setOpencodeModels] = useState<string[]>([]);
   const [opencodeDefaultVariant, setOpencodeDefaultVariant] = useState<OpenCodeDefaultVariant>("high");
   const primedRuntimePresetRef = useRef("");
   const primedRuntimeAuthRef = useRef("");
@@ -204,21 +201,6 @@ export function AddActorModal({
     };
   }, [avatarPreviewUrl]);
 
-  useEffect(() => {
-    if (!isOpen || opencodeModels.length) return;
-    let cancelled = false;
-    void fetchDoneHubModels().then((modelResp) => {
-      if (cancelled) return;
-      const models = modelResp.ok
-        ? (modelResp.result?.models || modelResp.result?.items?.map((item) => item.model) || []).filter(Boolean)
-        : [];
-      setOpencodeModels(models.length ? models : [...OPENCODE_FALLBACK_MODELS]);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, opencodeModels.length]);
-
   const handleClose = () => {
     setAvatarFile(null);
     setSelectedRuntimePresetId("");
@@ -229,7 +211,6 @@ export function AddActorModal({
   const { modalRef } = useModalA11y(isOpen, handleClose);
 
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
-  const modelCatalog = opencodeModels;
   const runtimeAvailable = runtimeInfo?.available ?? false;
   const defaultCommand = runtimeInfo?.recommended_command || "";
   const derivedRuntimePresetId = runtimePresetIdFor(newActorRuntime, newActorCommand);
@@ -242,7 +223,7 @@ export function AddActorModal({
     newActorRuntime,
     newActorCommand,
     selectedModel === null && newActorRuntime === "kimi"
-      ? defaultRuntimePresetFor(newActorRuntime, modelCatalog)?.model
+      ? defaultRuntimePresetFor(newActorRuntime)?.model
       : selectedModel,
   );
   const newActorSecretsPlaceholder = secretsPlaceholderForRuntime(newActorRuntime);
@@ -323,7 +304,7 @@ export function AddActorModal({
 
   useEffect(() => {
     if (!isOpen || newActorUseProfile || newActorCommand.trim()) return;
-    const defaultPreset = defaultRuntimePresetFor(newActorRuntime, modelCatalog);
+    const defaultPreset = defaultRuntimePresetFor(newActorRuntime);
     const commandToPrime = defaultPreset
       ? commandForRuntimePreset(defaultPreset, runtimeInfo).trim()
       : defaultCommand.trim();
@@ -333,7 +314,7 @@ export function AddActorModal({
     primedCommandRef.current = primeKey;
     // The modal defaults are derived from the selected runtime preset.
     setNewActorCommand(commandToPrime);
-  }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, modelCatalog, setNewActorCommand]);
+  }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, setNewActorCommand]);
 
   if (!isOpen) return null;
 
@@ -399,7 +380,7 @@ export function AddActorModal({
 
   const changeRuntime = (next: SupportedRuntime) => {
     const nextInfo = runtimes.find((item) => item.name === next);
-    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next, opencodeModels);
+    const preset = next === "openclaw" ? null : defaultRuntimePresetFor(next);
     const nextCommand = preset
       ? commandForRuntimePreset(preset, nextInfo)
       : String(nextInfo?.recommended_command || "").trim();
@@ -421,7 +402,7 @@ export function AddActorModal({
 
   const changeModel = (model: string) => {
     const normalized = model.trim();
-    const preset = runtimePresetForModel(newActorRuntime, normalized, modelCatalog);
+    const preset = runtimePresetForModel(newActorRuntime, normalized);
     const baseCommand = newActorCommand.trim() || defaultCommand.trim();
     const nextCommand = withRuntimeModel(newActorRuntime, baseCommand, normalized);
     setNewActorCommand(nextCommand);
@@ -552,7 +533,6 @@ export function AddActorModal({
                         runtimes={runtimes}
                         onRuntimeChange={changeRuntime}
                         onModelChange={changeModel}
-                        modelCatalog={modelCatalog}
                         runtimeDescriptions={{ openclaw: t("openClawRuntimeDescription") }}
                         disabled={busy === "actor-add"}
                         labels={{
@@ -568,9 +548,6 @@ export function AddActorModal({
                           notInstalled: t("notInstalled"),
                           modelRequired: t("modelRequired"),
                           modelInvalid: t("modelInvalid"),
-                          loadingModels: t("loadingOpenClawModels"),
-                          modelCatalogError: t("openClawModelsLoadFailed"),
-                          retryModelCatalog: t("retryOpenClawModels"),
                         }}
                       />
 
