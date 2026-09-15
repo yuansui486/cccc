@@ -608,6 +608,8 @@
     "helpRefreshMinMsgsHelp": "Minimum accumulated messages.",
     "messageFollowups": "Message Follow-ups",
     "messageFollowupsHelp": "Controls reminders for unread, reply-required, and ack-required messages.",
+    "rolePromptEveryMessages": "Role prompt frequency",
+    "rolePromptEveryMessagesHelp": "Mix the role prompt into the next message after every N successfully accepted chat messages; 0 disables it.",
     "progressFollowups": "Progress Follow-ups",
     "progressFollowupsHelp": "Controls actor keepalive timing and retry behavior.",
     "contextRefresh": "Context Refresh",
@@ -751,8 +753,6 @@
     "foremanOnly": "Send to foreman only",
     "broadcastAll": "Broadcast to all enabled agents",
     "tip": "Tip: Use explicit recipients for unambiguous routing.",
-    "rolePromptEveryMessages": "Role prompt frequency",
-    "rolePromptEveryMessagesHint": "Mix the role prompt into the next message after every N successfully accepted chat messages; 0 disables it.",
     "saveMessaging": "Save Messaging Settings"
   },
   "imBridge": {

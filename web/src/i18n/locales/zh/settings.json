@@ -608,6 +608,8 @@
     "helpRefreshMinMsgsHelp": "最少累积消息数。",
     "messageFollowups": "消息跟进",
     "messageFollowupsHelp": "控制未读、需回复和待确认消息的提醒节奏。",
+    "rolePromptEveryMessages": "角色提示频率",
+    "rolePromptEveryMessagesHelp": "每 N 条成功接收的对话消息混入一次角色提示；0 表示关闭。",
     "progressFollowups": "进度跟进",
     "progressFollowupsHelp": "控制智能体进度保活与重试策略。",
     "contextRefresh": "上下文刷新",
@@ -751,8 +753,6 @@
     "foremanOnly": "仅发送给负责人",
     "broadcastAll": "广播给所有已启用的智能体",
     "tip": "提示：使用明确的收件人以确保路由准确。",
-    "rolePromptEveryMessages": "角色提示频率",
-    "rolePromptEveryMessagesHint": "每 N 条成功接收的对话消息混入一次角色提示；0 表示关闭。",
     "saveMessaging": "保存消息路由设置"
   },
   "imBridge": {

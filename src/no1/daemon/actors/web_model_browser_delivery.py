@@ -28,7 +28,10 @@ from ...ports.web_model_browser_sidecar import (
     record_chatgpt_browser_state,
     resolve_pending_chatgpt_conversation,
 )
-from ..messaging.actor_turn_rendering import render_actor_event_batch_for_delivery
+from ..messaging.actor_turn_rendering import (
+    render_actor_event_batch_for_delivery,
+    render_turn_context_block,
+)
 from ..messaging.delivery import MCP_REMINDER_LINE
 from ..messaging.experience_reminder import append_experience_reminder, commit_experience_reminder, plan_experience_reminder
 from ..messaging.message_categories import commit_role_prompt_delivery, plan_role_prompt_delivery
@@ -275,7 +278,14 @@ def build_web_model_browser_turn_prompt(
     setup_seed = str(bootstrap_seed_text or "").strip()
     setup_block = f"{setup_seed}\n\n" if setup_seed else ""
     reminder = str(MCP_REMINDER_LINE or "").strip()
-    reminder_block = f"{reminder}\n\n" if reminder else ""
+    context = render_turn_context_block(
+        group_id=str(turn.get("group_id") or ""),
+        actor_id=actor_id,
+        messages=turn.get("messages") if isinstance(turn.get("messages"), list) else (),
+    )
+    reminder_block = "\n\n".join(item for item in (context, reminder) if item)
+    if reminder_block:
+        reminder_block += "\n\n"
     completion_receipt = turn.get("completion_receipt") if isinstance(turn.get("completion_receipt"), dict) else {}
     receipt_block = (
         "[protocol] completion_receipt="

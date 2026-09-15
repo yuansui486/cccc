@@ -69,6 +69,7 @@ export const NumberInputRow = ({
   onChange,
   isDark,
   min = 0,
+  max,
   helperText,
   formatValue = true,
   onAutoSave,
@@ -78,6 +79,7 @@ export const NumberInputRow = ({
   onChange: (val: number) => void;
   isDark?: boolean;
   min?: number;
+  max?: number;
   helperText?: React.ReactNode;
   formatValue?: boolean;
   onAutoSave?: () => void;
@@ -90,6 +92,7 @@ export const NumberInputRow = ({
         <input
           type="number"
           min={min}
+          max={max}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
           onBlur={() => onAutoSave?.()}

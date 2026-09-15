@@ -42,6 +42,7 @@ from ...runners import headless as headless_runner
 from ...util.fs import atomic_write_text, read_json
 from ...util.time import parse_utc_iso, utc_now_iso
 from ...util.conv import coerce_bool
+from .actor_turn_rendering import render_turn_context_block
 from .inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
 from .experience_reminder import (
     ExperienceReminderDecision,
@@ -581,16 +582,25 @@ MCP_REMINDER_LINE = (
 from .message_categories import commit_role_prompt_delivery, plan_role_prompt_delivery
 
 
-def append_mcp_reply_reminder(text: str) -> str:
+def append_mcp_reply_reminder(
+    text: str,
+    *,
+    group_id: str = "",
+    actor_id: str = "",
+    messages: Optional[List[Any]] = None,
+) -> str:
     reminder = str(MCP_REMINDER_LINE or "").strip()
     out = str(text or "").rstrip("\n")
-    if not reminder:
-        return out
-    if reminder in out:
-        return out
-    if not out:
-        return reminder
-    return f"{out}\n\n{reminder}"
+    context = render_turn_context_block(
+        group_id=group_id,
+        actor_id=actor_id,
+        messages=messages or (),
+    )
+    for addition in (context, reminder):
+        if not addition or addition in out:
+            continue
+        out = f"{out}\n\n{addition}" if out else addition
+    return out
 
 
 def append_collaboration_required_instructions(text: str) -> str:
@@ -715,6 +725,8 @@ def render_system_notify_delivery_text(*, notify: SystemNotifyData, group: Optio
 def render_batched_messages(
     messages: List[PendingMessage],
     *,
+    group_id: str = "",
+    actor_id: str = "",
     reminder_after_index: Optional[int] = None,
     role_block: str = "",
 ) -> str:
@@ -733,7 +745,12 @@ def render_batched_messages(
     if role_block and out:
         out = f"{role_block.strip()}\n\n{out}"
     if reminder_after_index is not None:
-        out = append_mcp_reply_reminder(out)
+        out = append_mcp_reply_reminder(
+            out,
+            group_id=group_id,
+            actor_id=actor_id,
+            messages=messages,
+        )
 
     return out
 
@@ -954,7 +971,7 @@ def deliver_message_with_preamble(
     delivered_before = THROTTLE.get_delivered_chat_count(group.group_id, aid)
     out = (message_text or "").rstrip("\n")
     if out and (delivered_before + 1) % REMINDER_EVERY_N_MESSAGES == 0:
-        out = append_mcp_reply_reminder(out)
+        out = append_mcp_reply_reminder(out, group_id=group.group_id, actor_id=aid)
     result = pty_submit_text(group, actor_id=aid, text=out)
     if result:
         THROTTLE.add_delivered_chat_count(group.group_id, aid, 1)
@@ -1766,6 +1783,8 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
 
         message_text = render_batched_messages(
             deliverable,
+            group_id=group.group_id,
+            actor_id=aid,
             reminder_after_index=reminder_after_index,
             role_block=role_decision.role_block,
         )

@@ -3,11 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   buildBuiltinAutomationSettingsPatch,
   buildTaskReminderSettingsPatch,
+  DEFAULT_BUILTIN_AUTOMATION_POLICY,
   type BuiltinAutomationPolicyValues,
   type TaskReminderPolicyValues,
 } from "../../../../src/components/modals/settings/useAutomationPolicyDraft";
 
 describe("automation policy settings patches", () => {
+  it("defaults the role prompt cadence to five messages", () => {
+    expect(DEFAULT_BUILTIN_AUTOMATION_POLICY.role_prompt_every_messages).toBe(5);
+  });
+
   it("keeps task reminder settings isolated from built-in automation", () => {
     const values: TaskReminderPolicyValues = {
       task_reminder_enabled: false,
@@ -34,6 +39,7 @@ describe("automation policy settings patches", () => {
 
   it("keeps built-in automation settings isolated from task reminders", () => {
     const values: BuiltinAutomationPolicyValues = {
+      role_prompt_every_messages: 7,
       nudge_after_seconds: 300,
       reply_required_nudge_after_seconds: 310,
       attention_ack_nudge_after_seconds: 620,

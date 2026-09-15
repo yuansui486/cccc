@@ -16,6 +16,58 @@ from ...kernel.peer_insight import PEER_PERSPECTIVE_AGENT_LABEL, append_peer_per
 from .inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
 
 
+_TURN_CONTEXT_MAX_MESSAGES = 8
+
+
+def render_turn_context_block(
+    *,
+    group_id: str = "",
+    actor_id: str = "",
+    messages: Iterable[Any] = (),
+) -> str:
+    """Render copyable identity and message IDs for the current actor turn."""
+    gid = str(group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    lines = ["[context] OneColleague turn:"]
+    if gid:
+        lines.append(f"group_id={gid}")
+    if aid:
+        lines.append(f"actor_id={aid}")
+
+    message_lines: List[str] = []
+    for item in list(messages or ())[:_TURN_CONTEXT_MAX_MESSAGES]:
+        if isinstance(item, dict):
+            nested_data = item.get("data") if isinstance(item.get("data"), dict) else {}
+
+            def get_value(key: str, source: dict[str, Any] = item, data: dict[str, Any] = nested_data) -> Any:
+                return source.get(key) or data.get(key, "")
+        else:
+            get_value = lambda key, obj=item: getattr(obj, key, "")
+        event_id = str(get_value("event_id") or get_value("id") or "").strip()
+        reply_to = str(get_value("reply_to") or "").strip()
+        by = str(get_value("by") or "").strip()
+        raw_to = get_value("to")
+        if isinstance(raw_to, (list, tuple, set)):
+            to = ",".join(str(value or "").strip() for value in raw_to if str(value or "").strip())
+        else:
+            to = str(raw_to or "").strip()
+        fields: List[str] = []
+        if event_id:
+            fields.append(f"event_id={event_id}")
+        if reply_to:
+            fields.append(f"reply_to={reply_to}")
+        if by:
+            fields.append(f"by={by}")
+        if to:
+            fields.append(f"to={to}")
+        if fields:
+            message_lines.append("- " + " ".join(fields))
+    if message_lines:
+        lines.append("messages:")
+        lines.extend(message_lines)
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 COLLABORATION_REQUIRED_INSTRUCTIONS = (
     "[coordination] 需协作：这条消息必须协作完成，不允许自己独立完成任务。所有过程输出和最终回复都必须使用中文。\n"
     "- 负责人首先拆分任务，定好任务拆分标准，并明确告诉执行成员必须按照该标准完成拆分。\n"

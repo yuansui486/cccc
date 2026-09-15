@@ -1239,7 +1239,19 @@ class ClaudeAppSession:
             if not isinstance(event, dict):
                 continue
             data = event.get("data") if isinstance(event.get("data"), dict) else {}
-            text = append_mcp_reply_reminder(render_actor_event_for_delivery(event, actor_id=self.actor_id))
+            text = append_mcp_reply_reminder(
+                render_actor_event_for_delivery(event, actor_id=self.actor_id),
+                group_id=self.group_id,
+                actor_id=self.actor_id,
+                messages=[
+                    {
+                        "event_id": event_id,
+                        "reply_to": data.get("reply_to"),
+                        "by": event.get("by") or data.get("by"),
+                        "to": data.get("to"),
+                    }
+                ],
+            )
             if not text.strip():
                 continue
             self._turn_queue.put_nowait(

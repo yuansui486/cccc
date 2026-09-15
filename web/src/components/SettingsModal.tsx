@@ -108,7 +108,6 @@ export function SettingsModal({
 
   // Messaging policy
   const [defaultSendTo, setDefaultSendTo] = useState<"foreman" | "broadcast">("foreman");
-  const [rolePromptEveryMessages, setRolePromptEveryMessages] = useState(5);
 
   // Terminal transcript (group-scoped policy)
   const [terminalVisibility, setTerminalVisibility] = useState<"off" | "foreman" | "all">("foreman");
@@ -164,7 +163,6 @@ export function SettingsModal({
     if (isOpen && settings) {
       setAutoMarkOnDelivery(Boolean(settings.auto_mark_on_delivery));
       setDefaultSendTo(settings.default_send_to || "foreman");
-      setRolePromptEveryMessages(Number(settings.role_prompt_every_messages ?? 5));
       setTerminalVisibility(settings.terminal_transcript_visibility || "foreman");
       setTerminalNotifyTail(Boolean(settings.terminal_transcript_notify_tail));
       setTerminalNotifyLines(Number(settings.terminal_transcript_notify_lines || 20));
@@ -290,7 +288,6 @@ export function SettingsModal({
   const handleSaveMessagingSettings = async () => {
     await onUpdateSettings({
       default_send_to: defaultSendTo,
-      role_prompt_every_messages: Math.max(0, Math.min(1000, Math.trunc(rolePromptEveryMessages || 0))),
     });
   };
 
@@ -714,8 +711,6 @@ export function SettingsModal({
                   busy={busy}
                   defaultSendTo={defaultSendTo}
                   setDefaultSendTo={setDefaultSendTo}
-                  rolePromptEveryMessages={rolePromptEveryMessages}
-                  setRolePromptEveryMessages={setRolePromptEveryMessages}
                   onSave={handleSaveMessagingSettings}
                 />
               )}

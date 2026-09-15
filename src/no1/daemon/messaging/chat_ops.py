@@ -1071,16 +1071,14 @@ def handle_send(
         src_event_id=src_event_id,
         computer_control_request=computer_control_request,
     )
-    headless_delivery_text = append_mcp_reply_reminder(
-        _build_headless_delivery_text(
-            by=by,
-            to=effective_to,
-            body=delivery_text,
-            quote_text=quote_text,
-            source_platform=source_platform,
-            source_user_name=source_user_name,
-            source_user_id=source_user_id,
-        )
+    headless_delivery_base = _build_headless_delivery_text(
+        by=by,
+        to=effective_to,
+        body=delivery_text,
+        quote_text=quote_text,
+        source_platform=source_platform,
+        source_user_name=source_user_name,
+        source_user_id=source_user_id,
     )
     actors = list_actors(group)
     event_for_delivery = event_with_effective_to(event, effective_to)
@@ -1107,10 +1105,16 @@ def handle_send(
             messages=[{"id": event_id, "kind": "chat.message", "by": by, "scope_key": scope_key}],
             scope_key=scope_key,
         )
-        actor_headless_delivery_text = append_experience_reminder(headless_delivery_text, experience_decision)
+        actor_headless_delivery_text = append_experience_reminder(headless_delivery_base, experience_decision)
         role_decision = plan_role_prompt_delivery(group, actor_id=actor_id, event_ids=[event_id])
         if role_decision.role_block:
             actor_headless_delivery_text = f"{role_decision.role_block}\n\n{actor_headless_delivery_text}".strip()
+        actor_headless_delivery_text = append_mcp_reply_reminder(
+            actor_headless_delivery_text,
+            group_id=group.group_id,
+            actor_id=actor_id,
+            messages=[{"event_id": event_id, "reply_to": "", "by": by, "to": effective_to}],
+        )
         if decision.transport in {TRANSPORT_CODEX_HEADLESS, TRANSPORT_CODEX_APP_SERVER}:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,
@@ -1684,14 +1688,12 @@ def handle_reply(
         refs=refs,
         attachments=attachments,
     )
-    headless_delivery_text = append_mcp_reply_reminder(
-        _build_headless_delivery_text(
-            by=by,
-            to=effective_to,
-            body=delivery_text,
-            reply_to=target_event_id or reply_to,
-            quote_text=quote_text,
-        )
+    headless_delivery_base = _build_headless_delivery_text(
+        by=by,
+        to=effective_to,
+        body=delivery_text,
+        reply_to=target_event_id or reply_to,
+        quote_text=quote_text,
     )
     skip_headless_notify_actor_ids: set[str] = set()
     for actor in list_actors(group):
@@ -1715,10 +1717,23 @@ def handle_reply(
             messages=[{"id": event_id, "kind": "chat.message", "by": by, "scope_key": scope_key}],
             scope_key=scope_key,
         )
-        actor_headless_delivery_text = append_experience_reminder(headless_delivery_text, experience_decision)
+        actor_headless_delivery_text = append_experience_reminder(headless_delivery_base, experience_decision)
         role_decision = plan_role_prompt_delivery(group, actor_id=actor_id, event_ids=[event_id])
         if role_decision.role_block:
             actor_headless_delivery_text = f"{role_decision.role_block}\n\n{actor_headless_delivery_text}".strip()
+        actor_headless_delivery_text = append_mcp_reply_reminder(
+            actor_headless_delivery_text,
+            group_id=group.group_id,
+            actor_id=actor_id,
+            messages=[
+                {
+                    "event_id": event_id,
+                    "reply_to": target_event_id or reply_to,
+                    "by": by,
+                    "to": effective_to,
+                }
+            ],
+        )
         if decision.transport in {TRANSPORT_CODEX_HEADLESS, TRANSPORT_CODEX_APP_SERVER}:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,

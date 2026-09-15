@@ -19,13 +19,11 @@ interface MessagingTabProps {
   busy: boolean;
   defaultSendTo: "foreman" | "broadcast";
   setDefaultSendTo: (v: "foreman" | "broadcast") => void;
-  rolePromptEveryMessages: number;
-  setRolePromptEveryMessages: (v: number) => void;
   onSave: () => void;
 }
 
 export function MessagingTab(props: MessagingTabProps) {
-  const { isDark, busy, defaultSendTo, setDefaultSendTo, rolePromptEveryMessages, setRolePromptEveryMessages, onSave } = props;
+  const { isDark, busy, defaultSendTo, setDefaultSendTo, onSave } = props;
   const { t } = useTranslation("settings");
 
   return (
@@ -37,21 +35,6 @@ export function MessagingTab(props: MessagingTabProps) {
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
               {t("messaging.description")}
             </p>
-          </div>
-          <div className="mt-5 ml-1 space-y-2.5">
-            <label className={labelClass(isDark)}>{t("messaging.rolePromptEveryMessages", { defaultValue: "角色提示频率" })}</label>
-            <input
-              type="number"
-              min={0}
-              max={1000}
-              step={1}
-              value={rolePromptEveryMessages}
-              onChange={(event) => setRolePromptEveryMessages(Math.max(0, Math.min(1000, Number(event.target.value || 0))))}
-              className={inputClass(isDark)}
-            />
-            <div className="text-[11px] leading-snug text-[var(--color-text-muted)]">
-              {t("messaging.rolePromptEveryMessagesHint", { defaultValue: "每 N 条成功消息混入一次角色提示；0 表示关闭。" })}
-            </div>
           </div>
         </div>
 
