@@ -28,6 +28,7 @@ interface BuiltinAutomationSettingsModalProps extends AutomationPoliciesSectionP
 
 function readValues(props: BuiltinAutomationSettingsModalProps): BuiltinAutomationPolicyValues {
   return {
+    role_prompt_every_messages: props.rolePromptEveryMessages,
     nudge_after_seconds: props.nudgeSeconds,
     reply_required_nudge_after_seconds: props.replyRequiredNudgeSeconds,
     attention_ack_nudge_after_seconds: props.attentionAckNudgeSeconds,
@@ -49,6 +50,7 @@ function restoreValues(
   values: BuiltinAutomationPolicyValues,
 ) {
   props.setNudgeSeconds(values.nudge_after_seconds);
+  props.setRolePromptEveryMessages(values.role_prompt_every_messages);
   props.setReplyRequiredNudgeSeconds(values.reply_required_nudge_after_seconds);
   props.setAttentionAckNudgeSeconds(values.attention_ack_nudge_after_seconds);
   props.setUnreadNudgeSeconds(values.unread_nudge_after_seconds);

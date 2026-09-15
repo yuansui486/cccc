@@ -1037,8 +1037,8 @@ class ClaudeAppSession:
             return text
 
         lines = [text.rstrip()] if text.strip() else []
-        lines.append("[onecolleague] 图片附件已保存到本地文件。Claude stream-json 当前仅支持文本输入，不能直接内嵌图片。")
-        lines.append("[onecolleague] 请优先基于以下图片文件路径继续处理：")
+        lines.append("[attachment] 图片附件已保存到本地文件。Claude stream-json 当前仅支持文本输入，不能直接内嵌图片。")
+        lines.append("[attachment] 请优先基于以下图片文件路径继续处理：")
         for path in image_paths[:8]:
             lines.append(f"- {path}")
         if len(image_paths) > 8:
@@ -1239,7 +1239,19 @@ class ClaudeAppSession:
             if not isinstance(event, dict):
                 continue
             data = event.get("data") if isinstance(event.get("data"), dict) else {}
-            text = append_mcp_reply_reminder(render_actor_event_for_delivery(event, actor_id=self.actor_id))
+            text = append_mcp_reply_reminder(
+                render_actor_event_for_delivery(event, actor_id=self.actor_id),
+                group_id=self.group_id,
+                actor_id=self.actor_id,
+                messages=[
+                    {
+                        "event_id": event_id,
+                        "reply_to": data.get("reply_to"),
+                        "by": event.get("by") or data.get("by"),
+                        "to": data.get("to"),
+                    }
+                ],
+            )
             if not text.strip():
                 continue
             self._turn_queue.put_nowait(

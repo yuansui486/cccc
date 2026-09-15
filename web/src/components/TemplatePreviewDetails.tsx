@@ -144,6 +144,7 @@ export function TemplatePreviewDetails({
   const hasAutomation = automationRules > 0 || automationSnippets > 0;
   const stableSettingsKeys: string[] = [
     "default_send_to",
+    "role_prompt_every_messages",
     "nudge_after_seconds",
     "reply_required_nudge_after_seconds",
     "attention_ack_nudge_after_seconds",

@@ -5,6 +5,8 @@ import { NumberInputRow } from "./automationUtils";
 
 export interface AutomationPoliciesSectionProps {
   isDark: boolean;
+  rolePromptEveryMessages: number;
+  setRolePromptEveryMessages: (value: number) => void;
   nudgeSeconds: number;
   setNudgeSeconds: (value: number) => void;
   replyRequiredNudgeSeconds: number;
@@ -70,7 +72,21 @@ export function AutomationPoliciesSection(props: AutomationPoliciesSectionProps)
         title={t("policies.messageFollowups")}
         description={t("policies.messageFollowupsHelp")}
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-4">
+          <NumberInputRow
+            isDark={props.isDark}
+            min={0}
+            max={1000}
+            label={t("policies.rolePromptEveryMessages")}
+            value={props.rolePromptEveryMessages}
+            onChange={(value) =>
+              props.setRolePromptEveryMessages(
+                Math.max(0, Math.min(1000, Math.trunc(value || 0))),
+              )
+            }
+            formatValue={false}
+            helperText={t("policies.rolePromptEveryMessagesHelp")}
+          />
           <NumberInputRow
             isDark={props.isDark}
             label={t("policies.needReplyFollowup")}

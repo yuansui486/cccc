@@ -28,9 +28,13 @@ from ...ports.web_model_browser_sidecar import (
     record_chatgpt_browser_state,
     resolve_pending_chatgpt_conversation,
 )
-from ..messaging.actor_turn_rendering import render_actor_event_batch_for_delivery
+from ..messaging.actor_turn_rendering import (
+    render_actor_event_batch_for_delivery,
+    render_turn_context_block,
+)
 from ..messaging.delivery import MCP_REMINDER_LINE
 from ..messaging.experience_reminder import append_experience_reminder, commit_experience_reminder, plan_experience_reminder
+from ..messaging.message_categories import commit_role_prompt_delivery, plan_role_prompt_delivery
 from ..messaging.turn_provenance import (
     TurnDeliveryBusyError,
     begin_turn_delivery_attempt,
@@ -226,6 +230,14 @@ def _browser_delivery_batch(group: Any, *, actor_id: str) -> Dict[str, Any]:
     compact_messages = [_compact_delivery_event(event) for event in messages]
     latest = compact_messages[-1] if compact_messages else {}
     delivery_id = _browser_delivery_id(group_id=group.group_id, actor_id=actor_id, messages=compact_messages) if compact_messages else ""
+    role_decision = plan_role_prompt_delivery(
+        group,
+        actor_id=actor_id,
+        event_ids=[item.get("id") for item in compact_messages if str(item.get("kind") or "") == "chat.message"],
+    )
+    coalesced_text = render_actor_event_batch_for_delivery(compact_messages, actor_id=actor_id)
+    if role_decision.role_block and coalesced_text:
+        coalesced_text = f"{role_decision.role_block}\n\n{coalesced_text}"
     return {
         "delivery_id": delivery_id,
         "turn_id": delivery_id,
@@ -236,7 +248,8 @@ def _browser_delivery_batch(group: Any, *, actor_id: str) -> Dict[str, Any]:
         "latest_event_id": str(latest.get("id") or ""),
         "latest_ts": str(latest.get("ts") or ""),
         "messages": compact_messages,
-        "coalesced_text": render_actor_event_batch_for_delivery(compact_messages, actor_id=actor_id),
+        "coalesced_text": coalesced_text,
+        "role_batch_id": role_decision.batch_id,
         "delivery": {
             "mode": "browser_injection_cursor_on_submit",
             "cursor_committed": False,
@@ -260,15 +273,22 @@ def build_web_model_browser_turn_prompt(
     ]
     coalesced_text = str(turn.get("coalesced_text") or "").strip()
     if len(coalesced_text) > _PROMPT_TEXT_LIMIT:
-        coalesced_text = coalesced_text[: _PROMPT_TEXT_LIMIT - 80].rstrip() + "\n\n[onecolleague] delivery text truncated"
+        coalesced_text = coalesced_text[: _PROMPT_TEXT_LIMIT - 80].rstrip() + "\n\n[event] delivery text truncated"
     event_label = ",".join(event_ids) if event_ids else "-"
     setup_seed = str(bootstrap_seed_text or "").strip()
     setup_block = f"{setup_seed}\n\n" if setup_seed else ""
     reminder = str(MCP_REMINDER_LINE or "").strip()
-    reminder_block = f"{reminder}\n\n" if reminder else ""
+    context = render_turn_context_block(
+        group_id=str(turn.get("group_id") or ""),
+        actor_id=actor_id,
+        messages=turn.get("messages") if isinstance(turn.get("messages"), list) else (),
+    )
+    reminder_block = "\n\n".join(item for item in (context, reminder) if item)
+    if reminder_block:
+        reminder_block += "\n\n"
     completion_receipt = turn.get("completion_receipt") if isinstance(turn.get("completion_receipt"), dict) else {}
     receipt_block = (
-        "[onecolleague] completion_receipt="
+        "[protocol] completion_receipt="
         + json.dumps(completion_receipt, ensure_ascii=True, separators=(",", ":"))
         + "\n"
         if completion_receipt
@@ -276,7 +296,7 @@ def build_web_model_browser_turn_prompt(
     )
     return (
         f"{setup_block}"
-        f"[onecolleague] Browser batch {delivery_id} events={event_label} actor={actor_id}\n"
+        f"[protocol] Browser batch {delivery_id} events={event_label} actor={actor_id}\n"
         f"{receipt_block}"
         f"{reminder_block}"
         f"{coalesced_text}"
@@ -709,6 +729,11 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
             return finalize_failure
         if bool(commit.get("ok")) and bool(commit.get("cursor_committed")):
             commit_experience_reminder(group, experience_decision)
+            commit_role_prompt_delivery(
+                group,
+                decision=plan_role_prompt_delivery(group, actor_id=aid, event_ids=turn.get("event_ids") or []),
+                actor_id=aid,
+            )
         pending_seed_state = (
             {
                 "bootstrap_seed_delivered_at": utc_now_iso(),
@@ -832,6 +857,11 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
             return finalize_failure
         if bool(commit.get("ok")) and bool(commit.get("cursor_committed")):
             commit_experience_reminder(group, experience_decision)
+            commit_role_prompt_delivery(
+                group,
+                decision=plan_role_prompt_delivery(group, actor_id=aid, event_ids=turn.get("event_ids") or []),
+                actor_id=aid,
+            )
         update_headless_state(
             group.group_id,
             aid,

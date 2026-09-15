@@ -14,6 +14,7 @@ import {
 } from "./modals/settings/types";
 import { ModalFrame } from "./modals/ModalFrame";
 import { SettingsNavigation } from "./modals/settings/SettingsNavigation";
+import { MessagingTab } from "./modals/settings/MessagingTab";
 import { useModalA11y } from "../hooks/useModalA11y";
 import { copyTextToClipboard } from "../utils/copy";
 
@@ -81,15 +82,20 @@ export function SettingsModal({
       if (initialTarget.tab === "groupBridge" && groupId) {
         setScope("group");
         setGroupTab("groupBridge");
-      } else if (initialTarget.tab === "blueprint" || initialTarget.tab === "guidance" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
-        setGlobalTab(initialTarget.tab);
+      } else if (initialTarget.tab === "blueprint" || initialTarget.tab === "guidance" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer" || initialTarget.tab === "messaging") {
+        if (initialTarget.tab === "messaging" && groupId) {
+          setScope("group");
+          setGroupTab("messaging");
+          return;
+        }
+        if (initialTarget.tab !== "messaging") setGlobalTab(initialTarget.tab);
       }
       return;
     }
     if (initialTarget.scope === "group") {
-      if (initialTarget.tab === "groupBridge") {
+      if (initialTarget.tab === "groupBridge" || initialTarget.tab === "messaging") {
         setScope("group");
-        setGroupTab("groupBridge");
+        setGroupTab(initialTarget.tab);
       } else if (initialTarget.tab === "blueprint") {
         setScope("global");
         setGlobalTab("blueprint");
@@ -558,6 +564,7 @@ export function SettingsModal({
 
   const groupTabs: { id: GroupTabId; label: string }[] = useMemo(() => [
     { id: "groupBridge", label: t("tabs.groupBridge") },
+    { id: "messaging", label: t("tabs.messaging") },
   ], [t]);
 
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
@@ -698,6 +705,15 @@ export function SettingsModal({
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
 
               {activeTab === "groupBridge" && <GroupBridgeTab isDark={isDark} groupId={groupId} />}
+              {activeTab === "messaging" && (
+                <MessagingTab
+                  isDark={isDark}
+                  busy={busy}
+                  defaultSendTo={defaultSendTo}
+                  setDefaultSendTo={setDefaultSendTo}
+                  onSave={handleSaveMessagingSettings}
+                />
+              )}
 
               {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
 

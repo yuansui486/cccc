@@ -14,6 +14,7 @@ export type TaskReminderPolicyValues = Pick<
 
 export type BuiltinAutomationPolicyValues = Pick<
   GroupSettings,
+  | "role_prompt_every_messages"
   | "nudge_after_seconds"
   | "reply_required_nudge_after_seconds"
   | "attention_ack_nudge_after_seconds"
@@ -37,6 +38,7 @@ export const DEFAULT_TASK_REMINDER_POLICY: TaskReminderPolicyValues = {
 };
 
 export const DEFAULT_BUILTIN_AUTOMATION_POLICY: BuiltinAutomationPolicyValues = {
+  role_prompt_every_messages: 5,
   nudge_after_seconds: 300,
   reply_required_nudge_after_seconds: 300,
   attention_ack_nudge_after_seconds: 600,
@@ -82,6 +84,9 @@ export function useAutomationPolicyDraft({
 }) {
   const [nudgeSeconds, setNudgeSeconds] = useState(
     DEFAULT_BUILTIN_AUTOMATION_POLICY.nudge_after_seconds,
+  );
+  const [rolePromptEveryMessages, setRolePromptEveryMessages] = useState(
+    DEFAULT_BUILTIN_AUTOMATION_POLICY.role_prompt_every_messages,
   );
   const [replyRequiredNudgeSeconds, setReplyRequiredNudgeSeconds] = useState(
     DEFAULT_BUILTIN_AUTOMATION_POLICY.reply_required_nudge_after_seconds,
@@ -136,6 +141,10 @@ export function useAutomationPolicyDraft({
     // Refresh the editable draft when the persisted policy changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setNudgeSeconds(settings.nudge_after_seconds);
+    setRolePromptEveryMessages(
+      settings.role_prompt_every_messages ??
+        DEFAULT_BUILTIN_AUTOMATION_POLICY.role_prompt_every_messages,
+    );
     setReplyRequiredNudgeSeconds(
       settings.reply_required_nudge_after_seconds ??
         DEFAULT_BUILTIN_AUTOMATION_POLICY.reply_required_nudge_after_seconds,
@@ -195,6 +204,7 @@ export function useAutomationPolicyDraft({
   }, [active, settings]);
 
   const currentBuiltinPolicy = (): BuiltinAutomationPolicyValues => ({
+    role_prompt_every_messages: rolePromptEveryMessages,
     nudge_after_seconds: nudgeSeconds,
     reply_required_nudge_after_seconds: replyRequiredNudgeSeconds,
     attention_ack_nudge_after_seconds: attentionAckNudgeSeconds,
@@ -255,6 +265,7 @@ export function useAutomationPolicyDraft({
   };
 
   const resetBuiltinPoliciesDraft = () => {
+    setRolePromptEveryMessages(DEFAULT_BUILTIN_AUTOMATION_POLICY.role_prompt_every_messages);
     setNudgeSeconds(DEFAULT_BUILTIN_AUTOMATION_POLICY.nudge_after_seconds);
     setReplyRequiredNudgeSeconds(
       DEFAULT_BUILTIN_AUTOMATION_POLICY.reply_required_nudge_after_seconds,
@@ -293,6 +304,8 @@ export function useAutomationPolicyDraft({
   };
 
   return {
+    rolePromptEveryMessages,
+    setRolePromptEveryMessages,
     nudgeSeconds,
     setNudgeSeconds,
     replyRequiredNudgeSeconds,

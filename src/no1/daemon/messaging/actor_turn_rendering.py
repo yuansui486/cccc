@@ -16,8 +16,60 @@ from ...kernel.peer_insight import PEER_PERSPECTIVE_AGENT_LABEL, append_peer_per
 from .inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
 
 
+_TURN_CONTEXT_MAX_MESSAGES = 8
+
+
+def render_turn_context_block(
+    *,
+    group_id: str = "",
+    actor_id: str = "",
+    messages: Iterable[Any] = (),
+) -> str:
+    """Render copyable identity and message IDs for the current actor turn."""
+    gid = str(group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    lines = ["[context] OneColleague turn:"]
+    if gid:
+        lines.append(f"group_id={gid}")
+    if aid:
+        lines.append(f"actor_id={aid}")
+
+    message_lines: List[str] = []
+    for item in list(messages or ())[:_TURN_CONTEXT_MAX_MESSAGES]:
+        if isinstance(item, dict):
+            nested_data = item.get("data") if isinstance(item.get("data"), dict) else {}
+
+            def get_value(key: str, source: dict[str, Any] = item, data: dict[str, Any] = nested_data) -> Any:
+                return source.get(key) or data.get(key, "")
+        else:
+            get_value = lambda key, obj=item: getattr(obj, key, "")
+        event_id = str(get_value("event_id") or get_value("id") or "").strip()
+        reply_to = str(get_value("reply_to") or "").strip()
+        by = str(get_value("by") or "").strip()
+        raw_to = get_value("to")
+        if isinstance(raw_to, (list, tuple, set)):
+            to = ",".join(str(value or "").strip() for value in raw_to if str(value or "").strip())
+        else:
+            to = str(raw_to or "").strip()
+        fields: List[str] = []
+        if event_id:
+            fields.append(f"event_id={event_id}")
+        if reply_to:
+            fields.append(f"reply_to={reply_to}")
+        if by:
+            fields.append(f"by={by}")
+        if to:
+            fields.append(f"to={to}")
+        if fields:
+            message_lines.append("- " + " ".join(fields))
+    if message_lines:
+        lines.append("messages:")
+        lines.extend(message_lines)
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 COLLABORATION_REQUIRED_INSTRUCTIONS = (
-    "[onecolleague] 需协作：这条消息必须协作完成，不允许自己独立完成任务。所有过程输出和最终回复都必须使用中文。\n"
+    "[coordination] 需协作：这条消息必须协作完成，不允许自己独立完成任务。所有过程输出和最终回复都必须使用中文。\n"
     "- 负责人首先拆分任务，定好任务拆分标准，并明确告诉执行成员必须按照该标准完成拆分。\n"
     "- 拆分任务时，必须告知所有必要前提条件和上下文，不能因为任务被简化而造成上下文不统一。\n"
     "- 执行标准必须包含硬性的结果标准，并且必须可量化。\n"
@@ -35,7 +87,7 @@ def render_computer_control_contract(request: dict[str, Any]) -> str:
     workflow_id = compact_delivery_text(request.get("workflow_id"), limit=100)
     actor_id = compact_delivery_text(request.get("actor_id"), limit=100)
     lines = [
-        f"[onecolleague] 电脑控制执行契约（request_id={request_id}）：",
+        f"[control] 电脑控制执行契约（request_id={request_id}）：",
         f"- 模式：{'运行已有工作流' if mode == 'run_existing' else '根据需求新建工作流并运行'}",
         f"- 执行智能体：{actor_id}",
     ]
@@ -101,7 +153,7 @@ def render_delivery_refs(refs: list[dict[str, Any]]) -> list[str]:
     if not refs:
         return []
 
-    lines = ["[onecolleague] References:"]
+    lines = ["[context] References:"]
     rendered = 0
 
     for ref in refs:
@@ -215,15 +267,15 @@ def build_actor_delivery_text(
     delivery_text = text
     prefix_lines: list[str] = []
     if priority == "attention" and event_id:
-        prefix_lines.append(f"[onecolleague] IMPORTANT (event_id={event_id}):")
+        prefix_lines.append(f"[important] IMPORTANT (event_id={event_id}):")
     if reply_required and event_id:
-        prefix_lines.append(f"[onecolleague] REPLY REQUIRED (event_id={event_id}): reply via onecolleague_message_reply.")
+        prefix_lines.append(f"[reply] REPLY REQUIRED (event_id={event_id}): reply via onecolleague_message_reply.")
     if collaboration_required:
         prefix_lines.append(COLLABORATION_REQUIRED_INSTRUCTIONS)
     if isinstance(computer_control_request, dict):
         prefix_lines.append(render_computer_control_contract(computer_control_request))
     if src_group_id and src_event_id:
-        prefix_lines.append(f"[onecolleague] RELAYED FROM (group_id={src_group_id}, event_id={src_event_id}):")
+        prefix_lines.append(f"[forward] RELAYED FROM (group_id={src_group_id}, event_id={src_event_id}):")
     if prefix_lines:
         delivery_text = "\n".join(prefix_lines) + "\n" + delivery_text
     ref_lines = render_delivery_refs(refs)
@@ -231,7 +283,7 @@ def build_actor_delivery_text(
         delivery_text = (delivery_text.rstrip("\n") + "\n\n" + "\n".join(ref_lines)).strip()
     if attachments:
         lines = [
-            '[onecolleague] Attachments: use onecolleague_file(action="read", rel_path=...) for text; '
+            '[attachment] Attachments: use onecolleague_file(action="read", rel_path=...) for text; '
             'use action="blob_path" for binary/local tools.'
         ]
         for attachment in attachments[:8]:
@@ -320,12 +372,12 @@ def render_actor_event_for_delivery(event: Dict[str, Any], *, actor_id: str = ""
         title = str(data.get("title") or data.get("summary") or "").strip()
         message = str(data.get("message") or data.get("text") or "").strip()
         body = "\n".join([item for item in (title, message) if item]).strip()
-        return f"[onecolleague] SYSTEM ({notify_kind}): {body}".strip()
+        return f"[event] SYSTEM ({notify_kind}): {body}".strip()
 
     text = str(data.get("text") or data.get("message") or data.get("summary") or "").strip()
     if not text:
         text = jsonish(data) if data else ""
-    header = f"[onecolleague] {kind or 'event'}"
+    header = f"[event] {kind or 'event'}"
     if event_id:
         header += f" (event_id={event_id})"
     return f"{header}:\n{text}".strip()

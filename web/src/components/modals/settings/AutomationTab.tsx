@@ -42,6 +42,8 @@ interface AutomationTabProps {
   devActors: Actor[];
   busy: boolean;
 
+  rolePromptEveryMessages: number;
+  setRolePromptEveryMessages: (v: number) => void;
   nudgeSeconds: number;
   setNudgeSeconds: (v: number) => void;
   replyRequiredNudgeSeconds: number;
@@ -758,6 +760,8 @@ export function AutomationTab(props: AutomationTabProps) {
         open={builtinSettingsOpen}
         isDark={isDark}
         busy={props.busy}
+        rolePromptEveryMessages={props.rolePromptEveryMessages}
+        setRolePromptEveryMessages={props.setRolePromptEveryMessages}
         nudgeSeconds={props.nudgeSeconds}
         setNudgeSeconds={props.setNudgeSeconds}
         replyRequiredNudgeSeconds={props.replyRequiredNudgeSeconds}

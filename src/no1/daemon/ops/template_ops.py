@@ -298,6 +298,7 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
     _int_list("task_active_overdue_milestones_seconds", default=[1800, 3000, 3600, 5400])
     _int_list("task_planned_unassigned_milestones_seconds", default=[900, 1800, 3600, 7200, 10800, 21600])
     _int("min_interval_seconds", min_v=0)
+    _int("role_prompt_every_messages", min_v=0, max_v=1000)
 
     # Delivery toggles
     if "auto_mark_on_delivery" in settings:
@@ -343,7 +344,7 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
         "task_active_overdue_milestones_seconds",
         "task_planned_unassigned_milestones_seconds",
     }
-    messaging_keys = {"default_send_to"}
+    messaging_keys = {"default_send_to", "role_prompt_every_messages"}
     feature_keys = {"panorama_enabled"}
 
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
@@ -364,7 +365,10 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
             else:
                 automation[k] = int(v)
         if k in messaging_keys:
-            messaging["default_send_to"] = str(v)
+            if k == "default_send_to":
+                messaging["default_send_to"] = str(v)
+            elif k == "role_prompt_every_messages":
+                messaging[k] = max(0, min(1000, int(v)))
 
     group.doc["delivery"] = delivery
     group.doc["automation"] = automation

@@ -2316,6 +2316,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
         delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
         experience = group.doc.get("experience") if isinstance(group.doc.get("experience"), dict) else {}
+        messaging = group.doc.get("messaging") if isinstance(group.doc.get("messaging"), dict) else {}
         features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
         from ....kernel.terminal_transcript import get_terminal_transcript_settings
         from ....kernel.messaging import get_default_send_to
@@ -2326,6 +2327,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             "result": {
                 "settings": {
                     "default_send_to": get_default_send_to(group.doc),
+                    "role_prompt_every_messages": _safe_int(
+                        messaging.get("role_prompt_every_messages", 5),
+                        default=5,
+                        min_value=0,
+                        max_value=1000,
+                    ),
                     "nudge_after_seconds": _safe_int(automation.get("nudge_after_seconds", 300), default=300, min_value=0),
                     "reply_required_nudge_after_seconds": _safe_int(automation.get("reply_required_nudge_after_seconds", 300), default=300, min_value=0),
                     "attention_ack_nudge_after_seconds": _safe_int(automation.get("attention_ack_nudge_after_seconds", 600), default=600, min_value=0),
@@ -3310,6 +3317,11 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         patch: Dict[str, Any] = {}
         if req.default_send_to is not None:
             patch["default_send_to"] = str(req.default_send_to)
+        if req.role_prompt_every_messages is not None:
+            patch["role_prompt_every_messages"] = max(
+                0,
+                min(1000, int(req.role_prompt_every_messages)),
+            )
         if req.nudge_after_seconds is not None:
             patch["nudge_after_seconds"] = max(0, req.nudge_after_seconds)
         if req.reply_required_nudge_after_seconds is not None:

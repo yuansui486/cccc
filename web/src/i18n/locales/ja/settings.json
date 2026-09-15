@@ -604,6 +604,8 @@
     "helpRefreshMinMsgsHelp": "最小累積メッセージ。",
     "messageFollowups": "メッセージフォローアップ",
     "messageFollowupsHelp": "未読、返信必須、確認必須メッセージの通知間隔を制御します。",
+    "rolePromptEveryMessages": "ロールプロンプトの頻度",
+    "rolePromptEveryMessagesHelp": "正常に受け付けられたチャットメッセージ N 件ごとに、次のメッセージへロールプロンプトを挿入します。0 で無効化します。",
     "progressFollowups": "進捗フォローアップ",
     "progressFollowupsHelp": "Actor のキープアライブ間隔と再試行動作を制御します。",
     "contextRefresh": "コンテキスト更新",
