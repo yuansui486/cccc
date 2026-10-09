@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import logging
+import ntpath
 import queue
 import selectors
 import secrets
@@ -25,6 +27,53 @@ _WINPTY_PROCESS = load_winpty_process_class()
 
 PTY_SUPPORTED = bool(os.name == "nt" and _WINPTY_PROCESS is not None)
 TERMINAL_SIGNAL_BUFFER_CHARS = 4096
+logger = logging.getLogger(__name__)
+
+# Win32-input-mode: VK_RETURN, scan code, Unicode CR, down/up, modifiers, repeat.
+_WIN32_ENTER = "\x1b[13;28;13;1;0;1_\x1b[13;28;13;0;0;1_"
+
+
+def _codex_inline_command(command: list[str], *, runtime: str) -> list[str]:
+    """Use inline rendering for direct Codex TUIs hosted by Windows ConPTY.
+
+    Alternate-screen Codex can retain pasted messages despite accepting the
+    submit key. Apply this at spawn time so saved commands and resume identity
+    remain unchanged, including for actors created before this compatibility fix.
+    """
+    if str(runtime).strip().lower() != "codex" or not command:
+        return command
+    if ntpath.splitext(ntpath.basename(command[0]))[0].lower() != "codex":
+        return command
+    takes_value = {
+        "-c", "--config", "-m", "--model", "-p", "--profile",
+        "-s", "--sandbox", "-a", "--ask-for-approval", "-C", "--cd",
+        "-i", "--image", "--add-dir", "--enable", "--disable",
+        "--local-provider", "--remote", "--remote-auth-token-env",
+    }
+    non_interactive = {
+        "agents", "exec", "e", "review", "login", "logout", "mcp",
+        "mcp-server", "plugin", "app-server", "remote-control", "app",
+        "completion", "update", "doctor", "sandbox", "debug", "apply",
+        "a", "queue", "archive", "delete", "migrate-rollouts", "unarchive",
+        "cloud", "exec-server", "features", "help",
+    }
+    first_positional = True
+    index = 1
+    while index < len(command):
+        arg = command[index]
+        if arg == "--":
+            break
+        if arg in {"--no-alt-screen", "-h", "--help", "-V", "--version"}:
+            return command
+        if arg in takes_value:
+            index += 2
+            continue
+        if not arg.startswith("-") and first_positional:
+            if arg in non_interactive:
+                return command
+            first_positional = False
+        index += 1
+    return [command[0], "--no-alt-screen", *command[1:]]
 
 
 def _coerce_bytes(data: object) -> bytes:
@@ -101,6 +150,7 @@ class PtySession:
         self._query_tail = b""
         self._query_output_pending = b""
         self._bracketed_paste = False
+        self._win32_input_mode = False
         self._bracketed_paste_changed_at: Optional[float] = None
 
         self._output_q: "queue.Queue[Optional[bytes]]" = queue.Queue()
@@ -116,6 +166,10 @@ class PtySession:
         cmd = [str(x) for x in command if isinstance(x, str) and str(x).strip()]
         if not cmd:
             cmd = ["cmd.exe"]
+        inline_cmd = _codex_inline_command(cmd, runtime=self._runtime)
+        if inline_cmd != cmd:
+            logger.debug("Codex inline terminal enabled group=%s actor=%s", group_id, actor_id)
+        cmd = inline_cmd
 
         proc_env = os.environ.copy()
         proc_env.update({k: v for k, v in env.items() if isinstance(k, str) and isinstance(v, str)})
@@ -396,6 +450,10 @@ class PtySession:
                 if new_state != self._bracketed_paste:
                     self._bracketed_paste = new_state
                     self._bracketed_paste_changed_at = time.monotonic()
+            win32_enable = data.rfind(b"\x1b[?9001h")
+            win32_disable = data.rfind(b"\x1b[?9001l")
+            if win32_enable >= 0 or win32_disable >= 0:
+                self._win32_input_mode = win32_enable > win32_disable
             keep = max(len(enable), len(disable)) - 1
             self._mode_tail = data[-keep:] if keep > 0 else b""
 
@@ -522,6 +580,47 @@ class PtySession:
             return True
         except Exception:
             return False
+
+    def submit_input(self, mode: str = "enter") -> bool:
+        """Write a submit key, without replaying text or retrying uncertain writes.
+
+        This confirms transport acceptance only, not that the CLI began a turn.
+        Manual input continues to pass through write_input unchanged.
+        """
+        if mode == "none":
+            return True
+        with self._lock:
+            win32_enter = (
+                mode != "newline"
+                and self._runtime.strip().lower() == "codex"
+                and self._win32_input_mode
+            )
+        text = _WIN32_ENTER if win32_enter else ("\n" if mode == "newline" else "\r")
+        method = "win32_enter" if win32_enter else ("newline" if mode == "newline" else "enter")
+        started = time.monotonic()
+        try:
+            # All submit sequences are ASCII, so byte and character counts agree.
+            written = self._proc.write(text)
+        except Exception as exc:
+            logger.warning(
+                "PTY submit failed group=%s actor=%s method=%s error=%s",
+                self.group_id, self.actor_id, method, type(exc).__name__,
+            )
+            return False
+        # ConPTY/pywinpty can return 0 after a successful write (verified against
+        # a real CLI). Other backends return the byte count. Exceptions, invalid
+        # results and positive short writes remain uncertain; never replay them.
+        if type(written) is not int or written not in (0, len(text)):
+            logger.warning(
+                "PTY submit unconfirmed group=%s actor=%s method=%s written=%s expected=%s",
+                self.group_id, self.actor_id, method, written, len(text),
+            )
+            return False
+        logger.debug(
+            "PTY submit written group=%s actor=%s method=%s write_result=%s elapsed_ms=%.1f",
+            self.group_id, self.actor_id, method, written, (time.monotonic() - started) * 1000,
+        )
+        return True
 
     def _terminate_process(self) -> None:
         for name, args in (
@@ -1398,6 +1497,16 @@ class PtySupervisor:
         if s is None or not s.is_running():
             return False
         return bool(s.write_input(data))
+
+    def submit_input(self, *, group_id: str, actor_id: str, mode: str = "enter") -> bool:
+        if mode == "none":
+            return True
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        with self._lock:
+            session = self._sessions.get(key)
+        if session is None or not session.is_running():
+            return False
+        return bool(session.submit_input(mode))
 
 
 SUPERVISOR = PtySupervisor()

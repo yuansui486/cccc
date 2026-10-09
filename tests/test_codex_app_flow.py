@@ -4463,7 +4463,7 @@ class TestCodexAppFlow(unittest.TestCase):
                 transport="websocket",
                 persist_headless_state=False,
                 start_remote_tui=True,
-                remote_tui_base_command=["codex", "--search"],
+                remote_tui_base_command=["codex", "--dangerously-bypass-approvals-and-sandbox", "--search"],
             )
 
             class FakeProc:
@@ -4526,6 +4526,8 @@ class TestCodexAppFlow(unittest.TestCase):
 
             self.assertEqual([item[0] for item in requests], ["initialize", "thread/resume"])
             self.assertEqual(requests[1][1].get("threadId"), "thr-existing")
+            self.assertEqual(requests[1][1].get("approvalPolicy"), "never")
+            self.assertEqual(requests[1][1].get("sandbox"), "danger-full-access")
             self.assertEqual(len(started_pty), 1)
             self.assertEqual(
                 started_pty[0]["command"],

@@ -127,5 +127,8 @@ class PtySupervisor:
     def write_input(self, *, group_id: str, actor_id: str, data: bytes) -> bool:
         return False
 
+    def submit_input(self, *, group_id: str, actor_id: str, mode: str = "enter") -> bool:
+        return mode == "none"
+
 
 SUPERVISOR = PtySupervisor()

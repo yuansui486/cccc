@@ -339,6 +339,7 @@ def _command_stem(command: str) -> str:
 
 
 def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str, *, resume_thread_id: str = "") -> list[str]:
+    resume_target = str(resume_thread_id or "").strip()
     command = list(base_command or [])
     if not command or _command_stem(str(command[0] or "")) != "codex":
         command = ["codex"]
@@ -363,29 +364,43 @@ def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str, *
     }
     valueless = {
         "--dangerously-bypass-approvals-and-sandbox",
+        "--approve-for-me",
+        "--full-auto",
+        "--yolo",
         "--no-alt-screen",
         "--oss",
         "--search",
+    }
+    # Remote resume inherits permissions from the app-server thread. Recent
+    # Codex versions reject CLI permission overrides before attaching the TUI.
+    # Keep these options for fresh starts; server-side thread/resume still
+    # establishes the actor's policy in codex_app_thread_ops.
+    resume_permission_options = {
+        "-a", "--ask-for-approval", "-s", "--sandbox", "--add-dir",
+        "--dangerously-bypass-approvals-and-sandbox", "--yolo",
+        "--approve-for-me", "--full-auto",
     }
     i = 1
     while i < len(command):
         arg = str(command[i] or "")
         if arg in takes_value:
             if i + 1 < len(command):
-                filtered.extend([arg, str(command[i + 1])])
+                if not resume_target or arg not in resume_permission_options:
+                    filtered.extend([arg, str(command[i + 1])])
                 i += 2
                 continue
             break
         if any(arg.startswith(prefix + "=") for prefix in takes_value if prefix.startswith("--")):
-            filtered.append(arg)
+            if not resume_target or arg.split("=", 1)[0] not in resume_permission_options:
+                filtered.append(arg)
             i += 1
             continue
         if arg in valueless:
-            filtered.append(arg)
+            if not resume_target or arg not in resume_permission_options:
+                filtered.append(arg)
             i += 1
             continue
         break
-    resume_target = str(resume_thread_id or "").strip()
     if resume_target:
         filtered.extend(["resume", resume_target])
     filtered.extend(["--remote", str(listen_url)])

@@ -541,7 +541,7 @@ wheels = [
 
 [[package]]
 name = "no1"
-version = "0.4.22"
+version = "0.4.27"
 source = { editable = "." }
 dependencies = [
     { name = "comtypes", marker = "sys_platform == 'win32'" },

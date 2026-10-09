@@ -1366,6 +1366,11 @@ class PtySupervisor:
             return False
         return s.resize_if_writer(writer_lease=writer_lease, cols=int(cols), rows=int(rows))
 
+    def submit_input(self, *, group_id: str, actor_id: str, mode: str = "enter") -> bool:
+        if mode == "none":
+            return True
+        return self.write_input(group_id=group_id, actor_id=actor_id, data=b"\n" if mode == "newline" else b"\r")
+
     def write_input(self, *, group_id: str, actor_id: str, data: bytes) -> bool:
         if not data:
             return True

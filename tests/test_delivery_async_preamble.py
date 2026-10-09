@@ -6,6 +6,15 @@ from unittest.mock import patch
 
 
 class TestAsyncFirstDelivery(unittest.TestCase):
+    def setUp(self):
+        # These tests isolate PTY sequencing; the minimal group has no storage.
+        role_prompt = patch(
+            "no1.daemon.messaging.delivery.plan_role_prompt_delivery",
+            return_value=SimpleNamespace(role_block="", event_ids=()),
+        )
+        role_prompt.start()
+        self.addCleanup(role_prompt.stop)
+
     def _group(self):
         return SimpleNamespace(group_id="g-test", doc={})
 

@@ -2134,6 +2134,9 @@ class TestTurnProvenance(unittest.TestCase):
             "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
             "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.write_input", side_effect=blocking_write
+        ), patch(
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.submit_input",
+            side_effect=lambda **kw: blocking_write(data=b"\r"),
         ):
             thread = threading.Thread(
                 target=lambda: result.setdefault(
@@ -2182,6 +2185,9 @@ class TestTurnProvenance(unittest.TestCase):
                     "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
                 ), patch(
                     "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.write_input", side_effect=uncertain_write
+                ), patch(
+                    "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.submit_input",
+                    side_effect=lambda **kw: uncertain_write(data=b"\r"),
                 ), patch(
                     "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.stop_actor"
                 ) as stop_actor:
@@ -2309,6 +2315,9 @@ class TestTurnProvenance(unittest.TestCase):
                 "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
             ), patch(
                 "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.write_input", side_effect=preamble_write
+            ), patch(
+                "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.submit_input",
+                side_effect=lambda **kw: preamble_write(data=b"\r"),
             ), patch(
                 "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.stop_actor",
                 side_effect=stop_and_record,

@@ -848,13 +848,8 @@ def pty_submit_text(
     multiline = ("\n" in raw) or ("\r" in raw)
     
     # Determine submit mode for this actor.
-    submit = b"\r"
     actor = find_actor(group, aid)
-    mode = str(actor.get("submit") if isinstance(actor, dict) else "") or "enter"
-    if mode == "none":
-        submit = b""
-    elif mode == "newline":
-        submit = b"\n"
+    mode = str(actor.get("submit") or "enter") if isinstance(actor, dict) else "enter"
 
     payload = raw.encode("utf-8", errors="replace")
     
@@ -890,7 +885,7 @@ def pty_submit_text(
     logger.debug(f"[pty_submit_text] Sent text payload, scheduling delayed submit")
     
     # Step 2: send submit (Enter/Newline) after a small delay for CLI timing
-    if submit:
+    if mode != "none":
         if wait_for_submit or detailed_result:
             time.sleep(PTY_SUBMIT_DELAY_SECONDS)
             if not pty_runner.SUPERVISOR.actor_running(gid, aid):
@@ -898,7 +893,7 @@ def pty_submit_text(
                 outcome = PtySubmitOutcome(False, False, "submit_write_unknown", "actor stopped before submit")
                 return outcome if detailed_result else False
             try:
-                ok_submit = bool(pty_runner.SUPERVISOR.write_input(group_id=gid, actor_id=aid, data=submit))
+                ok_submit = bool(pty_runner.SUPERVISOR.submit_input(group_id=gid, actor_id=aid, mode=mode))
             except Exception as exc:
                 outcome = PtySubmitOutcome(False, False, "submit_write_unknown", str(exc))
                 if detailed_result:
@@ -913,7 +908,14 @@ def pty_submit_text(
             def delayed_submit():
                 time.sleep(PTY_SUBMIT_DELAY_SECONDS)  # Empirically reliable delay
                 if pty_runner.SUPERVISOR.actor_running(gid, aid):
-                    ok_submit = bool(pty_runner.SUPERVISOR.write_input(group_id=gid, actor_id=aid, data=submit))
+                    try:
+                        ok_submit = bool(pty_runner.SUPERVISOR.submit_input(group_id=gid, actor_id=aid, mode=mode))
+                    except Exception as exc:
+                        logger.warning(
+                            "[pty_submit_text] Delayed submit raised for %s/%s: %s",
+                            gid, aid, type(exc).__name__,
+                        )
+                        return
                     if ok_submit:
                         logger.debug(f"[pty_submit_text] Delayed submit sent to {gid}/{aid}")
                     else:
