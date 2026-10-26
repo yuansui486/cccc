@@ -16,7 +16,7 @@ try {
   $identityJson = & python scripts/onecolleague_release.py check @identityArgs
   if ($LASTEXITCODE -ne 0) { throw "Release identity check failed" }
   $identity = $identityJson | ConvertFrom-Json
-  & npm ci --prefix web
+& npm ci --include=dev --prefix web
   if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
   & node scripts/prepare_rust_web_assets.mjs
   if ($LASTEXITCODE -ne 0) { throw "Web asset build failed" }

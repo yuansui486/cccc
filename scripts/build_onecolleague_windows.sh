@@ -7,7 +7,7 @@ cd "$root_dir"
 python3 scripts/onecolleague_release.py check
 toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
 rustup run "$toolchain" cargo xwin --version
-npm ci --prefix web
+npm ci --include=dev --prefix web
 node scripts/prepare_rust_web_assets.mjs
 rustup run "$toolchain" cargo xwin build --release --locked --features standalone \
   --target x86_64-pc-windows-msvc -p cccc --bin cccc
