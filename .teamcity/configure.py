@@ -101,7 +101,8 @@ bash scripts/teamcity-application.sh
         for item in steps.get('step', []):
             for prop in item['properties']['property']:
                 if prop['name'] == 'script.content':
-                    guard = '''python3 - <<'PY'
+                    guard = '''set -eu
+python3 - <<'PY'
 import json
 m = json.load(open('release-manifest.json', encoding='utf-8'))
 assert str(m['buildId']) == '%dep.OneColleague_Application_Release.teamcity.build.id%', 'installer is not from snapshot build'
