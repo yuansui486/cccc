@@ -1,10 +1,10 @@
 import type { WebBranding } from "../types";
 
-export const DEFAULT_PRODUCT_NAME = "CCCC";
+export const DEFAULT_PRODUCT_NAME = "一号同事";
 export const DEFAULT_LOGO_ICON_URL = "/ui/logo.svg";
 export const DEFAULT_DARK_LOGO_ICON_URL = "/ui/logo-dark.svg";
 export const DEFAULT_FAVICON_URL = "/ui/logo.svg";
-export const DEFAULT_DOCUMENT_TITLE = "CCCC - AI Agent Collaboration";
+export const DEFAULT_DOCUMENT_TITLE = "一号同事";
 export const WEB_APP_MANIFEST_URL = "/ui/manifest.webmanifest";
 export const APPLE_TOUCH_ICON_URL = "/apple-touch-icon.png";
 

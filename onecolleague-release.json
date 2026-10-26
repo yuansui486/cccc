@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "tagPrefix": "onecolleague-v",
+  "target": "x86_64-pc-windows-msvc"
+}

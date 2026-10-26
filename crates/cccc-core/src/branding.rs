@@ -94,7 +94,7 @@ pub fn payload(raw: &Map<String, Value>) -> Payload {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("CCCC")
+        .unwrap_or("一号同事")
         .into();
     let logo = raw
         .get("logo_icon_asset_path")
@@ -250,7 +250,7 @@ mod tests {
         let manifest = web_app_manifest(&Map::new());
 
         assert_eq!(manifest["id"], "/ui/");
-        assert_eq!(manifest["name"], "CCCC");
+        assert_eq!(manifest["name"], "一号同事");
         assert_eq!(manifest["icons"][0]["src"], "/ui/logo.svg");
         assert_eq!(manifest["icons"][1]["src"], "/ui/logo.png");
     }

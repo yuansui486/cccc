@@ -199,6 +199,7 @@ impl Fixture {
             runtime_proof_key: "test".into(),
             web_mode: crate::WebMode::Normal,
             exhibit_allow_terminal: false,
+            desktop_embedding: false,
         };
         Self {
             _temp: temp,

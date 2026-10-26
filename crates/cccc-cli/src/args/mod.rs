@@ -53,10 +53,10 @@ pub struct SetupArgs {
 pub struct UpdateArgs {
     #[arg(long, value_enum)]
     pub channel: Option<ReleaseChannelArg>,
-    /// Check the latest channel release and installation without changing files.
+    /// Show the installed core version and launcher-managed update instructions.
     #[arg(long)]
     pub check: bool,
-    /// Show local installation details without requesting release metadata.
+    /// Accepted for compatibility; this edition never requests release metadata.
     #[arg(long, requires = "check")]
     pub offline: bool,
 }
@@ -141,7 +141,7 @@ pub enum CommandKind {
     Status,
     Doctor(DoctorArgs),
     Setup(SetupArgs),
-    /// Update CCCC through the installer that owns this executable.
+    /// Show update instructions for the 一号同事 launcher.
     Update(UpdateArgs),
     Version,
     Home,

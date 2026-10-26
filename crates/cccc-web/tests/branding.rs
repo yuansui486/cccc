@@ -35,7 +35,7 @@ async fn branding_is_public_to_read_and_admin_only_to_mutate() {
     assert_eq!(public.status(), StatusCode::OK);
     assert_eq!(
         json(public).await["result"]["branding"]["product_name"],
-        "CCCC"
+        "一号同事"
     );
 
     let default_manifest = app

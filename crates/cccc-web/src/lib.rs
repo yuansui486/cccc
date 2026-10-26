@@ -106,6 +106,7 @@ pub(crate) struct AppState {
     runtime_proof_key: String,
     web_mode: WebMode,
     exhibit_allow_terminal: bool,
+    desktop_embedding: bool,
 }
 
 pub(crate) struct RestartHandle {
@@ -211,6 +212,7 @@ fn app_with_shutdown(
         runtime_proof_key: new_web_runtime_proof_key(),
         web_mode,
         exhibit_allow_terminal: readonly::exhibit_allow_terminal_from_env(),
+        desktop_embedding: false,
     };
     let app = router_for_state(state.clone());
     (app, im_workers, browser_surfaces, state)
@@ -461,7 +463,7 @@ where
         .then(|| Arc::new(RestartHandle::new(web_shutdown.clone())));
     let mut restart_rx = web_shutdown.subscribe();
     let (shutdown_started, mut shutdown_started_rx) = tokio::sync::oneshot::channel();
-    let (app, im_workers, browser_surfaces, app_state) = app_with_shutdown(
+    let (_, im_workers, browser_surfaces, mut app_state) = app_with_shutdown(
         home,
         web_shutdown.clone(),
         web_mode,
@@ -472,6 +474,14 @@ where
         },
         runtime_id,
     );
+    // Only the real listener can opt in; environment-derived app bindings must
+    // never grant desktop embedding authority.
+    app_state.desktop_embedding = cfg!(windows)
+        && security_headers::desktop_binding_enabled(
+            std::env::var("ONECOLLEAGUE_DESKTOP").ok().as_deref(),
+            address,
+        );
+    let app = router_for_state(app_state.clone());
     if let Err(error) = web_runtime_state::write(
         &app_state.home,
         host,
