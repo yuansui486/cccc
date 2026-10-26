@@ -35,6 +35,13 @@ git push codeup OneColleague
 Windows 需要 Visual Studio C++/Windows SDK、CMake、NASM；Linux 使用自有 cargo-xwin
 镜像，包含 Clang/LLD、CMake/Ninja、NASM 和经校验的原生依赖缓存。
 
+TeamCity 原生依赖缓存固定为 `/opt/Agent/cache/onecolleague-native`，只读挂载到构建容器，
+通过 `SHERPA_ONNX_ARCHIVE_DIR` 提供 sherpa-onnx 离线归档。当前文件为
+`sherpa-onnx-v1.13.4-win-x64-static-MT-Release-lib.tar.bz2`，SHA256 为
+`d81bd1d25112540862d2387072e76b2b6843ef962918d6b5c7db5a19c6276b4c`。
+更换机器需先从官方来源或已校验副本种入缓存；构建入口与依赖 build.rs 均校验 SHA256。
+上游升级该依赖时同步更换归档名、固定校验值与缓存，禁止使用未经验证的镜像归档。
+
 ```powershell
 python scripts/onecolleague_release.py check
 python -m unittest discover -s scripts/tests -p test_onecolleague_release.py -v
