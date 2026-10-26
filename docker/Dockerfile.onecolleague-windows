@@ -3,6 +3,7 @@ ARG BASE_IMAGE=tauri-windows-builder
 FROM node:24.19.0-bookworm-slim AS node
 FROM ${BASE_IMAGE}
 USER root
+RUN rm -rf /usr/local/lib/node_modules/npm
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN apt-get update \
@@ -12,4 +13,4 @@ ENV RUSTUP_DIST_SERVER=https://static.rust-lang.org \
     RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup
 RUN rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy \
     && rustup target add --toolchain 1.88.0 x86_64-pc-windows-msvc \
-    && node --version && cargo xwin --version && nasm -v
+    && node --version && npm --version && cargo xwin --version && nasm -v
