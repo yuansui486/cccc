@@ -53,6 +53,7 @@ def apply(backup):
     for job in JOBS:
         api(f'buildTypes/id:{job}/paused', 'true', 'PUT')
     api(f'vcs-roots/id:{CORE_ROOT}/properties/branchSpec', '+:refs/heads/OneColleague\n+:refs/tags/(onecolleague-v*)', 'PUT')
+    api(f'vcs-roots/id:{CORE_ROOT}/properties/teamcity:branchSpec', '+:refs/heads/OneColleague\n+:refs/tags/(onecolleague-v*)', 'PUT')
     for release in [False, True]:
         suffix = 'Release' if release else 'Build'
         core = f'OneColleague_Core_{suffix}'
@@ -84,9 +85,11 @@ export CORE_VERSION="%dep.{core}.onecolleague.version%"
 export CORE_COMMIT="%dep.{core}.onecolleague.coreCommit%"
 export CORE_BUILD_ID="%dep.{core}.teamcity.build.id%"
 export BUILD_ID="%teamcity.build.id%"
+export REQUIRE_RELEASE_TAG="{'1' if release else '0'}"
 bash scripts/teamcity-application.sh
 '''
         api(f'buildTypes/id:{app}/steps', {'step': [step('Stage exact core and build NSIS', script)]}, 'PUT')
+        api(f'buildTypes/id:{app}/settings/cleanBuild', 'true', 'PUT')
         api(f'buildTypes/id:{app}/settings/artifactRules', 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/** => onecolleague_windows.zip\nrelease-manifest.json', 'PUT')
         api(f'buildTypes/id:{app}/parameters/env.ONECOLLEAGUE_UPDATE_MANIFEST_URL', BASE_URL + ('OneColleague' if release else 'OneColleague_test') + '/version.json', 'PUT')
         triggers = api(f'buildTypes/id:{app}/triggers')
@@ -109,19 +112,17 @@ bash scripts/teamcity-application.sh
                 'properties': props(cleanDestinationDirectory='false',
                     pathRules='+:onecolleague_windows.zip!** => .\n+:release-manifest.json => .',
                     revisionName='sameChainOrLastFinished', revisionValue='latest.sameChainOrLastFinished')}]}, 'PUT')
-        steps = api(f'buildTypes/id:{job}/steps')
-        for item in steps.get('step', []):
-            for prop in item['properties']['property']:
-                if prop['name'] == 'script.content':
-                    guard = '''set -eu
-python3 - <<'PY'
-import json
-m = json.load(open('release-manifest.json', encoding='utf-8'))
-assert str(m['buildId']) == '%dep.OneColleague_Application_Release.teamcity.build.id%', 'installer is not from snapshot build'
-PY
+        script = f'''set -eu
+export EXPECTED_APPLICATION_BUILD_ID="%dep.{source}.teamcity.build.id%"
+export BUILD_ID="%teamcity.build.id%"
+bash scripts/teamcity-publish.sh
 '''
-                    prop['value'] = guard.replace('OneColleague_Application_Release', source) + prop['value']
-        api(f'buildTypes/id:{job}/steps', steps, 'PUT')
+        api(f'buildTypes/id:{job}/steps', {'step': [step('Validate snapshot and publish installer', script)]}, 'PUT')
+        if job.endswith('_Production'):
+            api(f'buildTypes/id:{job}/triggers', {'trigger': [{'type': 'buildDependencyTrigger',
+                # The launcher VCS branch can be master even for a tagged core.
+                # Publication checks the propagated coreTag, not the launcher branch.
+                'properties': props(dependsOn=source, afterSuccessfulBuildOnly='true', branchFilter='+:*')}]}, 'PUT')
     print(f'Configured paused jobs. Backup: {backup}. Validate branch builds before --resume.')
 
 
