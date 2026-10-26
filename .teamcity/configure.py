@@ -97,6 +97,18 @@ bash scripts/teamcity-application.sh
                         prop['value'] = '+:onecolleague-v*' if release else '+:<default>'
         api(f'buildTypes/id:{app}/triggers', triggers, 'PUT')
     for job in ['OneColleague_Publish_Test', 'OneColleague_Publish_Production']:
+        source = 'OneColleague_Application_Build' if job.endswith('_Test') else 'OneColleague_Application_Release'
+        if job.endswith('_Test'):
+            api(f'buildTypes/id:{job}/snapshot-dependencies', {'snapshot-dependency': [{
+                'type': 'snapshot_dependency', 'source-buildType': {'id': source},
+                'properties': props(**{'run-build-if-dependency-failed':'MAKE_FAILED_TO_START',
+                    'run-build-if-dependency-failed-to-start':'MAKE_FAILED_TO_START',
+                    'sync-revisions':'true', 'take-successful-builds-only':'true'})}]}, 'PUT')
+            api(f'buildTypes/id:{job}/artifact-dependencies', {'artifact-dependency': [{
+                'type': 'artifact_dependency', 'source-buildType': {'id': source},
+                'properties': props(cleanDestinationDirectory='false',
+                    pathRules='+:onecolleague_windows.zip!** => .\n+:release-manifest.json => .',
+                    revisionName='sameChainOrLastFinished', revisionValue='latest.sameChainOrLastFinished')}]}, 'PUT')
         steps = api(f'buildTypes/id:{job}/steps')
         for item in steps.get('step', []):
             for prop in item['properties']['property']:
@@ -108,7 +120,7 @@ m = json.load(open('release-manifest.json', encoding='utf-8'))
 assert str(m['buildId']) == '%dep.OneColleague_Application_Release.teamcity.build.id%', 'installer is not from snapshot build'
 PY
 '''
-                    prop['value'] = guard + prop['value']
+                    prop['value'] = guard.replace('OneColleague_Application_Release', source) + prop['value']
         api(f'buildTypes/id:{job}/steps', steps, 'PUT')
     print(f'Configured paused jobs. Backup: {backup}. Validate branch builds before --resume.')
 

@@ -1,3 +1,7 @@
+> **一号同事 Windows 定制发行版**：请通过一号同事启动器安装和更新。
+> 开发、同步上游与发布流程见[维护说明](docs/onecolleague-maintenance.md)。
+> 下方保留上游功能文档，其中作者官网、pip 和 `cccc update` 安装更新流程不适用于本发行版。
+
 <div align="center">
 
 <img src="https://raw.githubusercontent.com/ChesterRa/cccc/main/assets/readme/hero.svg" width="100%" alt="CCCC 通过各组本地账本与明确的投递状态，协调编码智能体和已连接的 Group" />

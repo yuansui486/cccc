@@ -1,3 +1,7 @@
+> **OneColleague Windows distribution:** install and update through the OneColleague desktop launcher.
+> See the [maintenance guide](docs/onecolleague-maintenance.md). The upstream installation channels
+> documented below do not apply to this distribution; `cccc update` directs users to the launcher.
+
 <div align="center">
 
 <img src="https://raw.githubusercontent.com/ChesterRa/cccc/main/assets/readme/hero.svg" width="100%" alt="CCCC coordinates coding agents and connected Groups with local ledgers and explicit delivery status" />
