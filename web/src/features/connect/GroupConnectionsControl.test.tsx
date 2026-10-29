@@ -7,6 +7,12 @@ import { useModalStore } from "../../stores/useModalStore";
 import type { GroupMeta } from "../../types";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), t: (key: string) => key }));
+// Preserve upstream feature coverage independently of the distribution visibility policy.
+vi.mock("../../customization/onecolleague", async (original) => ({
+  ...(await original<typeof import("../../customization/onecolleague")>()),
+  onecolleagueSettings: { isTabVisible: () => true, showGlobalScopeExplanation: true },
+  visibleSettingsTabs: (_scope: string, tabs: { id: string }[]) => tabs,
+}));
 vi.mock("../../services/api/base", () => ({ apiJson: mocks.request }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: mocks.t, i18n: { language: "ja", resolvedLanguage: "ja" } }),

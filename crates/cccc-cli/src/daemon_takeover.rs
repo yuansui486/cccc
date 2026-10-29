@@ -144,7 +144,7 @@ fn command_line_of(pid: u32) -> Option<String> {
 
 #[cfg(windows)]
 fn command_line_of(pid: u32) -> Option<String> {
-    let output = std::process::Command::new("powershell")
+    let output = cccc_runtime::background_command("powershell")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -234,7 +234,7 @@ fn terminate(_pid: u32) -> Result<bool> {
 
 #[cfg(windows)]
 fn kill(pid: u32) -> Result<()> {
-    let status = std::process::Command::new("taskkill")
+    let status = cccc_runtime::background_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status()
         .map_err(|error| anyhow::anyhow!("could not run taskkill for PID {pid}: {error}"))?;

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 fn job_termination_kills_descendants_while_child_lock_is_held() {
     let (mut child, owner) = OwnedProcessTree::spawn(
         Command::new("cmd")
+            .env("ONECOLLEAGUE_DESKTOP", "1")
             .args(["/C", "ping -n 60 127.0.0.1"])
             .stdout(Stdio::piped()),
     )

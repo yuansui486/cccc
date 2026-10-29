@@ -6,6 +6,12 @@ import { SettingsModal } from "./SettingsModal";
 import { useModalStore } from "../stores";
 import { writeSettingsLastLocation } from "./modals/settings/settingsLastLocation";
 
+// Preserve upstream feature coverage independently of the distribution visibility policy.
+vi.mock("../customization/onecolleague", async (original) => ({
+  ...(await original<typeof import("../customization/onecolleague")>()),
+  onecolleagueSettings: { isTabVisible: () => true, showGlobalScopeExplanation: true },
+  visibleSettingsTabs: (_scope: string, tabs: { id: string }[]) => tabs,
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
   Trans: ({ i18nKey }: { i18nKey: string }) => i18nKey,

@@ -1,3 +1,4 @@
+import { onecolleagueSettings } from "../../../customization/onecolleague";
 import { useActiveSettingsTab } from "./useActiveSettingsTab";
 import { useTranslation } from "react-i18next";
 import { InfoIcon } from "../../Icons";
@@ -88,36 +89,38 @@ export function SettingsNavigation({
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1 px-2 text-xs text-[var(--color-text-muted)]">
-            <span className="min-w-0 truncate">
-              {scope === "group"
-                ? t("navigation.appliesToGroup", {
-                    name: groupTitle || scopeRootUrl || groupId || "—",
-                  })
-                : t("navigation.appliesToGlobal")}
-            </span>
-            <ScopeTooltip
-              isDark={isDark}
-              title={scope === "group" ? t("navigation.groupScopeTitle") : globalScopeTitle}
-              content={
-                scope === "group" ? (
-                  <>{t("navigation.groupScopeContent", { scopeRoot: scopeRootUrl || groupId })}</>
-                ) : (
-                  <>{globalScopeContent}</>
-                )
-              }
-            >
-              {(getReferenceProps, setReference) => (
-                <span
-                  ref={setReference}
-                  {...getReferenceProps()}
-                  className="shrink-0 rounded-full p-1 opacity-60 hover:bg-black/5 dark:hover:bg-white/5"
-                >
-                  <InfoIcon size={12} />
-                </span>
-              )}
-            </ScopeTooltip>
-          </div>
+          {(scope === "group" || onecolleagueSettings.showGlobalScopeExplanation) && (
+            <div className="flex items-center gap-1 px-2 text-xs text-[var(--color-text-muted)]">
+              <span className="min-w-0 truncate">
+                {scope === "group"
+                  ? t("navigation.appliesToGroup", {
+                      name: groupTitle || scopeRootUrl || groupId || "—",
+                    })
+                  : t("navigation.appliesToGlobal")}
+              </span>
+              <ScopeTooltip
+                isDark={isDark}
+                title={scope === "group" ? t("navigation.groupScopeTitle") : globalScopeTitle}
+                content={
+                  scope === "group" ? (
+                    <>{t("navigation.groupScopeContent", { scopeRoot: scopeRootUrl || groupId })}</>
+                  ) : (
+                    <>{globalScopeContent}</>
+                  )
+                }
+              >
+                {(getReferenceProps, setReference) => (
+                  <span
+                    ref={setReference}
+                    {...getReferenceProps()}
+                    className="shrink-0 rounded-full p-1 opacity-60 hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <InfoIcon size={12} />
+                  </span>
+                )}
+              </ScopeTooltip>
+            </div>
+          )}
         </div>
 
         <nav className="flex-1 overflow-y-auto scrollbar-hide px-3 pb-4 pt-2">
@@ -183,23 +186,25 @@ export function SettingsNavigation({
               className={`${mobileScopeButtonClass(scope === "global")} disabled:opacity-40`}
             >
               <span className="min-w-0 pr-2">{t("navigation.global")}</span>
-              <div className="absolute right-1 top-1/2 -translate-y-1/2">
-                <ScopeTooltip
-                  isDark={isDark}
-                  title={globalScopeTitle}
-                  content={<>{globalScopeContent}</>}
-                >
-                  {(getReferenceProps, setReference) => (
-                    <div
-                      ref={setReference}
-                      {...getReferenceProps({ onClick: (e) => e.stopPropagation() })}
-                      className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors opacity-50"
-                    >
-                      <InfoIcon size={14} />
-                    </div>
-                  )}
-                </ScopeTooltip>
-              </div>
+              {onecolleagueSettings.showGlobalScopeExplanation && (
+                <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                  <ScopeTooltip
+                    isDark={isDark}
+                    title={globalScopeTitle}
+                    content={<>{globalScopeContent}</>}
+                  >
+                    {(getReferenceProps, setReference) => (
+                      <div
+                        ref={setReference}
+                        {...getReferenceProps({ onClick: (e) => e.stopPropagation() })}
+                        className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors opacity-50"
+                      >
+                        <InfoIcon size={14} />
+                      </div>
+                    )}
+                  </ScopeTooltip>
+                </div>
+              )}
             </button>
           </div>
         </div>

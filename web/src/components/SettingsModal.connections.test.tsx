@@ -6,6 +6,12 @@ import { SettingsModal } from "./SettingsModal";
 import { writeSettingsLastLocation } from "./modals/settings/settingsLastLocation";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), allowed: true }));
+// Preserve upstream feature coverage independently of the distribution visibility policy.
+vi.mock("../customization/onecolleague", async (original) => ({
+  ...(await original<typeof import("../customization/onecolleague")>()),
+  onecolleagueSettings: { isTabVisible: () => true, showGlobalScopeExplanation: true },
+  visibleSettingsTabs: (_scope: string, tabs: { id: string }[]) => tabs,
+}));
 vi.mock("../services/api/base", () => ({ apiJson: mocks.request }));
 vi.mock("../services/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../services/api")>()),
@@ -22,6 +28,7 @@ vi.mock("../services/api", async (importOriginal) => ({
   })),
 }));
 vi.mock("react-i18next", () => ({
+  Trans: ({ i18nKey }: { i18nKey: string }) => i18nKey,
   useTranslation: () => ({
     t: (key: string) => key,
     i18n: { language: "en", resolvedLanguage: "en" },

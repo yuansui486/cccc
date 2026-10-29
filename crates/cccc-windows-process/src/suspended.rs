@@ -21,7 +21,8 @@ pub struct SuspendedChild {
 /// `creation_flags` is the caller's complete Windows creation-flag set; it is
 /// combined with CREATE_SUSPENDED, not silently replaced by that flag alone.
 pub fn spawn_suspended(command: &mut Command, creation_flags: u32) -> io::Result<SuspendedChild> {
-    command.creation_flags(creation_flags | CREATE_SUSPENDED);
+    let effective_flags = crate::background_creation_flags(command, creation_flags);
+    command.creation_flags(effective_flags | CREATE_SUSPENDED);
     let result = command.spawn();
     // Command remains reusable with the caller's original flags.
     command.creation_flags(creation_flags);

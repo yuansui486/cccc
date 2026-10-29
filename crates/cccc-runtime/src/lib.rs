@@ -1,3 +1,4 @@
+mod background_command;
 mod cancellation;
 mod command;
 mod command_output;
@@ -37,6 +38,7 @@ mod transcript_archive;
 mod transcript_files;
 mod transcript_reader;
 
+pub use background_command::background_command;
 pub use command::{
     DEEPSEEK_ACP_APP_PACKAGE, DEEPSEEK_ACP_APP_VERSION, DEEPSEEK_ACP_PACKAGE,
     DEEPSEEK_ACP_SDK_VERSION, DEEPSEEK_ACP_VERSION, DEEPSEEK_LLM_ADAPTER_PACKAGE,

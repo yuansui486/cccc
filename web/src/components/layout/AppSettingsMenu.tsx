@@ -1,3 +1,4 @@
+import { onecolleagueSettings } from "../../customization/onecolleague";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccountIcon, ChevronRightIcon, SettingsIcon } from "../Icons";
@@ -80,7 +81,7 @@ export function AppSettingsMenu({
           if (openingDialog.current) event.preventDefault();
         }}
       >
-        {canAccessAccount ? (
+        {canAccessAccount && onecolleagueSettings.isTabVisible("global", "account") ? (
           <>
             <button
               type="button"

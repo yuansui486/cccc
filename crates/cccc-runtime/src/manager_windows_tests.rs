@@ -27,7 +27,10 @@ fn npm_style_batch_actor_survives_utf8_message_delivery() {
         runner: RunnerKind::Pty,
         command: vec!["actor".into()],
         cwd: temp.path().into(),
-        env: BTreeMap::from([("PATH".into(), path)]),
+        env: BTreeMap::from([
+            ("PATH".into(), path),
+            ("ONECOLLEAGUE_DESKTOP".into(), "1".into()),
+        ]),
         cols: 80,
         rows: 24,
     })

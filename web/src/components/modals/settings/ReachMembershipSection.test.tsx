@@ -45,6 +45,11 @@ function render(
 }
 
 describe("ReachMembershipSection", () => {
+  it("hides account settings navigation while preserving Reach controls", () => {
+    const html = render({ logged_in: true, online: false }, { hasAdminToken: true });
+    expect(html).not.toContain("webAccess.reach.manageAccount");
+    expect(html).toContain("webAccess.reach.start");
+  });
   it("starts account authorization in place instead of routing setup away", () => {
     const html = render({ logged_in: false });
 

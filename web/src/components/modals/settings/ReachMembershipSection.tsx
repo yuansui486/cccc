@@ -1,3 +1,4 @@
+import { onecolleagueSettings } from "../../../customization/onecolleague";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -272,7 +273,8 @@ export function ReachMembershipSection({
               {t("webAccess.reach.stop")}
             </button>
           ) : null}
-          {kind === "offline" || kind === "online" || kind === "unavailable" ? (
+          {onecolleagueSettings.isTabVisible("global", "account") &&
+          (kind === "offline" || kind === "online" || kind === "unavailable") ? (
             <button type="button" onClick={onOpenAccount} className={secondaryButtonClass()}>
               {t("webAccess.reach.manageAccount")}
             </button>

@@ -11,6 +11,12 @@ import * as api from "../services/api";
 import type { WeixinLoginStatus } from "../types";
 
 const developer = vi.hoisted(() => ({ props: null as ComponentProps<typeof DeveloperTab> | null }));
+// Preserve upstream feature coverage independently of the distribution visibility policy.
+vi.mock("../customization/onecolleague", async (original) => ({
+  ...(await original<typeof import("../customization/onecolleague")>()),
+  onecolleagueSettings: { isTabVisible: () => true, showGlobalScopeExplanation: true },
+  visibleSettingsTabs: (_scope: string, tabs: { id: string }[]) => tabs,
+}));
 vi.mock("./modals/settings/DeveloperTab", () => ({
   DeveloperTab: (props: ComponentProps<typeof DeveloperTab>) => {
     developer.props = props;

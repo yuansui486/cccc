@@ -1,3 +1,4 @@
+import { onecolleagueSettings } from "../../customization/onecolleague";
 import "./MobileMenuSheet.css";
 import { useTranslation } from "react-i18next";
 import { GroupDoc, TextScale, Theme } from "../../types";
@@ -149,7 +150,7 @@ export function MobileMenuSheet({
 
           <section className={sectionCardClass}>
             <div className={sectionTitleClass}>{t("workspaceSection")}</div>
-            {canAccessAccount ? (
+            {canAccessAccount && onecolleagueSettings.isTabVisible("global", "account") ? (
               <button
                 className={rowButtonClass}
                 onClick={() => {

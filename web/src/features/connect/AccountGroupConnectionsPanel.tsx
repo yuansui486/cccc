@@ -1,3 +1,4 @@
+import { onecolleagueSettings } from "../../customization/onecolleague";
 import { ExternalLink, Link2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/button";
@@ -34,9 +35,11 @@ export function AccountGroupConnectionsPanel({
   const empty = state === "ready" && links.length === 0;
   const canSelect = !busy && state === "ready" && !!value?.account_id && !!groupId;
   const primary = unlinked ? (
-    <Button onClick={onOpenAccount} className="w-full sm:w-auto">
-      {t("groupConnections.linkAccount")}
-    </Button>
+    onecolleagueSettings.isTabVisible("global", "account") ? (
+      <Button onClick={onOpenAccount} className="w-full sm:w-auto">
+        {t("groupConnections.linkAccount")}
+      </Button>
+    ) : null
   ) : (
     <Button disabled={!canSelect} onClick={() => void select()} className="w-full sm:w-auto">
       {t(invitation ? "groupConnections.accept" : "groupConnections.invite")}

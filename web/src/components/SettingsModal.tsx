@@ -1,3 +1,4 @@
+import { visibleSettingsTabs, resolveSettingsTab } from "../customization/onecolleague";
 // SettingsModal renders the settings modal.
 import { GroupConnectionsPanel } from "../features/connect/GroupConnectionsControl";
 import { lazy, Suspense, useState, useEffect, useRef, useMemo } from "react";
@@ -117,12 +118,62 @@ export function SettingsModal({
   const { modalRef } = useModalA11y(isOpen, requestClose, { initialFocusRef: initialVoiceFocus });
   const [initialLocation] = useState(() => readSettingsLastLocation(Boolean(groupId)));
   const [scope, setScope] = useState<SettingsScope>(() => initialLocation.scope);
-  const [groupTab, setGroupTab] = useState<GroupTabId>(() => initialLocation.groupTab);
-  const [globalTab, setGlobalTab] = useState<GlobalTabId>(() => initialLocation.globalTab);
+  const [requestedGroupTab, setGroupTab] = useState<GroupTabId>(() => initialLocation.groupTab);
+  const [requestedGlobalTab, setGlobalTab] = useState<GlobalTabId>(() => initialLocation.globalTab);
   const [accountReturnToWebAccess, setAccountReturnToWebAccess] = useState(false);
   const [focusReachOnOpen, setFocusReachOnOpen] = useState(false);
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
+  const globalSettingsEnabled = canAccessGlobalSettings === true;
+  const currentBrowserSignedIn = Boolean(webAccessSession?.current_browser_signed_in);
+  const globalScopeEnabled = globalSettingsEnabled || currentBrowserSignedIn;
+
+  const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(
+    () =>
+      visibleSettingsTabs("global", [
+        ...(globalSettingsEnabled
+          ? [
+              { id: "account" as const, label: t("tabs.account") },
+              { id: "capabilities" as const, label: t("tabs.capabilities") },
+              { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
+              { id: "voice" as const, label: t("tabs.voice") },
+            ]
+          : []),
+        // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
+        ...(currentBrowserSignedIn && !globalSettingsEnabled
+          ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }]
+          : []),
+        ...(globalSettingsEnabled
+          ? [
+              { id: "branding" as const, label: t("tabs.branding") },
+              { id: "webAccess" as const, label: t("tabs.webAccess") },
+              {
+                id: "webModels" as const,
+                label: t("tabs.webModels", { defaultValue: "ChatGPT Web Model" }),
+              },
+              { id: "developer" as const, label: t("tabs.developer") },
+            ]
+          : []),
+      ]),
+    [globalSettingsEnabled, currentBrowserSignedIn, t],
+  );
+
+  const groupTabs: { id: GroupTabId; label: string }[] = visibleSettingsTabs("group", [
+    { id: "guidance", label: t("tabs.guidance") },
+    { id: "automation", label: t("tabs.automation") },
+    { id: "delivery", label: t("tabs.delivery") },
+    { id: "space", label: t("tabs.space") },
+    { id: "messaging", label: t("tabs.messaging") },
+    { id: "im", label: t("tabs.im") },
+    ...(globalSettingsEnabled
+      ? [{ id: "connections" as const, label: t("layout:groupConnections.title") }]
+      : []),
+    { id: "transcript", label: t("tabs.transcript") },
+    { id: "copyGroups", label: t("tabs.copyGroups") },
+  ]);
+  // Resolve before rendering or running tab hooks, including stale storage and deep links.
+  const groupTab = resolveSettingsTab(requestedGroupTab, groupTabs);
+  const globalTab = resolveSettingsTab(requestedGlobalTab, globalTabs);
   const [webModelProvider, setWebModelProvider] = useState<api.WebModelView>("chatgpt_web");
   const [webModelFocusTarget, setWebModelFocusTarget] = useState<{
     section: "login" | "connector";
@@ -363,9 +414,14 @@ export function SettingsModal({
     previousSettings.current = { groupId, value: settings };
   }, [isOpen, groupId, settings]);
 
+  const previousScopeGroup = useRef(groupId);
   useEffect(() => {
     if (!isOpen) return;
-    setScope(groupId ? "group" : "global");
+    // Keep the restored scope on first open; only a different Group changes context.
+    if (!groupId || previousScopeGroup.current !== groupId) {
+      setScope(groupId ? "group" : "global");
+    }
+    previousScopeGroup.current = groupId;
   }, [isOpen, groupId]);
 
   useEffect(() => {
@@ -504,39 +560,6 @@ export function SettingsModal({
 
   // ============ Derived state (must be before early return to keep hooks stable) ============
 
-  const globalSettingsEnabled = canAccessGlobalSettings === true;
-  const currentBrowserSignedIn = Boolean(webAccessSession?.current_browser_signed_in);
-  const globalScopeEnabled = globalSettingsEnabled || currentBrowserSignedIn;
-
-  const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(
-    () => [
-      ...(globalSettingsEnabled
-        ? [
-            { id: "account" as const, label: t("tabs.account") },
-            { id: "capabilities" as const, label: t("tabs.capabilities") },
-            { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
-            { id: "voice" as const, label: t("tabs.voice") },
-          ]
-        : []),
-      // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
-      ...(currentBrowserSignedIn && !globalSettingsEnabled
-        ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }]
-        : []),
-      ...(globalSettingsEnabled
-        ? [
-            { id: "branding" as const, label: t("tabs.branding") },
-            { id: "webAccess" as const, label: t("tabs.webAccess") },
-            {
-              id: "webModels" as const,
-              label: t("tabs.webModels", { defaultValue: "ChatGPT Web Model" }),
-            },
-            { id: "developer" as const, label: t("tabs.developer") },
-          ]
-        : []),
-    ],
-    [globalSettingsEnabled, currentBrowserSignedIn, t],
-  );
-
   useEffect(() => {
     if (scope !== "global") return;
     if (!globalTabs.length) return;
@@ -584,19 +607,6 @@ export function SettingsModal({
     clearSettingsTarget();
   }, [clearSettingsTarget, isOpen, settingsTarget]);
 
-  const groupTabs: { id: GroupTabId; label: string }[] = [
-    { id: "guidance", label: t("tabs.guidance") },
-    { id: "automation", label: t("tabs.automation") },
-    { id: "delivery", label: t("tabs.delivery") },
-    { id: "space", label: t("tabs.space") },
-    { id: "messaging", label: t("tabs.messaging") },
-    { id: "im", label: t("tabs.im") },
-    ...(globalSettingsEnabled
-      ? [{ id: "connections" as const, label: t("layout:groupConnections.title") }]
-      : []),
-    { id: "transcript", label: t("tabs.transcript") },
-    { id: "copyGroups", label: t("tabs.copyGroups") },
-  ];
   const tabs = scope === "group" ? groupTabs : globalScopeEnabled ? globalTabs : [];
   const activeTab = scope === "group" ? groupTab : globalTab;
   const setActiveTab = (tab: GroupTabId | GlobalTabId) => {

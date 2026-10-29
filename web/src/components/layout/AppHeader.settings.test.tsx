@@ -9,6 +9,12 @@ import { useModalStore } from "../../stores/useModalStore";
 import type { TextScale, Theme } from "../../types";
 
 const { changeLanguage } = vi.hoisted(() => ({ changeLanguage: vi.fn() }));
+// Preserve upstream feature coverage independently of the distribution visibility policy.
+vi.mock("../../customization/onecolleague", async (original) => ({
+  ...(await original<typeof import("../../customization/onecolleague")>()),
+  onecolleagueSettings: { isTabVisible: () => true, showGlobalScopeExplanation: true },
+  visibleSettingsTabs: (_scope: string, tabs: { id: string }[]) => tabs,
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => key,
